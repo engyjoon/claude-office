@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-11-07T08:21:46+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "rm -rf __pycache__ && echo \"exit: $?\"; find . -path ./.venv -prune -o -name __p…<94자 생략>",
+      "description": "Delete the cache folder and check for others"
+    },
+    "permission_suggestions": [
+      {
+        "type": "addRules",
+        "rules": [
+          {
+            "toolName": "Bash",
+            "ruleContent": "rm -rf __pycache__"
+          },
+          {
+            "toolName": "Bash",
+            "ruleContent": "echo \"exit: $?\""
+          }
+        ],
+        "behavior": "allow",
+        "destination": "localSettings"
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-11-07T08:17:58+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "agent_id": "a208bf3d388353a43",
+    "agent_type": "general-purpose",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PostToolUse",
+    "tool_name": "SubagentHandback",
+    "tool_input": {
+      "message": "한국어 README를 ~/work/project-2/README.md 에 작성했습니다. 작성 전에 calc.py와 test_calc.py를 직…<631자 생략>"
+    },
+    "tool_response": {
+      "success": true,
+      "message": "Report delivered to your caller."
+    },
+    "tool_use_id": "toolu_01GvSKKSGgebXNag4Vysdoa1",
+    "duration_ms": 75
+  }
+}

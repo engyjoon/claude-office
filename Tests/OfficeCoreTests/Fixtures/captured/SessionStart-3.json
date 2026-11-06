@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-11-07T08:13:10+0900",
+  "term_program": "vscode",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "hook_event_name": "SessionStart",
+    "source": "startup",
+    "model": "claude-opus-5-5"
+  }
+}

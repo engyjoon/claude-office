@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-11-07T08:20:50+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo \"=== .venv\"; .venv/bin/pip list 2>/dev/null; echo \"=== system python3\"; py…<108자 생략>",
+      "description": "List installed packages in venv and system Python"
+    },
+    "permission_suggestions": [
+      {
+        "type": "addRules",
+        "rules": [
+          {
+            "toolName": "Bash",
+            "ruleContent": ".venv/bin/pip list *"
+          },
+          {
+            "toolName": "Bash",
+            "ruleContent": "python3 -m pip list"
+          }
+        ],
+        "behavior": "allow",
+        "destination": "localSettings"
+      }
+    ]
+  }
+}

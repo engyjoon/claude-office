@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-11-07T08:17:43+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Agent",
+    "tool_input": {
+      "description": "Write README.md",
+      "prompt": "<prompt: 468자 가림>",
+      "subagent_type": "general-purpose"
+    },
+    "tool_response": {
+      "isAsync": true,
+      "status": "async_launched",
+      "agentId": "a208bf3d388353a43",
+      "description": "Write README.md",
+      "resolvedModel": "claude-opus-5-5",
+      "prompt": "<prompt: 468자 가림>",
+      "outputFile": "/<가림>.output",
+      "canReadOutputFile": true,
+      "canContinueAgent": true
+    },
+    "tool_use_id": "toolu_01A6wWnhfEymApmzYYHtuDCj",
+    "duration_ms": 14
+  }
+}

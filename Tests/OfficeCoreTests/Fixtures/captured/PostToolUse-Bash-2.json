@@ -1,0 +1,75 @@
+{
+  "captured_at": "2026-11-07T08:16:58+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "ls -a && cat > calc.py <<'EOF'\n\"\"\"간단한 계산기 모듈.\"\"\"\n\n\ndef add(a, b):\n    return a …<834자 생략>",
+      "description": "Create calculator module and tests, run pytest"
+    },
+    "tool_response": {
+      "stdout": "<stdout: 85자 가림>",
+      "stderr": "<stderr: 0자 가림>",
+      "interrupted": false,
+      "isImage": false,
+      "noOutputExpected": false,
+      "bashEditDiff": {
+        "files": [
+          {
+            "filePath": "~/work/project-2/calc.py",
+            "hunks": [
+              {
+                "oldStart": 0,
+                "oldLines": 0,
+                "newStart": 1,
+                "newLines": 19,
+                "lines": [
+                  "+\"\"\"간단한 계산기 모듈.\"\"\"",
+                  "+",
+                  "+",
+                  "<16개 생략>"
+                ]
+              }
+            ],
+            "created": true
+          },
+          {
+            "filePath": "~/work/project-2/test_calc.py",
+            "hunks": [
+              {
+                "oldStart": 0,
+                "oldLines": 0,
+                "newStart": 1,
+                "newLines": 28,
+                "lines": [
+                  "+import pytest",
+                  "+",
+                  "+from calc import add, subtract, multiply, divide",
+                  "<25개 생략>"
+                ]
+              }
+            ],
+            "created": true
+          }
+        ],
+        "moreFiles": 0,
+        "changedFiles": [
+          "~/work/project-2/calc.py",
+          "~/work/project-2/test_calc.py"
+        ]
+      }
+    },
+    "tool_use_id": "toolu_01RTfavQqdVFrrVUFKREc6dN",
+    "duration_ms": 499
+  }
+}

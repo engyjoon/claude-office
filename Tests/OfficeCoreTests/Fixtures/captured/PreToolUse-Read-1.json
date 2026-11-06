@@ -1,0 +1,21 @@
+{
+  "captured_at": "2026-11-07T08:19:58+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Read",
+    "tool_input": {
+      "file_path": "~/work/project-2/notexist.txt"
+    },
+    "tool_use_id": "toolu_01K7rWVGUatQU2ae8JkciQkq"
+  }
+}

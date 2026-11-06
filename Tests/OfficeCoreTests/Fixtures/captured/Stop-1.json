@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-11-07T08:15:24+0900",
+  "term_program": "vscode",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "Stop",
+    "stop_hook_active": false,
+    "last_assistant_message": "<last_assistant_message: 117자 가림>",
+    "background_tasks": [],
+    "session_crons": []
+  }
+}

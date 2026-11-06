@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-11-07T08:15:20+0900",
+  "term_program": "vscode",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "ls -la",
+      "description": "List files in current directory"
+    },
+    "tool_use_id": "toolu_01Aaqw4JWtYyncQKkp5t2YUb"
+  }
+}

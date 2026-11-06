@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-11-07T08:16:56+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "ls -a && cat > calc.py <<'EOF'\n\"\"\"간단한 계산기 모듈.\"\"\"\n\n\ndef add(a, b):\n    return a …<834자 생략>",
+      "description": "Create calculator module and tests, run pytest"
+    },
+    "tool_use_id": "toolu_01RTfavQqdVFrrVUFKREc6dN"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-11-07T08:17:05+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "python3 -m venv .venv && .venv/bin/pip install -q pytest 2>&1 | tail -3; .venv/…<118자 생략>",
+      "description": "Create venv, install pytest, run tests"
+    },
+    "tool_response": {
+      "stdout": "<stdout: 994자 가림>",
+      "stderr": "<stderr: 0자 가림>",
+      "interrupted": false,
+      "isImage": false,
+      "noOutputExpected": false,
+      "bashEditDiff": {
+        "files": [],
+        "moreFiles": 0,
+        "unavailable": true
+      }
+    },
+    "tool_use_id": "toolu_01HUyWjDAqP1yynnbEnYG61W",
+    "duration_ms": 4136
+  }
+}

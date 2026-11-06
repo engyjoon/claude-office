@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-11-07T08:17:11+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "agent_id": "a72bb066980bbc4a0",
+    "agent_type": "",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "SubagentStop",
+    "stop_hook_active": false,
+    "agent_transcript_path": "~/.<가림>.jsonl",
+    "last_assistant_message": "<last_assistant_message: 21자 가림>",
+    "background_tasks": [],
+    "session_crons": []
+  }
+}

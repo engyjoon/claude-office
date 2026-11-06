@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-11-07T08:18:32+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "dontAsk",
+    "agent_id": "a4bd10358c1f82b42",
+    "agent_type": "web-fetch",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PostToolUse",
+    "tool_name": "WebFetch",
+    "tool_input": {
+      "url": "https://developer.apple.<가림>",
+      "prompt": "<prompt: 364자 가림>"
+    },
+    "tool_response": {
+      "bytes": 18336,
+      "code": 200,
+      "codeText": "OK",
+      "result": "Fetched https://developer.apple.<가림> (HTTP 200 OK, text/html, 47 characters).\n<…<170자 생략>",
+      "durationMs": 894,
+      "url": "https://developer.apple.<가림>"
+    },
+    "tool_use_id": "toolu_01RDt7aJGZy81xGAq2YcGccN",
+    "duration_ms": 894
+  }
+}

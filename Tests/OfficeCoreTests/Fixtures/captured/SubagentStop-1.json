@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-11-07T08:15:26+0900",
+  "term_program": "vscode",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "agent_id": "a997d7a042d9f1bce",
+    "agent_type": "",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "SubagentStop",
+    "stop_hook_active": false,
+    "agent_transcript_path": "~/.<가림>.jsonl",
+    "background_tasks": [],
+    "session_crons": []
+  }
+}

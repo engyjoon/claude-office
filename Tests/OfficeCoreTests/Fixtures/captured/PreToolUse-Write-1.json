@@ -1,0 +1,24 @@
+{
+  "captured_at": "2026-11-07T08:17:52+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "agent_id": "a208bf3d388353a43",
+    "agent_type": "general-purpose",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Write",
+    "tool_input": {
+      "file_path": "~/work/project-2/README.md",
+      "content": "<content: 700자 가림>"
+    },
+    "tool_use_id": "toolu_01B67N3uts2YbGLViJvrnXMf"
+  }
+}

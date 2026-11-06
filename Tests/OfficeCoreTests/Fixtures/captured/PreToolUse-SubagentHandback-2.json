@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-11-07T08:18:06+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "<가림>",
+    "transcript_path": "~/.<가림>.jsonl",
+    "cwd": "~/work/project-2",
+    "scratchpad_dir": "/<가림>",
+    "prompt_id": "<가림>",
+    "permission_mode": "auto",
+    "agent_id": "a2e682f660c093d0e",
+    "agent_type": "general-purpose",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "SubagentHandback",
+    "tool_input": {
+      "message": "~/work/project-2/test_calc.py에 테스트를 추가했습니다. `.venv/bin/python -m pytest -v`로 실행…<1079자 생략>"
+    },
+    "tool_use_id": "toolu_01GdHEEc6ecVbvh21ctuKEZU"
+  }
+}
