@@ -1,4 +1,4 @@
-<title>AgentOffice 설계 미리보기</title>
+<title>Claude Office 설계 미리보기</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -166,9 +166,17 @@ td .place{font-weight:600}
 .ide-top span{font-family:var(--f-mono);font-size:11.5px;color:var(--ide-dim);margin-left:8px}
 .ide pre{margin:0;padding:14px 18px;font-family:var(--f-mono);font-size:12px;line-height:1.7;color:var(--ide-text);white-space:pre;overflow:hidden}
 .ide .kw{color:var(--ide-kw)}.ide .ty{color:var(--ide-ty)}.ide .st{color:var(--ide-str)}.ide .cm{color:var(--ide-dim)}
-.mini{position:absolute;right:14px;bottom:14px;width:min(250px,62%);border-radius:14px;overflow:hidden;background:var(--wall);box-shadow:0 16px 36px -12px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18)}
-.mini-bar{display:flex;justify-content:space-between;align-items:center;padding:4px 9px;font-size:10.5px;background:var(--menubar);color:var(--text);font-family:var(--f-mono)}
-.mini svg{display:block;width:100%;height:auto}
+.ide{min-height:400px}
+.mini{position:absolute;right:14px;bottom:14px;width:260px;height:190px;display:flex;flex-direction:column;border-radius:14px;overflow:hidden;background:var(--wall);box-shadow:0 16px 36px -12px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18)}
+.mini-bar{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:4px 9px 4px 22px;font-size:10.5px;background:var(--menubar);color:var(--text);font-family:var(--f-mono);white-space:nowrap}
+.mini-presets{display:flex;gap:3px}
+.mini-presets button{font:inherit;font-size:10px;border:0;border-radius:5px;padding:1px 5px;background:var(--accent-soft);color:var(--text);cursor:pointer}
+.mini-presets button:focus-visible{outline:2px solid var(--accent)}
+.mini svg{display:block;width:100%;flex:1;min-height:0}
+.mini-grip{position:absolute;left:0;top:0;width:20px;height:20px;cursor:nwse-resize;z-index:2;touch-action:none;background:linear-gradient(135deg,var(--accent) 0 3px,transparent 3px 6px,var(--accent) 6px 8px,transparent 8px)}
+.mini.lod-1 .pill,.mini.lod-1 .plate,.mini.lod-0 .pill,.mini.lod-0 .plate{display:none}
+.mini.lod-0 .bubble:not(.b-shout){display:none}
+@media (max-width:520px){.mini-presets{display:none}}
 
 .mermaid{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;overflow-x:auto;margin:0}
 .principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
@@ -185,6 +193,30 @@ ol.miles small{color:var(--muted);font-size:13px;line-height:1.5}
 .open{background:var(--accent-soft);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
 .open ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
 footer{font-size:13px;color:var(--muted)}
+
+/* sound settings mock */
+.snd{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.snd-master,.snd-row{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.snd-master{background:var(--accent-soft);flex-wrap:wrap}
+.snd-main,.snd-row .who{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.4}
+.snd-main small,.snd-row small{color:var(--muted);font-size:12.5px}
+.snd-row b .onomato{font-family:var(--f-display);font-weight:400;color:var(--accent);margin-left:6px}
+.vol{display:flex;align-items:center;gap:8px;font-size:13px}
+.vol input{width:120px;accent-color:var(--accent)}
+.vol output{font-family:var(--f-mono);font-size:12px;min-width:3.2em}
+.tag{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap;color:var(--chip-ink)}
+.tag.alert{background:var(--chip-wait)}.tag.deco{background:var(--chip-read)}
+.play{font:inherit;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--page);color:var(--text);cursor:pointer;flex:none}
+.play:focus-visible,.sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.play.on{background:var(--accent);color:var(--page);border-color:var(--accent)}
+.sw{position:relative;width:40px;height:24px;border-radius:999px;border:0;background:var(--chip-idle);cursor:pointer;flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.sw[aria-checked="true"]{background:var(--accent)}
+.sw[aria-checked="true"]::after{transform:translateX(16px)}
+.snd.muted-all .snd-row{opacity:.45}
+.snd-demo{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px}
+.snd-demo small{font-size:12.5px}
+@media (max-width:520px){.snd-row .tag{display:none}.vol input{width:90px}}
 
 /* ---------- office scene ---------- */
 .o{stroke:var(--ink-line);stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
@@ -271,14 +303,18 @@ footer{font-size:13px;color:var(--muted)}
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">AgentOffice · 설계 v0.1 미리보기</div>
+    <div class="eyebrow">Claude Office · 설계 v0.2 미리보기</div>
     <h1>에이전트들이 일하는 작은 사무실</h1>
     <p class="muted">Claude Code 세션은 팀장으로, 서브에이전트는 팀원으로 출근합니다. 이 페이지는 <code>docs/DESIGN.md</code>의 아트 디렉션과 화면 구성을 미리 보여주는 시안입니다. 캐릭터는 실제 앱과 같은 방식(부위별 종이인형 리그)으로 그렸습니다.</p>
     <div class="decisions">
       <span><b>①</b>세션 = 팀장, 서브에이전트 = 팀원, 직접 정의한 에이전트 = 고정 직원</span>
       <span><b>②</b>한 사무실 + 프로젝트별 팀 구역</span>
       <span><b>③</b>보기 + 알림 + 상세 이동</span>
-      <span><b>④</b>직접 그린 벡터 에셋, 공개 가능 구조</span>
+      <span><b>④</b>그래픽·효과음 모두 직접 제작</span>
+      <span><b>⑤</b>앱 이름 Claude Office</span>
+      <span><b>⑥</b>해요체 통일</span>
+      <span><b>⑦</b>효과음 항목별 켜기·끄기</span>
+      <span><b>⑧</b>미니 사무실 오른쪽 아래, 크기 자유 조절</span>
     </div>
   </header>
 
@@ -357,12 +393,12 @@ footer{font-size:13px;color:var(--muted)}
   <section aria-labelledby="s-screens">
     <div class="sec-head">
       <h2 id="s-screens">맥에서 보이는 모습</h2>
-      <p class="muted">메뉴바에서 상태를 확인하고, 화면 구석의 미니 사무실은 포커스를 빼앗지 않은 채 전체화면 IDE 위에도 떠 있습니다.</p>
+      <p class="muted">메뉴바에서 상태를 확인하고, 화면 구석의 미니 사무실은 포커스를 빼앗지 않은 채 전체화면 IDE 위에도 떠 있습니다. 오른쪽 시안의 미니 사무실은 <b>왼쪽 위 모서리를 끌어서</b> 크기를 바꿔 보실 수 있습니다. 작아지면 상태 칩과 명패를 숨기고, 더 작아지면 외침 풍선만 남깁니다.</p>
     </div>
     <div class="screens">
       <div class="mac">
         <div class="menubar"><b>Xcode</b><span>File</span><span>Edit</span><span>View</span><span class="sp"></span>
-          <span class="mb-icon" aria-label="AgentOffice 메뉴바 아이콘, 승인 대기 1건"><svg viewBox="0 0 20 16"><path class="o" d="M3,15 V6 L10,2 L17,6 V15 Z" style="fill:var(--accent-soft)"/><rect x="8" y="10" width="4" height="5" class="ink"/><circle cx="16" cy="4" r="3" style="fill:var(--shout)" class="o"/></svg><i>1</i></span>
+          <span class="mb-icon" aria-label="Claude Office 메뉴바 아이콘, 승인 대기 1건"><svg viewBox="0 0 20 16"><path class="o" d="M3,15 V6 L10,2 L17,6 V15 Z" style="fill:var(--accent-soft)"/><rect x="8" y="10" width="4" height="5" class="ink"/><circle cx="16" cy="4" r="3" style="fill:var(--shout)" class="o"/></svg><i>1</i></span>
           <span>금 오후 3:42</span></div>
         <div class="drop-area"><div class="drop">
           <div class="drop-h">사무실 현황 <small>팀 2 · 직원 9</small></div>
@@ -386,7 +422,7 @@ footer{font-size:13px;color:var(--muted)}
         </div></div>
       </div>
       <div class="ide">
-        <div class="ide-top"><i></i><i></i><i></i><span>CharacterNode.swift — AgentOffice</span></div>
+        <div class="ide-top"><i></i><i></i><i></i><span>CharacterNode.swift — ClaudeOffice</span></div>
 <pre><span class="kw">final class</span> <span class="ty">CharacterNode</span>: <span class="ty">SKNode</span> {
   <span class="kw">let</span> head = <span class="ty">SKNode</span>()
   <span class="kw">let</span> armFront = <span class="ty">SKNode</span>()
@@ -401,9 +437,10 @@ footer{font-size:13px;color:var(--muted)}
     armFront.run(g.action, withKey: <span class="st">"gesture"</span>)
   }
 }</pre>
-        <div class="mini" aria-label="미니 사무실 패널">
-          <div class="mini-bar"><span>미니 사무실</span><span>a-sdn-portal ▾</span></div>
-          <svg id="miniOffice" viewBox="40 196 470 300" role="img" aria-label="미니 사무실: 왼쪽 팀만 확대해서 보여줍니다"></svg>
+        <div class="mini" id="mini" aria-label="미니 사무실 패널">
+          <div class="mini-grip" id="miniGrip" title="끌어서 크기 조절" aria-hidden="true"></div>
+          <div class="mini-bar"><span id="miniSize">미니 사무실</span><span class="mini-presets"><button type="button" data-preset="s">작게</button><button type="button" data-preset="m">보통</button><button type="button" data-preset="l">크게</button></span></div>
+          <svg id="miniOffice" viewBox="40 196 470 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="미니 사무실: 왼쪽 팀을 확대해서 보여줍니다"></svg>
         </div>
       </div>
     </div>
@@ -416,15 +453,16 @@ footer{font-size:13px;color:var(--muted)}
     </div>
 <pre class="mermaid">
 flowchart LR
-  CC["Claude Code 세션들"] -- "훅 JSON" --> SH["agent-office.sh<br/>curl, 1초 제한"]
+  CC["Claude Code 세션들"] -- "훅 JSON" --> SH["claude-office.sh<br/>curl, 1초 제한"]
   SH -- "POST /v1/hook" --> SV
-  subgraph APP["AgentOffice.app"]
+  subgraph APP["Claude Office.app"]
     SV["HookServer<br/>127.0.0.1 + 토큰"] --> PA["HookParser"]
     PA --> RD["OfficeReducer"]
     RD --> CH["Choreographer"]
     CH -- "Directive" --> SC["SpriteKit 사무실"]
     CH --> UI["SwiftUI 메뉴바 · 인스펙터"]
     CH --> NT["macOS 알림"]
+    CH --> SP["효과음"]
   end
 </pre>
     <div class="principles">
@@ -449,17 +487,33 @@ flowchart LR
     </ol>
   </section>
 
+  <section aria-labelledby="s-sound">
+    <div class="sec-head">
+      <h2 id="s-sound">효과음</h2>
+      <p class="muted">모두 직접 합성한 짧은 소리입니다. 항목마다 켜고 끌 수 있고, 놓치면 안 되는 <b>알림</b> 소리와 사무실이 보일 때만 나는 <b>장식</b> 소리를 나눴습니다. ▶를 누르면 들어보실 수 있습니다.</p>
+    </div>
+    <div class="snd">
+      <div class="snd-master">
+        <div class="snd-main"><b>효과음</b><small>전체 켜기·끄기</small></div>
+        <label class="vol" for="sndVol">음량 <input id="sndVol" type="range" min="0" max="100" value="35"> <output id="sndVolOut">35%</output></label>
+        <button type="button" class="sw" role="switch" aria-checked="true" id="sndAll" aria-label="효과음 전체"></button>
+      </div>
+      <div id="sndList"></div>
+      <div class="snd-demo"><button type="button" class="btn primary" id="sndDemo">▶ 위임부터 완료까지 소리로 듣기</button><small class="muted">켜 둔 항목만 순서대로 재생합니다. 출근 → 말풍선 → 승인 요청 → 작업 완료 → 입력 대기</small></div>
+    </div>
+  </section>
+
   <section class="open" aria-labelledby="s-open">
-    <h3 id="s-open">정해 주셔야 할 것</h3>
+    <h3 id="s-open">확정된 사항</h3>
     <ul>
-      <li><b>앱 이름:</b> Desklings, Little Desk, Agent Burrow, 콩사무소 중에서 고르시거나 다른 이름을 정해 주세요</li>
-      <li><b>캐릭터 말투:</b> 모두 해요체 (기본) / 직원마다 성격을 다르게</li>
-      <li><b>효과음:</b> 없음 (기본) / 작은 효과음 옵션</li>
-      <li><b>미니 사무실 위치:</b> 오른쪽 아래 (기본) / 노치 아래 가운데</li>
+      <li><b>앱 이름:</b> Claude Office</li>
+      <li><b>캐릭터 말투:</b> 모든 캐릭터 해요체 통일. 감탄사와 짧은 문장으로 아기자기하게</li>
+      <li><b>효과음:</b> 작고 아기자기한 합성음, 항목별 켜기·끄기, 기본 음량 35%</li>
+      <li><b>미니 사무실:</b> 화면 오른쪽 아래가 기본, 가장자리를 끌어 자유롭게 크기 조절, 디스플레이별로 위치와 크기 기억</li>
     </ul>
   </section>
 
-  <footer>AgentOffice 설계 v0.1 · 이 페이지의 모든 캐릭터와 가구는 직접 그린 벡터이며, 앱 에셋 규격의 시안입니다.</footer>
+  <footer>Claude Office 설계 v0.2 · 이 페이지의 모든 캐릭터와 가구는 직접 그린 벡터이며, 앱 에셋 규격의 시안입니다.</footer>
 </div>
 
 <script>
@@ -576,7 +630,7 @@ function bubble(o){
   if(kind==='thought') shape=`<rect class="o" x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${h/2}" style="fill:var(--thought)"/>
      <circle class="o" cx="${x+dx*0.45}" cy="${y-6.5}" r="3.4" style="fill:var(--thought)"/><circle class="o" cx="${x+dx*0.15}" cy="${y-0.5}" r="2" style="fill:var(--thought)"/>`;
   if(kind==='whisper') shape=`<path class="o" stroke-width="1.3" stroke-dasharray="3 3" style="fill:var(--bubble)" d="${tailRect(x0,y0,w,h,10,x,x,y-1)}"/>`;
-  return `<g class="bubble${o.cls?' '+o.cls:''}">${shape}${txt}</g>`;
+  return `<g class="bubble b-${kind}${o.cls?' '+o.cls:''}">${shape}${txt}</g>`;
 }
 const CAT = {write:'#7FD6B6', read:'#B9A8F2', shell:'#8CC8EE', web:'#F2C88B'};
 function pill(x,y,text,cat){
@@ -824,5 +878,96 @@ function render(){
 }
 render();
 if(document.fonts && document.fonts.ready){ document.fonts.ready.then(render).catch(()=>{}); }
+
+/* ---------- mini office resize (top-left grip, anchored bottom-right) ---------- */
+const mini=document.getElementById('mini'), grip=document.getElementById('miniGrip'), sizeOut=document.getElementById('miniSize');
+function lod(){
+  const scale = mini.clientWidth/470;
+  mini.classList.toggle('lod-0', scale<0.5); mini.classList.toggle('lod-1', scale>=0.5 && scale<0.8);
+  sizeOut.textContent = `미니 사무실 ${Math.round(mini.clientWidth)}×${Math.round(mini.clientHeight)}`;
+}
+function setSize(w,h){
+  const box=mini.parentElement.getBoundingClientRect();
+  w=Math.max(200,Math.min(w,box.width-28)); h=Math.max(130,Math.min(h,box.height-28));
+  mini.style.width=w+'px'; mini.style.height=h+'px'; lod();
+}
+grip.addEventListener('pointerdown',e=>{
+  e.preventDefault(); grip.setPointerCapture(e.pointerId); document.body.style.userSelect='none';
+  const sx=e.clientX, sy=e.clientY, sw=mini.clientWidth, sh=mini.clientHeight, keep=e.altKey, ratio=sw/sh;
+  const move=ev=>{ let w=sw-(ev.clientX-sx), h=sh-(ev.clientY-sy); if(keep||ev.altKey) h=w/ratio; setSize(w,h); };
+  const up=()=>{ document.body.style.userSelect=''; grip.removeEventListener('pointermove',move); grip.removeEventListener('pointerup',up); };
+  grip.addEventListener('pointermove',move); grip.addEventListener('pointerup',up);
+});
+document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{
+  const box=mini.parentElement.getBoundingClientRect();
+  const P={s:[210,140],m:[300,200],l:[box.width-28,box.height-80]}[b.dataset.preset]; setSize(P[0],P[1]);
+}));
+window.addEventListener('resize',()=>setSize(mini.clientWidth,mini.clientHeight));
+lod();
+
+/* ---------- sounds (Web Audio, 앱의 SoundRecipe 시안) ---------- */
+let AC=null, master=null, volume=.35;
+function ctx(){
+  if(!AC){ const A=window.AudioContext||window.webkitAudioContext; if(!A) return null; AC=new A(); master=AC.createGain(); master.gain.value=volume; master.connect(AC.destination); }
+  if(AC.state==='suspended') AC.resume();
+  return AC;
+}
+function env(g,t0,peak,attack,dur){ g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(peak,t0+attack); g.gain.exponentialRampToValueAtTime(0.0001,t0+dur); }
+function osc(t0,freq,dur,{type='sine',gain=.3,attack=.004,bend=0,to=null}={}){
+  const a=AC,o=a.createOscillator(),g=a.createGain(); o.type=type; o.frequency.setValueAtTime(freq,t0);
+  if(bend) o.frequency.exponentialRampToValueAtTime(freq*Math.pow(2,bend/12),t0+dur*.8);
+  if(to) to.forEach(([dt,f])=>o.frequency.exponentialRampToValueAtTime(f,t0+dt));
+  env(g,t0,gain,attack,dur); o.connect(g).connect(master); o.start(t0); o.stop(t0+dur+.03);
+}
+function mallet(t0,freq,dur=.35,gain=.28){ osc(t0,freq,dur,{gain}); osc(t0,freq*4,dur*.35,{gain:gain*.18}); osc(t0,freq*2.01,dur*.5,{gain:gain*.12,type:'triangle'}); }
+let noiseBuf=null;
+function noise(t0,dur,{freq=1000,q=1,gain=.3,kind='bandpass'}={}){
+  if(!noiseBuf){ noiseBuf=AC.createBuffer(1,AC.sampleRate*.3,AC.sampleRate); const d=noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; }
+  const src=AC.createBufferSource(), f=AC.createBiquadFilter(), g=AC.createGain(); src.buffer=noiseBuf; f.type=kind; f.frequency.value=freq; f.Q.value=q;
+  env(g,t0,gain,.002,dur); src.connect(f).connect(g).connect(master); src.start(t0); src.stop(t0+dur+.02);
+}
+const semis=(f,n)=>f*Math.pow(2,n/12);
+let voiceIdx=0;
+const VOICES=[523.25,659.25,783.99];
+const SOUNDS=[
+  {id:'knock', name:'승인 요청', ono:'똑똑', desc:'권한 승인을 기다리기 시작할 때. 30초마다 최대 2회 더', tag:'alert', on:true,
+   play:t=>{ [0,.17].forEach(d=>{ noise(t+d,.06,{freq:750,q:4,gain:.55}); osc(t+d,190,.09,{gain:.32,bend:-3}); }); }},
+  {id:'idle', name:'입력 대기', ono:'뾰롱', desc:'Claude가 응답을 마치고 내 입력을 기다릴 때', tag:'alert', on:true,
+   play:t=>{ mallet(t,1046.5,.22,.22); mallet(t+.11,783.99,.42,.24); }},
+  {id:'done', name:'작업 완료', ono:'띠리링', desc:'팀장 응답 완료. 팀원 보고는 더 짧은 2음', tag:'alert', on:true,
+   play:t=>{ mallet(t,1046.5,.25); mallet(t+.09,1318.5,.25); mallet(t+.18,1568,.6,.3); }},
+  {id:'bubble', name:'말풍선', ono:'톡 · 블립', desc:'말풍선이 뜰 때. 직원마다 목소리 높이가 달라요 (누를 때마다 다른 직원)', tag:'deco', on:true,
+   play:t=>{ const base=VOICES[voiceIdx++%VOICES.length]; osc(t,1500,.04,{gain:.18,bend:-7}); const n=2+Math.floor(Math.random()*3); for(let i=0;i<n;i++){ osc(t+.07+i*.085,semis(base,Math.round(Math.random()*4-2)),.07,{type:'triangle',gain:.2,attack:.006}); } }},
+  {id:'door', name:'출근·퇴근', ono:'딸랑', desc:'세션 시작·종료, 팀원 출근·퇴근', tag:'deco', on:true,
+   play:t=>{ [[0,.26],[.13,.15]].forEach(([d,g])=>{ osc(t+d,1568,.7,{gain:g}); osc(t+d,2093,.55,{gain:g*.6}); osc(t+d,3136,.25,{gain:g*.2}); }); }},
+  {id:'error', name:'오류', ono:'뿅?', desc:'툴 오류가 났을 때', tag:'deco', on:true,
+   play:t=>{ osc(t,660,.38,{type:'triangle',gain:.26,to:[[.16,430],[.34,520]]}); }},
+  {id:'chat', name:'잡담', ono:'소곤', desc:'휴게실 속삭임', tag:'deco', on:false,
+   play:t=>{ for(let i=0;i<3;i++) osc(t+i*.1,semis(880,Math.round(Math.random()*4-2)),.06,{type:'triangle',gain:.08}); }},
+  {id:'steps', name:'발소리', ono:'톡톡', desc:'캐릭터가 걸을 때', tag:'deco', on:false,
+   play:t=>{ [0,.2,.4,.6].forEach(d=>noise(t+d,.035,{freq:900,q:1.2,gain:.35,kind:'lowpass'})); }},
+  {id:'typing', name:'타이핑', ono:'타닥', desc:'편집 중', tag:'deco', on:false,
+   play:t=>{ let d=0; for(let i=0;i<7;i++){ noise(t+d,.018,{freq:3200,q:.8,gain:.18,kind:'highpass'}); d+=.05+Math.random()*.06; } }}
+];
+let state={}; try{ state=JSON.parse(localStorage.getItem('co-sound')||'{}'); }catch(e){}
+SOUNDS.forEach(x=>{ if(typeof state[x.id]==='boolean') x.on=state[x.id]; });
+let allOn = state.all!==false;
+const save=()=>{ try{ localStorage.setItem('co-sound',JSON.stringify(Object.assign({all:allOn},Object.fromEntries(SOUNDS.map(x=>[x.id,x.on]))))); }catch(e){} };
+const list=document.getElementById('sndList'), sndBox=document.querySelector('.snd');
+list.innerHTML=SOUNDS.map(x=>`<div class="snd-row"><button type="button" class="play" data-play="${x.id}" aria-label="${x.name} 듣기">▶</button><div class="who"><b>${x.name}<span class="onomato">${x.ono}</span></b><small>${x.desc}</small></div><span class="tag ${x.tag}">${x.tag==='alert'?'알림':'장식'}</span><button type="button" class="sw" role="switch" aria-checked="${x.on}" data-sw="${x.id}" aria-label="${x.name} 효과음"></button></div>`).join('');
+function play(id){ const a=ctx(); if(!a) return; const x=SOUNDS.find(s=>s.id===id); x.play(a.currentTime+.02); const b=list.querySelector(`[data-play="${id}"]`); if(b){ b.classList.add('on'); setTimeout(()=>b.classList.remove('on'),450); } }
+list.addEventListener('click',e=>{
+  const p=e.target.closest('[data-play]'); if(p){ play(p.dataset.play); return; }
+  const w=e.target.closest('[data-sw]'); if(w){ const x=SOUNDS.find(s=>s.id===w.dataset.sw); x.on=!x.on; w.setAttribute('aria-checked',x.on); save(); }
+});
+const allSw=document.getElementById('sndAll');
+const syncAll=()=>{ allSw.setAttribute('aria-checked',allOn); sndBox.classList.toggle('muted-all',!allOn); };
+allSw.addEventListener('click',()=>{ allOn=!allOn; syncAll(); save(); }); syncAll();
+const vol=document.getElementById('sndVol'), volOut=document.getElementById('sndVolOut');
+vol.addEventListener('input',()=>{ volume=vol.value/100; volOut.textContent=vol.value+'%'; if(master) master.gain.value=volume; });
+document.getElementById('sndDemo').addEventListener('click',()=>{
+  if(!allOn) return;
+  [['door',0],['bubble',.9],['knock',1.9],['done',3.2],['idle',4.4]].forEach(([id,d])=>setTimeout(()=>{ if(SOUNDS.find(s=>s.id===id).on) play(id); },d*1000));
+});
 })();
 </script>
