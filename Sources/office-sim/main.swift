@@ -1,5 +1,6 @@
 import Foundation
 import OfficeCore
+import OfficeServer
 
 // office-sim: 앱 없이 연출 엔진을 확인하는 개발용 도구
 //
@@ -7,6 +8,10 @@ import OfficeCore
 //       시나리오의 훅을 시간 순서대로 엔진에 넣고, 0.25초마다 tick을 돌려 지시 타임라인을 출력합니다.
 //   office-sim sounds <출력 폴더>
 //       모든 효과음을 WAV(44.1kHz, 16비트, 모노)로 저장합니다.
+//   office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
+//       맥 앱 없이 훅 서버와 엔진만 돌립니다 (헤드리스). 받은 훅의 연출 지시와 직원 목록을 출력합니다.
+//   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
+//       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
 // 시나리오 한 줄 형식 (JSON Lines, '#'로 시작하는 줄은 주석):
 //   {"t": 12.5, "term": "iTerm.app", "hook": { ...훅 페이로드... }}
@@ -22,6 +27,8 @@ func usage() -> Never {
         사용법:
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
+          office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
+          office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
 }
@@ -61,7 +68,7 @@ func loadScenario(_ path: String) throws -> [ScenarioStep] {
 }
 
 func run(_ arguments: [String]) throws {
-    guard let path = arguments.first(where: { !$0.hasPrefix("--") }) else { usage() }
+    guard let path = arguments.first, !path.hasPrefix("--") else { usage() }
     let privacy = option("--privacy", in: arguments).flatMap(PrivacyLevel.init(rawValue:)) ?? .detailed
     let seed = option("--seed", in: arguments).flatMap(UInt64.init) ?? 1
     let tail = option("--tail", in: arguments).flatMap(Double.init) ?? 3
@@ -149,11 +156,155 @@ func sounds(_ arguments: [String]) throws {
     print("\n\(cues.count)개 파일을 \(directory.path)에 저장했습니다.")
 }
 
+// MARK: - serve
+
+/// 버퍼 없이 바로 출력합니다 (파일로 돌려도 실시간으로 보이도록)
+func emit(_ text: String) {
+    FileHandle.standardOutput.write(Data((text + "\n").utf8))
+}
+
+/// 엔진은 값 타입이라 직렬 큐 하나에서만 만집니다.
+final class EngineBox: @unchecked Sendable {
+    let queue = DispatchQueue(label: "office-sim.engine")
+    var engine: OfficeEngine
+    var lastRoster = Roster.empty
+    let rosterOnly: Bool
+    let privacy: PrivacyLevel
+    let started = Date()
+
+    init(privacy: PrivacyLevel, rosterOnly: Bool) {
+        self.privacy = privacy
+        self.rosterOnly = rosterOnly
+        engine = OfficeEngine(privacy: privacy)
+    }
+
+    func stamp(_ date: Date) -> String {
+        String(format: "%8.2fs", date.timeIntervalSince(started))
+    }
+
+    func receive(_ delivery: HookDelivery) {
+        let name = (try? JSONValue.parse(delivery.body))?["hook_event_name"]?.stringValue ?? "?"
+        do {
+            let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, at: delivery.receivedAt)
+            emit("\(stamp(delivery.receivedAt))  ── 훅 \(name) (\(delivery.term ?? "터미널 모름"))")
+            show(directives, at: delivery.receivedAt)
+        } catch {
+            emit("\(stamp(delivery.receivedAt))  ── 훅 \(name): JSON을 읽을 수 없습니다 (\(error))")
+        }
+    }
+
+    func tick() {
+        let now = Date()
+        show(engine.tick(at: now), at: now)
+    }
+
+    func show(_ directives: [Directive], at date: Date) {
+        if !rosterOnly {
+            for directive in directives { emit("\(stamp(date))     \(directive)") }
+        }
+        let roster = Roster.make(from: engine.state, privacy: privacy)
+        if roster != lastRoster {
+            lastRoster = roster
+            emit("\(stamp(date))  ☰ \(describe(roster))")
+        }
+    }
+
+    func describe(_ roster: Roster) -> String {
+        if roster.teams.isEmpty { return "사무실이 비어 있어요" }
+        let teams = roster.teams.map { team in
+            let rows = team.rows.map { row in "\(row.name)(\(row.status.label)\(row.detail.map { " · \($0)" } ?? ""))" }
+            return "\(team.name): \(rows.joined(separator: ", "))"
+        }
+        return "[\(roster.mood.rawValue)] " + teams.joined(separator: " | ")
+    }
+}
+
+func serve(_ arguments: [String]) throws -> Never {
+    let privacy = option("--privacy", in: arguments).flatMap(PrivacyLevel.init(rawValue:)) ?? .detailed
+    let port = option("--port", in: arguments).flatMap(UInt16.init) ?? HookServer.defaultPort
+    let endpoint = option("--endpoint", in: arguments).map { URL(fileURLWithPath: $0) } ?? EndpointFile.defaultURL()
+    let box = EngineBox(privacy: privacy, rosterOnly: arguments.contains("--roster-only"))
+
+    let token = HookRequestPolicy.makeToken()
+    let server = HookServer(token: token) { delivery in
+        box.queue.async { box.receive(delivery) }
+    }
+    let bound = try server.start(preferredPort: port)
+    try EndpointFile.write(port: bound, token: token, to: endpoint)
+    emit("훅 서버: 127.0.0.1:\(bound)  엔드포인트: \(endpoint.path)  (Ctrl+C로 종료)")
+
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    let shutdown: @Sendable () -> Void = {
+        server.stop()
+        EndpointFile.remove(at: endpoint)
+        emit("\n종료했습니다. 엔드포인트 파일을 지웠습니다.")
+        exit(0)
+    }
+    let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: box.queue)
+    interrupt.setEventHandler(handler: shutdown)
+    interrupt.resume()
+    let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: box.queue)
+    terminate.setEventHandler(handler: shutdown)
+    terminate.resume()
+
+    let timer = DispatchSource.makeTimerSource(queue: box.queue)
+    timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
+    timer.setEventHandler { box.tick() }
+    timer.resume()
+    dispatchMain()
+}
+
+// MARK: - replay
+
+func replay(_ arguments: [String]) throws {
+    guard let path = arguments.first, !path.hasPrefix("--") else { usage() }
+    let endpointURL = option("--endpoint", in: arguments).map { URL(fileURLWithPath: $0) } ?? EndpointFile.defaultURL()
+    let speed = max(option("--speed", in: arguments).flatMap(Double.init) ?? 1, 0.01)
+    let endpoint: (port: UInt16, token: String)
+    do {
+        endpoint = try EndpointFile.read(from: endpointURL)
+    } catch {
+        throw Failure(description: "\(endpointURL.path)을(를) 읽을 수 없습니다. Claude Office 앱이나 office-sim serve가 실행 중인지 확인해 주세요.")
+    }
+    let steps = try loadScenario(path)
+    var previous = steps.first?.time ?? 0
+    var sent = 0
+    for step in steps {
+        let wait = (step.time - previous) / speed
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        previous = step.time
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "curl", "-s", "-m", "2", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
+            "-H", "Content-Type: application/json", "-H", "X-Office-Token: \(endpoint.token)",
+            "-H", "X-Office-Term: \(step.term ?? "unknown")", "--data-binary", "@-",
+            "http://127.0.0.1:\(endpoint.port)\(HookRequestPolicy.path)",
+        ]
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        try process.run()
+        input.fileHandleForWriting.write(Data(step.payload.serialized(pretty: false).utf8))
+        try input.fileHandleForWriting.close()
+        process.waitUntilExit()
+        let code = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let name = step.payload["hook_event_name"]?.stringValue ?? "?"
+        print(String(format: "%8.2fs  %@ %@", step.time, code, name))
+        if code == "202" { sent += 1 }
+    }
+    print("\n\(steps.count)개 중 \(sent)개를 보냈습니다 (\(speed)배속).")
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch arguments.first {
     case "run": try run(Array(arguments.dropFirst()))
     case "sounds": try sounds(Array(arguments.dropFirst()))
+    case "serve": try serve(Array(arguments.dropFirst()))
+    case "replay": try replay(Array(arguments.dropFirst()))
     default: usage()
     }
 } catch {

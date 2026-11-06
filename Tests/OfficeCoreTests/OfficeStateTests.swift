@@ -281,3 +281,23 @@ extension JSONValue {
         return .object(object)
     }
 }
+
+@Suite("도착 순서가 뒤바뀐 훅")
+struct OutOfOrderTests {
+    let hook = Hook()
+
+    @Test("PostToolUse가 PreToolUse보다 먼저 와도 툴이 계속 진행 중으로 남지 않는다")
+    func postBeforePre() {
+        var state = OfficeState()
+        func apply(_ payload: JSONValue) -> [Beat] {
+            state.apply(HookParser.parse(payload, receivedAt: Fixture.epoch)!)
+        }
+        _ = apply(hook.tool("PostToolUse", "Read", id: "r1", input: [:]))
+        #expect(apply(hook.tool("PreToolUse", "Read", id: "r1", input: [:])).isEmpty)
+        #expect(state.lead(of: SessionID("s1"))?.runningTools.isEmpty == true)
+        // 위임도 같습니다
+        _ = apply(hook.tool("PostToolUse", "Agent", id: "a1", input: [:]))
+        #expect(apply(hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"])).isEmpty)
+        #expect(state.agents.values.filter { $0.role == .member }.isEmpty)
+    }
+}

@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "OfficeCore", targets: ["OfficeCore"]),
+        .library(name: "OfficeServer", targets: ["OfficeServer"]),
         .executable(name: "office-sim", targets: ["office-sim"]),
     ],
     targets: [
@@ -14,15 +15,25 @@ let package = Package(
             name: "OfficeCore",
             resources: [.process("Resources")]
         ),
-        // 시나리오를 엔진에 흘려 연출 타임라인을 출력하고, 효과음을 WAV로 렌더링하는 개발용 CLI
+        // 로컬 훅 서버(BSD 소켓), 엔드포인트 파일, 훅 설치기. macOS와 Linux 모두에서 동작합니다.
+        .target(
+            name: "OfficeServer",
+            dependencies: ["OfficeCore"],
+            resources: [.copy("Resources/claude-office.sh")]
+        ),
+        // 개발용 CLI: 연출 타임라인(run), 효과음 WAV(sounds), 헤드리스 서버(serve), 앱으로 재생(replay)
         .executableTarget(
             name: "office-sim",
-            dependencies: ["OfficeCore"]
+            dependencies: ["OfficeCore", "OfficeServer"]
         ),
         .testTarget(
             name: "OfficeCoreTests",
             dependencies: ["OfficeCore"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "OfficeServerTests",
+            dependencies: ["OfficeServer", "OfficeCore"]
         ),
     ]
 )

@@ -29,6 +29,9 @@ public struct OfficeState: Sendable {
     private var memberBySubagent: [String: AgentID] = [:]
     private var memberByDelegation: [String: AgentID] = [:]
     private var serial = 0
+    /// 최근에 끝난 tool_use_id. 훅 스크립트가 curl을 백그라운드로 보내므로 Post가 Pre보다 먼저 도착할 수 있습니다.
+    private var finishedToolIDs: [String] = []
+    private var finishedToolIDSet: Set<String> = []
 
     public init() {}
 
@@ -77,6 +80,7 @@ public struct OfficeState: Sendable {
             beats.append(.promptArrived(agents[leadID]!))
 
         case .toolStarted(let call):
+            if let id = call.id, finishedToolIDSet.contains(id) { break }  // 이미 끝난 툴의 늦은 시작
             update(actorID) {
                 $0.runningTools.append(call)
                 $0.setActivity(.working(call), at: now)
@@ -84,6 +88,7 @@ public struct OfficeState: Sendable {
             beats.append(.working(agents[actorID]!, call))
 
         case .toolFinished(let call, let outcome):
+            rememberFinished(call.id)
             update(actorID) { agent in
                 agent.removeRunning(call)
                 switch outcome {
@@ -100,6 +105,7 @@ public struct OfficeState: Sendable {
             beats.append(.toolEnded(agents[actorID]!, call, outcome))
 
         case .delegationStarted(let call, let subagentType):
+            if let id = call.id, finishedToolIDSet.contains(id) { break }
             let memberID = createMember(
                 session: event.session, teamID: agents[leadID]!.teamID, agentType: subagentType,
                 delegatedBy: actorID, task: call.subject, toolUseID: call.id, background: call.runsInBackground,
@@ -108,6 +114,7 @@ public struct OfficeState: Sendable {
             beats.append(.delegated(by: agents[actorID]!, member: agents[memberID]!))
 
         case .delegationFinished(let call, _):
+            rememberFinished(call.id)
             // SubagentStart를 받은 팀원과 백그라운드 실행은 SubagentStop을 기다립니다.
             // 시작·종료 신호를 보내지 않는 서브에이전트(web-fetch 등)와 구버전은 여기서 보고 처리합니다.
             if let id = call.id, let memberID = memberByDelegation[id], let member = agents[memberID],
@@ -343,6 +350,14 @@ public struct OfficeState: Sendable {
         }
         if let toolUseID = agent.delegationToolUseID {
             memberByDelegation[toolUseID] = nil
+        }
+    }
+
+    private mutating func rememberFinished(_ id: String?) {
+        guard let id, finishedToolIDSet.insert(id).inserted else { return }
+        finishedToolIDs.append(id)
+        if finishedToolIDs.count > 512 {
+            finishedToolIDSet.remove(finishedToolIDs.removeFirst())
         }
     }
 
