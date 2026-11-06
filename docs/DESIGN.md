@@ -115,7 +115,12 @@
 > - 위 필드 구성이 실제와 일치했습니다. 서브에이전트 안의 툴 이벤트에는 `agent_id`·`agent_type`이 붙어 옵니다.
 > - 처음 보는 공통 필드: `scratchpad_dir`, `effort.level`, Stop/SubagentStop의 `session_crons` (사용하지 않음, 무시).
 > - 처음 보는 툴 `SubagentHandback`(입력: `message`): 서브에이전트가 결과를 넘기는 동작으로 보고 "보고 정리 중" 연출(서류 정리 자세)로 처리합니다. 메시지 내용은 표시하지 않습니다.
-> - `SubagentStop` 10건 대비 `SubagentStart` 2건, 위임 3건: 위임 없이 끝나는 서브에이전트가 있습니다. 그래서 짝을 모르는 `SubagentStop`은 종류가 정확히 같은 대기 팀원이 있을 때만 묶고, 종류를 모르면 후보가 하나일 때만 묶도록 바꿨습니다. 정체는 `capture.py breakdown`으로 확인 중입니다.
+> - **서브에이전트 유형 3가지** (`capture.py breakdown`으로 확인):
+>   1. **일반 위임** (`general-purpose` 등): `Agent` 위임 → `SubagentStart` → 툴 이벤트(`agent_id` 포함) → `SubagentHandback` → `SubagentStop` → `PostToolUse(Agent)`.
+>   2. **신호 없는 위임** (`web-fetch`): `Agent` 위임 → 툴 이벤트만 오고 `SubagentStart`/`SubagentStop`이 없습니다 → `PostToolUse(Agent)`로 끝납니다.
+>   3. **Claude Code 내부 작업**: `agent_type`이 빈 `SubagentStop` 하나만 옵니다 (16건 중 14건). 다른 이벤트가 없고 사용자가 맡긴 일이 아니므로 **무시**합니다.
+> - 그래서 팀원 종료 규칙을 이렇게 정했습니다: `SubagentStart`를 받은 팀원과 백그라운드 위임은 `SubagentStop`으로, 그 밖에는 `PostToolUse(Agent)`로 끝냅니다. 종류가 빈 신호는 무시합니다. 안전장치로, 팀장의 응답이 끝날 때(`Stop`) 남은 포그라운드 팀원은 보고하고 퇴근합니다.
+> - 메인의 `Bash` 하나가 끝나지 않은 채 남은 경우가 있었습니다 (중단 추정). 팀장의 `Stop`/새 프롬프트에서 진행 중인 툴을 비우므로 화면에 남지 않습니다.
 > - `TERM_PROGRAM`: iTerm2는 `iTerm.app`, VS Code 터미널은 `vscode`.
 > - `idle_prompt` 알림은 이번 수집에 없었습니다 (파서는 처리함).
 >
@@ -329,7 +334,7 @@ public enum Directive: Equatable, Sendable {
 - **유지 시간의 예외:** 더 바쁜 활동으로 바뀔 때(대기 → 생각 → 작업)는 2.5초를 기다리지 않고 바로 보여줍니다. 같은 등급끼리나 덜 바쁜 쪽으로 바뀔 때만 기다리고, 그 사이 들어온 활동은 최신 것만 남깁니다.
 - **읽기 횟수:** 책장 이동 판단(10초 안에 5회)은 화면 반영 여부와 상관없이 이벤트가 올 때마다 셉니다. 책장에 이미 있으면 읽기가 이어지는 동안 머뭅니다.
 - **위임은 팀장 자리에서:** 팀장이 책장이나 서버랙에 있을 때 위임하면 먼저 자리로 돌아오고, 팀원은 팀장 자리로 찾아옵니다.
-- **서브에이전트 연결:** `Agent` 툴의 PreToolUse로 팀원을 먼저 만들고, `SubagentStart`의 `agent_id`를 같은 종류의 대기 중인 팀원에 묶습니다. 백그라운드 위임(`run_in_background`)과 `agent_id`가 묶인 팀원은 `PostToolUse(Agent)`가 먼저 와도 `SubagentStop`까지 남습니다.
+- **서브에이전트 연결:** `Agent` 툴의 PreToolUse로 팀원을 먼저 만들고, `SubagentStart`나 툴 이벤트의 `agent_id`를 같은 종류의 대기 중인 팀원에 묶습니다. `SubagentStart`를 받은 팀원과 백그라운드 위임(`run_in_background`)은 `PostToolUse(Agent)`가 먼저 와도 `SubagentStop`까지 남고, 그 밖의 팀원은 `PostToolUse(Agent)`에서 보고합니다 (§4.1 M0 결과).
 - **공동 팀장:** 같은 폴더에서 세션을 여러 개 열면 같은 팀에 "팀장 2", "팀장 3"이 생깁니다.
 - **대사 선택:** 주어진 정보(작업 이름, 직원 이름, 명령)를 가장 많이 쓰는 줄을 우선 고릅니다. 모든 대사는 해요체이며, 테스트가 반말 대사를 잡아냅니다.
 - **효과음 위치:** 직원 대기열 안의 효과음(말풍선 블립, 문 종, 보고 소리)은 그 동작과 함께 울리고, 알림성 소리(노크, 뾰롱, 띠리링)는 바로 울립니다. 승인 요청 노크는 말풍선 블립 없이 노크만 울립니다.
@@ -758,8 +763,8 @@ claude-office/
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| **M0** 준비 | 수집 도구(`scripts/capture.py`), **실제 페이로드 수집** (사용자 맥, [안내](M0-capture.md)), 저장소 골격 | 픽스처 10종 이상 확보, §4 필드 확정 |
-| **M1** 코어 ✅ | 이벤트 모델, 파서, 리듀서, 연출 엔진, 대화 템플릿, 효과음 레시피·합성·정책, 단위 테스트 68개, `office-sim` | `swift test` 통과 (Swift 6.2.3, Linux) |
+| **M0** 준비 ✅ | 수집 도구(`scripts/capture.py`), **실제 페이로드 수집** (사용자 맥, [안내](M0-capture.md)), 저장소 골격 | 2.1.318 실제 리포트·집계로 §4 필드와 서브에이전트 유형 확정 |
+| **M1** 코어 ✅ | 이벤트 모델, 파서, 리듀서, 연출 엔진, 대화 템플릿, 효과음 레시피·합성·정책, 단위 테스트 74개, `office-sim` | `swift test` 통과 (Swift 6.2.3, Linux) |
 | **M2** 앱 뼈대 | 메뉴바 앱, HookServer, 텍스트 목록 UI, 훅 설치기 | 실제 Claude Code 이벤트가 메뉴바 목록에 실시간 표시 |
 | **M3** 사무실 | 맵, 가구, 캐릭터 리그, 길찾기, 자리 활동 | 출근, 업무, 퇴근 흐름이 화면에 보임 |
 | **M4** 표현 | 표정 10종, 제스처 12종, 말풍선 5종, 대화 스크립트, **효과음** | 위임, 승인 대기, 완료 보고 연출과 소리 동작 |

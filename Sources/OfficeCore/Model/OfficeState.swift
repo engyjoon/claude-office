@@ -108,16 +108,19 @@ public struct OfficeState: Sendable {
             beats.append(.delegated(by: agents[actorID]!, member: agents[memberID]!))
 
         case .delegationFinished(let call, _):
-            // SubagentStart로 agent_id가 묶인 경우와 백그라운드 실행은 SubagentStop을 기다립니다.
-            // 구버전처럼 agent_id를 끝내 모르면 여기서 보고 처리합니다.
+            // SubagentStart를 받은 팀원과 백그라운드 실행은 SubagentStop을 기다립니다.
+            // 시작·종료 신호를 보내지 않는 서브에이전트(web-fetch 등)와 구버전은 여기서 보고 처리합니다.
             if let id = call.id, let memberID = memberByDelegation[id], let member = agents[memberID],
-                member.subagentID == nil, !member.runsInBackground
+                !member.announcedByHook, !member.runsInBackground
             {
                 finishMember(memberID, at: now, beats: &beats)
             }
 
         case .subagentStarted(let ref):
+            // 종류가 빈 서브에이전트는 Claude Code 내부 작업입니다 (M0: 신호 하나만 오고 툴 이벤트가 없음)
+            guard let type = ref.type, !type.isEmpty else { break }
             let (memberID, created) = bindOrCreateMember(ref, session: event.session, leadID: leadID, term: event.term, at: now)
+            update(memberID) { $0.announcedByHook = true }
             if created { beats.append(.memberAppeared(agents[memberID]!)) }
 
         case .subagentStopped(let ref):
@@ -151,6 +154,13 @@ public struct OfficeState: Sendable {
             }
 
         case .turnEnded(let failed):
+            // 안전장치: 팀장 응답이 끝났는데 남은 (백그라운드가 아닌) 팀원은 이때 보고하고 퇴근합니다
+            let leftovers = agents.values
+                .filter { $0.session == event.session && $0.role == .member && !$0.runsInBackground }
+                .sorted { $0.serial < $1.serial }
+            for member in leftovers {
+                finishMember(member.id, at: now, beats: &beats)
+            }
             update(leadID) {
                 $0.runningTools = []
                 $0.setActivity(.idle, at: now)
@@ -236,14 +246,14 @@ public struct OfficeState: Sendable {
 
     /// 위임으로 만들어졌지만 아직 agent_id가 없는 팀원 중 종류가 맞는 가장 오래된 팀원
     ///
-    /// 실제 수집(M0)에서 위임 없이 끝나는 서브에이전트의 SubagentStop이 많이 보였습니다.
-    /// 엉뚱한 팀원과 짝짓지 않도록 종류가 정확히 같을 때만 묶고, 종류를 모르면 후보가 하나일 때만 묶습니다.
+    /// 실제 수집(M0)에서 종류가 빈 SubagentStop이 많았습니다 (Claude Code 내부 작업, 다른 이벤트 없음).
+    /// 엉뚱한 팀원과 짝짓지 않도록 종류가 정확히 같을 때만 묶고, 종류를 모르면 묶지 않습니다.
     private func pendingMember(for ref: SubagentRef, in session: SessionID) -> AgentID? {
-        let unbound = agents.values.filter { $0.session == session && $0.role == .member && $0.subagentID == nil }
-        guard let type = ref.type, !type.isEmpty else {
-            return unbound.count == 1 ? unbound.first?.id : nil
-        }
-        return unbound.filter { $0.profile.agentType == type }.min { $0.serial < $1.serial }?.id
+        guard let type = ref.type, !type.isEmpty else { return nil }
+        return agents.values
+            .filter { $0.session == session && $0.role == .member && $0.subagentID == nil && $0.profile.agentType == type }
+            .min { $0.serial < $1.serial }?
+            .id
     }
 
     private mutating func createMember(

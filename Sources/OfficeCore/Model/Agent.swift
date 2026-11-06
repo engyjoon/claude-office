@@ -136,6 +136,9 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var task: String?
     public internal(set) var delegationToolUseID: String?
     public internal(set) var runsInBackground: Bool
+    /// SubagentStart를 실제로 받았는지. 받았으면 끝도 SubagentStop으로 옵니다.
+    /// (M0: web-fetch처럼 시작·종료 신호 없이 툴 이벤트만 보내는 서브에이전트가 있습니다)
+    public internal(set) var announcedByHook: Bool = false
     public internal(set) var activity: Activity
     public internal(set) var activitySince: Date
     public internal(set) var runningTools: [ToolCall]

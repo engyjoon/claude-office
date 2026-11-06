@@ -208,12 +208,53 @@ struct M0FindingsTests {
         #expect(state.agents.values.filter { $0.role == .member }.count == 2)
     }
 
-    @Test("종류를 모르는 SubagentStop은 대기 중인 팀원이 하나뿐일 때만 짝짓는다")
-    func untypedStopWithSingleCandidate() {
+    @Test("종류가 빈 SubagentStart/Stop(내부 작업)은 후보가 하나여도 무시한다")
+    func untypedSignalsAreIgnored() {
         var state = OfficeState()
         _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
-        let beats = apply(&state, hook.make("SubagentStop", ["agent_id": "x1"]))
-        guard case .reported = beats.first else { Issue.record("\(beats)"); return }
+        #expect(apply(&state, hook.make("SubagentStart", ["agent_id": "x0", "agent_type": ""])).isEmpty)
+        #expect(apply(&state, hook.make("SubagentStop", ["agent_id": "x1"])).isEmpty)
+        #expect(apply(&state, hook.make("SubagentStop", ["agent_id": "x2", "agent_type": ""])).isEmpty)
+        #expect(state.agents.values.filter { $0.role == .member }.count == 1)
+    }
+
+    @Test("web-fetch처럼 시작·종료 신호가 없는 서브에이전트는 위임 툴이 끝날 때 보고하고 퇴근한다")
+    func silentSubagent() {
+        var state = OfficeState()
+        let webFetch = (id: "w1", type: "web-fetch")
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "문서 조회", "subagent_type": "web-fetch"]))
+        // 툴 이벤트의 agent_id로 위임 팀원에 연결됩니다 (새 직원이 생기지 않음)
+        let working = apply(&state, hook.tool("PreToolUse", "WebFetch", id: "f1", input: ["url": "https://example.com"], agent: webFetch))
+        #expect(working.count == 1)
+        _ = apply(&state, hook.tool("PostToolUse", "WebFetch", id: "f1", input: [:], agent: webFetch))
+        let finished = apply(&state, hook.tool("PostToolUse", "Agent", id: "a1", input: [:], extra: [("tool_response", [:])]))
+        guard case .reported(let member, _) = finished.first else { Issue.record("\(finished)"); return }
+        #expect(member.profile.agentType == "web-fetch")
+        #expect(member.profile.kind == .temporary)
+        #expect(state.agents.values.filter { $0.role == .member }.isEmpty)
+    }
+
+    @Test("SubagentStart를 받은 팀원은 PostToolUse(Agent)가 먼저 와도 SubagentStop을 기다린다")
+    func announcedSubagentWaitsForStop() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]))
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]))
+        #expect(apply(&state, hook.tool("PostToolUse", "Agent", id: "a1", input: [:])).isEmpty)
+        let stopped = apply(&state, hook.make("SubagentStop", ["agent_id": "g1", "agent_type": "general-purpose"]))
+        guard case .reported = stopped.first else { Issue.record("\(stopped)"); return }
+    }
+
+    @Test("안전장치: 팀장 응답이 끝나면 남은 팀원은 보고하고 퇴근한다 (백그라운드 제외)")
+    func turnEndCleansUp() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]))
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]))
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a2", input: ["subagent_type": "Explore", "run_in_background": true]))
+        let beats = apply(&state, hook.make("Stop"))
+        let reported = beats.filter { if case .reported = $0 { true } else { false } }
+        #expect(reported.count == 1)
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.profile.agentType) == ["Explore"])
+        guard case .turnEnded = beats.last else { Issue.record("\(beats)"); return }
     }
 
     @Test("SubagentHandback은 보고 정리 연출이 되고, 메시지 내용은 보여주지 않는다")
