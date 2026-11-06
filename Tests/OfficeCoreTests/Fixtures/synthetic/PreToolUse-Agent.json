@@ -1,5 +1,5 @@
 {
-  "_synthetic": "Claude Code 2.1.318 훅 스키마를 기준으로 만든 합성 픽스처입니다. 실제 수집본은 ../captured/ 에 둡니다.",
+  "_synthetic": "Claude Code 2.1.318 훅 스키마와 M0 실제 리포트(필드 구성)를 기준으로 만든 합성 픽스처입니다. 실제 수집본은 ../captured/ 에 둡니다.",
   "captured_at": "2026-11-06T09:00:00+0900",
   "term_program": "iTerm.app",
   "payload": {
@@ -15,6 +15,10 @@
       "prompt": "<prompt: 300자 가림>",
       "subagent_type": "code-reviewer"
     },
-    "tool_use_id": "tu-agent-1"
+    "tool_use_id": "tu-agent-1",
+    "scratchpad_dir": "/private/tmp/claude-501/-Users-demo-work-a-sdn-portal/s-demo/scratchpad",
+    "effort": {
+      "level": "high"
+    }
   }
 }

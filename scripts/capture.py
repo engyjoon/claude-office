@@ -6,6 +6,7 @@
     python3 scripts/capture.py install --basic    # 확장 이벤트 없이 기본 이벤트만
     python3 scripts/capture.py status             # 설치 상태와 수집 건수
     python3 scripts/capture.py report             # 필드 구조 요약 (값 없이 키만) → 공유해도 안전
+    python3 scripts/capture.py breakdown          # 서브에이전트 생애·툴 짝 집계 (값 없이) → 공유해도 안전
     python3 scripts/capture.py export             # 민감 정보를 가린 테스트 픽스처 생성
     python3 scripts/capture.py uninstall          # 수집 훅 제거 (다른 훅은 그대로)
 
@@ -179,6 +180,7 @@ def load_records() -> list[dict]:
             continue
         if isinstance(rec, dict) and isinstance(rec.get("payload"), dict):
             rec["_file"] = f.name
+            rec["_mtime"] = f.stat().st_mtime_ns  # 같은 초 안의 순서를 맞추기 위해 파일 수정 시각(나노초)을 씁니다
             out.append(rec)
     return out
 
@@ -253,6 +255,100 @@ def cmd_report(args) -> None:
     (CAPTURE_DIR / "report.md").write_text(report, encoding="utf-8")
     print(report)
     print(f"\n(저장됨: {CAPTURE_DIR / 'report.md'})")
+
+
+# ---------------------------------------------------------------- breakdown
+
+SHORT = {"PreToolUse": "Pre", "PostToolUse": "Post", "PostToolUseFailure": "Fail", "PermissionRequest": "Perm",
+         "PermissionDenied": "Denied", "SubagentStart": "Start", "SubagentStop": "Stop", "Notification": "Noti"}
+
+
+def cmd_breakdown(args) -> None:
+    """서브에이전트와 툴 호출의 짝을 값 없이 집계합니다 (agent_id는 S1, S2…로 바꿈)."""
+    records = sorted(load_records(), key=lambda r: (r["_mtime"], r["_file"]))
+    if not records:
+        sys.exit("수집된 데이터가 없습니다.")
+    alias: dict[str, str] = {}
+
+    def name_of(agent_id: str) -> str:
+        if agent_id not in alias:
+            alias[agent_id] = f"S{len(alias) + 1}"
+        return alias[agent_id]
+
+    lines = ["# Claude Office 서브에이전트 집계", "",
+             "agent_id는 S1, S2…로 바꿨고, 툴 입력·출력 값은 넣지 않았습니다. 순서는 파일 수정 시각 기준입니다.", ""]
+
+    # 1) 이벤트 × 주체 × 툴
+    counts: Counter = Counter()
+    for r in records:
+        p = r["payload"]
+        event = p.get("hook_event_name", "?")
+        if event in ("SubagentStart", "SubagentStop"):
+            actor = f"대상 {p.get('agent_type') or '(빈 값)'}"
+        else:
+            actor = (p.get("agent_type") or "(빈 값)") if p.get("agent_id") else "(메인)"
+        counts[(event, actor, p.get("tool_name", ""))] += 1
+    lines += ["## 1. 이벤트별 주체", "", "| 이벤트 | 주체 (서브에이전트 종류 / 메인) | 툴 | 건수 |", "|---|---|---|---|"]
+    for (event, actor, tool), n in sorted(counts.items()):
+        lines.append(f"| {event} | {actor} | {tool or '-'} | {n} |")
+
+    # 2) 서브에이전트별 생애
+    timelines: dict[str, list[str]] = defaultdict(list)
+    types: dict[str, str] = {}
+    previous_main_tool: dict[str, str] = {}
+    last_main_tool = "-"
+    for r in records:
+        p = r["payload"]
+        event = p.get("hook_event_name", "?")
+        tool = p.get("tool_name")
+        agent_id = p.get("agent_id")
+        if not agent_id:
+            if event == "PreToolUse" and tool:
+                last_main_tool = tool
+            continue
+        name = name_of(agent_id)
+        types.setdefault(name, p.get("agent_type") or "(빈 값)")
+        if not timelines[name]:
+            previous_main_tool[name] = last_main_tool
+        timelines[name].append(SHORT.get(event, event) + (f"({tool})" if tool else ""))
+    lines += ["", "## 2. 서브에이전트별 생애", "",
+              "| 이름 | 종류 | 처음 보이기 직전 메인의 툴 | 이벤트 수 | 순서 (앞 14개) |", "|---|---|---|---|---|"]
+    for name in sorted(timelines, key=lambda x: int(x[1:])):
+        seq = timelines[name]
+        shown = " → ".join(seq[:14]) + (" …" if len(seq) > 14 else "")
+        lines.append(f"| {name} | {types[name]} | {previous_main_tool.get(name, '-')} | {len(seq)} | {shown} |")
+
+    # 3) 짝이 없는 툴 호출
+    started: dict[str, str] = {}
+    finished: set[str] = set()
+    for r in records:
+        p = r["payload"]
+        tool_use_id = p.get("tool_use_id")
+        if not tool_use_id:
+            continue
+        if p.get("hook_event_name") == "PreToolUse":
+            started[tool_use_id] = p.get("tool_name", "?")
+        elif p.get("hook_event_name") in ("PostToolUse", "PostToolUseFailure", "PermissionDenied"):
+            finished.add(tool_use_id)
+    dangling = Counter(name for tid, name in started.items() if tid not in finished)
+    lines += ["", "## 3. 시작만 있고 끝이 없는 툴 호출", ""]
+    lines.append(", ".join(f"`{k}` × {v}" for k, v in dangling.most_common()) or "없음")
+
+    # 4) 위임 툴의 옵션
+    delegations = Counter()
+    for r in records:
+        p = r["payload"]
+        if p.get("hook_event_name") == "PreToolUse" and p.get("tool_name") in ("Agent", "Task"):
+            ti = p.get("tool_input") or {}
+            delegations[(ti.get("subagent_type") or "(없음)", bool(ti.get("run_in_background")))] += 1
+    lines += ["", "## 4. 위임 (Agent/Task 툴)", "", "| subagent_type | 백그라운드 | 건수 |", "|---|---|---|"]
+    for (kind, background), n in sorted(delegations.items()):
+        lines.append(f"| {kind} | {'예' if background else '아니오'} | {n} |")
+
+    report = "\n".join(lines)
+    (CAPTURE_DIR / "breakdown.md").write_text(report, encoding="utf-8")
+    print(report)
+    print(f"\n(저장됨: {CAPTURE_DIR / 'breakdown.md'})")
 
 
 # ---------------------------------------------------------------- export (sanitize)
@@ -351,6 +447,7 @@ def main() -> None:
     sub.add_parser("uninstall", help="수집 훅 제거").set_defaults(func=cmd_uninstall)
     sub.add_parser("status", help="설치 상태와 수집 건수").set_defaults(func=cmd_status)
     sub.add_parser("report", help="필드 구조 리포트 (값 없음)").set_defaults(func=cmd_report)
+    sub.add_parser("breakdown", help="서브에이전트 생애·툴 짝 집계 (값 없음)").set_defaults(func=cmd_breakdown)
     p = sub.add_parser("export", help="민감 정보를 가린 픽스처 생성")
     p.add_argument("--out", default=str(DEFAULT_OUT))
     p.add_argument("--per-kind", type=int, default=3, help="이벤트·툴 조합당 최대 개수 (기본 3)")

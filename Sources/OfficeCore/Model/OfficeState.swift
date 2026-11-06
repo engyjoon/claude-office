@@ -235,12 +235,15 @@ public struct OfficeState: Sendable {
     }
 
     /// 위임으로 만들어졌지만 아직 agent_id가 없는 팀원 중 종류가 맞는 가장 오래된 팀원
+    ///
+    /// 실제 수집(M0)에서 위임 없이 끝나는 서브에이전트의 SubagentStop이 많이 보였습니다.
+    /// 엉뚱한 팀원과 짝짓지 않도록 종류가 정확히 같을 때만 묶고, 종류를 모르면 후보가 하나일 때만 묶습니다.
     private func pendingMember(for ref: SubagentRef, in session: SessionID) -> AgentID? {
-        agents.values
-            .filter { $0.session == session && $0.role == .member && $0.subagentID == nil }
-            .filter { ref.type == nil || $0.profile.agentType == ref.type }
-            .min { $0.serial < $1.serial }?
-            .id
+        let unbound = agents.values.filter { $0.session == session && $0.role == .member && $0.subagentID == nil }
+        guard let type = ref.type, !type.isEmpty else {
+            return unbound.count == 1 ? unbound.first?.id : nil
+        }
+        return unbound.filter { $0.profile.agentType == type }.min { $0.serial < $1.serial }?.id
     }
 
     private mutating func createMember(

@@ -71,6 +71,12 @@ python3 scripts/capture.py report
 
 `report`는 **값을 모두 지우고 키와 타입만** 남긴 요약입니다. `~/claude-office-capture/report.md`에 저장되며, 이 내용은 그대로 공유하셔도 됩니다.
 
+```bash
+python3 scripts/capture.py breakdown
+```
+
+`breakdown`은 서브에이전트마다 어떤 이벤트가 어떤 순서로 왔는지, 시작만 있고 끝이 없는 툴 호출이 무엇인지 집계합니다. `agent_id`는 S1, S2…로 바꾸고 툴의 입력·출력 값은 넣지 않으므로 그대로 공유하셔도 됩니다 (`~/claude-office-capture/breakdown.md`).
+
 테스트 픽스처는 아래 명령으로 만듭니다.
 
 ```bash

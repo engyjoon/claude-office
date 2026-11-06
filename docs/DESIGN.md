@@ -111,6 +111,14 @@
 > - 서브에이전트 안에서 발생한 훅에는 **`agent_id`와 `agent_type`이 붙습니다.** 메인 스레드에서는 `agent_id`가 없습니다.
 > - `Notification.notification_type`에는 `permission_prompt`, `idle_prompt` 등이 들어옵니다.
 >
+> **M0 실제 수집 결과** (2026-11, Claude Code 2.1.318, macOS, 98건, iTerm.app·vscode)
+> - 위 필드 구성이 실제와 일치했습니다. 서브에이전트 안의 툴 이벤트에는 `agent_id`·`agent_type`이 붙어 옵니다.
+> - 처음 보는 공통 필드: `scratchpad_dir`, `effort.level`, Stop/SubagentStop의 `session_crons` (사용하지 않음, 무시).
+> - 처음 보는 툴 `SubagentHandback`(입력: `message`): 서브에이전트가 결과를 넘기는 동작으로 보고 "보고 정리 중" 연출(서류 정리 자세)로 처리합니다. 메시지 내용은 표시하지 않습니다.
+> - `SubagentStop` 10건 대비 `SubagentStart` 2건, 위임 3건: 위임 없이 끝나는 서브에이전트가 있습니다. 그래서 짝을 모르는 `SubagentStop`은 종류가 정확히 같은 대기 팀원이 있을 때만 묶고, 종류를 모르면 후보가 하나일 때만 묶도록 바꿨습니다. 정체는 `capture.py breakdown`으로 확인 중입니다.
+> - `TERM_PROGRAM`: iTerm2는 `iTerm.app`, VS Code 터미널은 `vscode`.
+> - `idle_prompt` 알림은 이번 수집에 없었습니다 (파서는 처리함).
+>
 > ⚠️ **M0에서 반드시 확인할 것:** 필드 구성은 Claude Code 버전마다 다를 수 있습니다. 구현 전에 사용 중인 버전에서 실제 페이로드를 수집해 테스트 픽스처로 저장하고([M0 안내](M0-capture.md)), 파서는 그 픽스처를 기준으로 만듭니다.
 
 ### 4.2 훅 스크립트

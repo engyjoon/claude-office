@@ -461,6 +461,9 @@ public struct Choreographer: Sendable {
                 prop = .marker
             case .shell:
                 modify(id) { $0.shellWatch = ShellWatch(callID: call.id, since: now) }
+            case .report:
+                pose = .sorting
+                prop = .documents
             case .write, .delegate, .mcp, .other:
                 break
             }
@@ -600,7 +603,9 @@ public struct Choreographer: Sendable {
         switch privacy {
         case .detailed:
             let text: String
-            if call.category == .mcp {
+            if call.category == .report {
+                text = call.category.summaryLabel  // 넘기는 메시지 내용은 보여주지 않습니다
+            } else if call.category == .mcp {
                 text = "MCP · \(call.subject ?? call.name)"
             } else if let subject = call.subject {
                 text = "\(call.name) · \(subject)"

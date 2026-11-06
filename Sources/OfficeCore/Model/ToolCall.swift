@@ -2,6 +2,8 @@ import Foundation
 
 public enum ToolCategory: String, Hashable, Sendable, CaseIterable {
     case read, write, shell, web, plan, delegate, mcp, other
+    /// 서브에이전트가 결과를 팀장에게 넘기는 중 (`SubagentHandback`, M0에서 확인)
+    case report
 
     /// 요약 표시 수준에서 쓰는 이름
     public var summaryLabel: String {
@@ -12,6 +14,7 @@ public enum ToolCategory: String, Hashable, Sendable, CaseIterable {
         case .web: "웹 검색 중"
         case .plan: "계획 정리 중"
         case .delegate: "일 맡기는 중"
+        case .report: "보고 정리 중"
         case .mcp, .other: "도구 사용 중"
         }
     }
@@ -48,6 +51,7 @@ public enum ToolCatalog {
 
     public static func category(for name: String) -> ToolCategory {
         if delegateTools.contains(name) { return .delegate }
+        if name == "SubagentHandback" { return .report }
         if readTools.contains(name) { return .read }
         if writeTools.contains(name) { return .write }
         if shellTools.contains(name) { return .shell }

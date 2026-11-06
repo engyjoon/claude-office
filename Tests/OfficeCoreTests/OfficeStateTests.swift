@@ -185,3 +185,58 @@ struct OfficeStateTests {
         #expect(state.teams.count == 1)  // 책상 섬과 명패는 남습니다
     }
 }
+
+@Suite("M0 실제 데이터에서 발견한 경우")
+struct M0FindingsTests {
+    let hook = Hook()
+
+    func apply(_ state: inout OfficeState, _ payload: JSONValue) -> [Beat] {
+        guard let event = HookParser.parse(payload, receivedAt: Fixture.epoch) else { return [] }
+        return state.apply(event)
+    }
+
+    @Test("위임 없이 끝나는 서브에이전트의 SubagentStop은 다른 팀원을 퇴근시키지 않는다")
+    func orphanStopIsIgnored() throws {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
+        // 종류가 다른 SubagentStop
+        #expect(apply(&state, hook.make("SubagentStop", ["agent_id": "x1", "agent_type": "web-fetch"])).isEmpty)
+        // 종류가 빈 SubagentStop (합성 픽스처와 같은 모양)
+        let orphan = try Fixture.payload("SubagentStop-orphan")
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a2", input: ["subagent_type": "general-purpose"]))
+        #expect(apply(&state, orphan.withSession("s1")).isEmpty)
+        #expect(state.agents.values.filter { $0.role == .member }.count == 2)
+    }
+
+    @Test("종류를 모르는 SubagentStop은 대기 중인 팀원이 하나뿐일 때만 짝짓는다")
+    func untypedStopWithSingleCandidate() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
+        let beats = apply(&state, hook.make("SubagentStop", ["agent_id": "x1"]))
+        guard case .reported = beats.first else { Issue.record("\(beats)"); return }
+    }
+
+    @Test("SubagentHandback은 보고 정리 연출이 되고, 메시지 내용은 보여주지 않는다")
+    func handback() throws {
+        let event = try Fixture.event("PreToolUse-SubagentHandback-subagent")
+        guard case .toolStarted(let call) = event.kind else { Issue.record("\(event.kind)"); return }
+        #expect(call.category == .report)
+        #expect(call.subject == nil)
+
+        var h = EngineHarness()
+        h.send(hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
+        let directives = h.send(hook.tool("PreToolUse", "SubagentHandback", id: "hb", input: ["message": "긴 보고 내용"], agent: (id: "r1", type: "code-reviewer")), at: 1)
+        let member = AgentID("member-2")
+        #expect(directives.contains(Directive(member, .pose(.sorting))))
+        #expect(directives.contains(Directive(member, .status(StatusPill(category: .report, text: "보고 정리 중")))))
+        #expect(!directives.bubbles.contains { $0.text.contains("긴 보고") })
+    }
+}
+
+extension JSONValue {
+    func withSession(_ id: String) -> JSONValue {
+        guard var object = objectValue else { return self }
+        object["session_id"] = .string(id)
+        return .object(object)
+    }
+}
