@@ -128,7 +128,7 @@
 
 ### 4.2 훅 스크립트
 
-`~/.claude/hooks/claude-office.sh`에 설치합니다.
+`~/.claude/hooks/claude-office.sh`에 설치합니다. 원본은 `Sources/OfficeServer/Resources/claude-office.sh`이고 앱 번들에 들어 있습니다 (아래는 요약). 테스트용으로 `CLAUDE_OFFICE_ENDPOINT` 환경 변수로 엔드포인트 파일 위치를 바꿀 수 있습니다.
 
 ```sh
 #!/bin/sh
@@ -338,6 +338,14 @@ public enum Directive: Equatable, Sendable {
 - **공동 팀장:** 같은 폴더에서 세션을 여러 개 열면 같은 팀에 "팀장 2", "팀장 3"이 생깁니다.
 - **대사 선택:** 주어진 정보(작업 이름, 직원 이름, 명령)를 가장 많이 쓰는 줄을 우선 고릅니다. 모든 대사는 해요체이며, 테스트가 반말 대사를 잡아냅니다.
 - **효과음 위치:** 직원 대기열 안의 효과음(말풍선 블립, 문 종, 보고 소리)은 그 동작과 함께 울리고, 알림성 소리(노크, 뾰롱, 띠리링)는 바로 울립니다. 승인 요청 노크는 말풍선 블립 없이 노크만 울립니다.
+
+### 6.5 M2 구현 메모
+
+- **훅 서버는 Network.framework 대신 BSD 소켓으로** 만들었습니다 (`OfficeServer`). macOS와 Linux에서 같은 코드가 돌아서, 서버·토큰 검증·훅 스크립트를 클라우드에서도 끝에서 끝까지 테스트할 수 있습니다. `poll` 기반 대기 루프라 멈출 때 깔끔하게 끝납니다.
+- 훅은 연결마다 동시에 받되 **도착 순서대로** 엔진에 넘깁니다. 그래도 훅 스크립트가 curl을 백그라운드로 보내므로 몇 밀리초 차이의 Pre/Post가 뒤바뀔 수 있어, 리듀서가 이미 끝난 `tool_use_id`의 늦은 시작을 무시합니다.
+- 훅 스크립트는 앱 번들(패키지 리소스)에 들어 있고, 설치할 때 `~/.claude/hooks/claude-office.sh`로 복사합니다. 앱이 업데이트되어 스크립트가 바뀌면 "다시 설치" 배너가 뜹니다.
+- 메뉴바 목록은 코어의 `Roster`가 만듭니다 (상태 이름, 승인 대기 모음, 표시 수준 적용). 앱은 그리기만 합니다.
+- 앱 타깃은 Swift 5 언어 모드 + 최소 동시성 검사로 둡니다 (코어 패키지는 Swift 6). 서버 콜백은 `DispatchQueue.main`으로 옮겨 순서를 지킵니다.
 
 ---
 
@@ -703,7 +711,8 @@ claude-office/
 │  │  ├─ Dialogue/     DialogueBook, PrivacyLevel, Redactor(민감 정보 가리기)
 │  │  ├─ Sound/        SoundCue/SoundGroup, SoundRecipe/SoundLibrary/SoundRenderer(합성), SoundPolicy
 │  │  └─ Resources/    dialogue.ko.json
-│  └─ office-sim/      # 시나리오 → 연출 타임라인 출력, 효과음 WAV 렌더링 (M2에서 앱으로 보내는 replay 추가)
+│  ├─ OfficeServer/    # 로컬 훅 서버(BSD 소켓, macOS·Linux), 훅 스크립트(리소스), HookInstaller, EndpointFile
+│  └─ office-sim/      # run(연출 타임라인), sounds(WAV), serve(헤드리스 서버+엔진), replay(앱으로 시나리오 전송)
 ├─ Scenarios/          # office-sim용 시나리오 (JSON Lines)
 ├─ Tests/OfficeCoreTests/
 │  └─ Fixtures/
@@ -711,14 +720,11 @@ claude-office/
 │     └─ captured/     # M0에서 수집한 실제 훅 페이로드 (export 결과)
 ├─ App/                             # macOS 전용 (Xcode 필요)
 │  ├─ project.yml                   # XcodeGen 설정 → ClaudeOffice.xcodeproj 생성
-│  ├─ Sources/
-│  │  ├─ App/          ClaudeOfficeApp, MenuBar, MiniOfficePanel, MainWindow, Settings
-│  │  ├─ Server/       HookServer (Network.framework NWListener)
-│  │  ├─ Scene/        OfficeScene, CharacterNode, BubbleNode, Pathfinder, Furniture
-│  │  └─ System/       Notifier, TerminalFocuser, LoginItem, SoundPlayer
+│  ├─ Sources/         # M2: ClaudeOfficeApp(MenuBarExtra), AppModel, MenuContentView, SettingsView,
+│  │                   #     EventLogView, Support(Palette, TerminalFocuser)
+│  │                   # M3~: OfficeScene, CharacterNode, BubbleNode, MiniOfficePanel, SoundPlayer, Notifier
 │  └─ Resources/       Assets.xcassets(SVG 벡터), Fonts/GowunDodum
 ├─ scripts/
-│  ├─ claude-office.sh             # 훅 스크립트
 │  ├─ capture-hook.sh              # M0: 실제 페이로드를 이벤트마다 파일로 저장
 │  └─ capture.py                   # M0: 수집 훅 설치·제거, 구조 리포트, 픽스처 내보내기
 ├─ docs/
@@ -765,7 +771,7 @@ claude-office/
 |---|---|---|
 | **M0** 준비 ✅ | 수집 도구(`scripts/capture.py`), **실제 페이로드 수집** (사용자 맥, [안내](M0-capture.md)), 저장소 골격 | 2.1.318 실제 리포트·집계로 §4 필드와 서브에이전트 유형 확정 |
 | **M1** 코어 ✅ | 이벤트 모델, 파서, 리듀서, 연출 엔진, 대화 템플릿, 효과음 레시피·합성·정책, 단위 테스트 74개, `office-sim` | `swift test` 통과 (Swift 6.2.3, Linux) |
-| **M2** 앱 뼈대 | 메뉴바 앱, HookServer, 텍스트 목록 UI, 훅 설치기 | 실제 Claude Code 이벤트가 메뉴바 목록에 실시간 표시 |
+| **M2** 앱 뼈대 🛠 | 메뉴바 앱, HookServer, 텍스트 목록 UI, 훅 설치기, 이벤트 로그 창, `office-sim serve`/`replay` | 실제 Claude Code 이벤트가 메뉴바 목록에 실시간 표시 ([빌드 안내](M2-build.md)) |
 | **M3** 사무실 | 맵, 가구, 캐릭터 리그, 길찾기, 자리 활동 | 출근, 업무, 퇴근 흐름이 화면에 보임 |
 | **M4** 표현 | 표정 10종, 제스처 12종, 말풍선 5종, 대화 스크립트, **효과음** | 위임, 승인 대기, 완료 보고 연출과 소리 동작 |
 | **M5** 편의 | 미니 사무실 패널(크기 조절, 표시 단계), 알림, 인스펙터, 설정, 터미널 이동 | 하루 동안 실사용 |

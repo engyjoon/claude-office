@@ -6,14 +6,15 @@ Claude Code 세션과 서브에이전트가 일하는 모습을 아기자기한 
 - 설계서: [docs/DESIGN.md](docs/DESIGN.md)
 - 스타일 미리보기: [docs/preview/index.html](docs/preview/index.html)
 - 훅 페이로드 수집 안내 (M0): [docs/M0-capture.md](docs/M0-capture.md)
+- 맥에서 빌드하고 확인하기 (M2): [docs/M2-build.md](docs/M2-build.md)
 
 ## 진행 상황
 
 | 단계 | 상태 |
 |---|---|
 | M0 준비: 실제 훅 수집 | 완료. Claude Code 2.1.318, 98건 (설계서 §4.1) |
-| **M1 코어** (`OfficeCore`) | **완료**. 훅 파서, 사무실 상태, 연출 엔진, 대사, 효과음 합성, 테스트 74개 |
-| M2 앱 뼈대 (메뉴바, 로컬 서버, 훅 설치) | 예정 |
+| **M1 코어** (`OfficeCore`) | **완료**. 훅 파서, 사무실 상태, 연출 엔진, 대사, 효과음 합성 |
+| M2 앱 뼈대 (메뉴바, 로컬 서버, 훅 설치) | **작성 완료, 맥 첫 빌드 대기**. 서버·설치기·훅 스크립트는 Linux에서 끝에서 끝까지 테스트 |
 | M3~M6 사무실 화면, 표현, 편의 기능, 다듬기 | 예정 |
 
 ## 개발
@@ -36,11 +37,21 @@ make sounds
 
 `make sounds`는 효과음을 `build/sounds/*.wav`로 저장합니다.
 
+맥 앱은 Xcode와 XcodeGen이 필요합니다 ([docs/M2-build.md](docs/M2-build.md)).
+
+```bash
+make run
+```
+
+`make serve`는 맥 앱 없이 훅 서버와 엔진만 실행하고(Linux 포함), `make replay`는 실행 중인 앱이나 serve로 시나리오를 보냅니다.
+
 ## 구조
 
 ```
-Sources/OfficeCore/   순수 Swift 코어 (훅 → 이벤트 → 사무실 상태 → 연출 지시, 효과음)
-Sources/office-sim/   개발용 CLI (연출 타임라인, 효과음 WAV)
+Sources/OfficeCore/   순수 Swift 코어 (훅 → 이벤트 → 사무실 상태 → 연출 지시, 효과음, 메뉴 목록)
+Sources/OfficeServer/ 로컬 훅 서버(BSD 소켓), 훅 스크립트, 훅 설치기 (macOS·Linux)
+Sources/office-sim/   개발용 CLI (연출 타임라인, 효과음 WAV, 헤드리스 serve, replay)
+App/                  macOS 메뉴바 앱 (SwiftUI, XcodeGen project.yml)
 Tests/OfficeCoreTests 단위 테스트와 훅 픽스처
 Scenarios/            office-sim 시나리오
 scripts/              M0 훅 수집 도구

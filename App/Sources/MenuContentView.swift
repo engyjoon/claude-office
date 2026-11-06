@@ -1,0 +1,227 @@
+import AppKit
+import OfficeCore
+import OfficeServer
+import SwiftUI
+
+/// 메뉴바 드롭다운 (설계서 §10, 미리보기의 "사무실 현황")
+struct MenuContentView: View {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    banners
+                    if !model.roster.waiting.isEmpty {
+                        section(title: "승인 대기 \(model.roster.waiting.count)", rows: model.roster.waiting, highlight: true)
+                    }
+                    ForEach(model.roster.teams) { team in
+                        section(title: team.name, rows: team.rows, highlight: false, colorIndex: team.colorIndex)
+                    }
+                    if model.roster.teams.isEmpty {
+                        emptyState
+                    }
+                }
+                .padding(12)
+            }
+            .frame(maxHeight: 420)
+            Divider()
+            footer
+        }
+        .frame(width: 340)
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("사무실 현황").font(.headline)
+            Spacer()
+            Text("팀 \(model.roster.teams.count) · 직원 \(model.roster.agentCount)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var banners: some View {
+        if case .failed(let message) = model.serverState {
+            Banner(systemImage: "exclamationmark.triangle.fill", tint: .red, text: "훅 서버를 시작하지 못했어요. \(message)")
+        }
+        switch model.hookStatus {
+        case .notInstalled:
+            Banner(systemImage: "link.badge.plus", tint: .orange, text: "Claude Code 훅이 설치되어 있지 않아요.") {
+                Button("설치") { model.installHooks() }.disabled(model.isInstalling)
+            }
+        case .scriptMissingOrOutdated:
+            Banner(systemImage: "arrow.triangle.2.circlepath", tint: .orange, text: "훅 스크립트를 업데이트해야 해요.") {
+                Button("다시 설치") { model.installHooks() }.disabled(model.isInstalling)
+            }
+        case .settingsUnreadable(let reason):
+            Banner(systemImage: "doc.badge.ellipsis", tint: .red, text: "~/.claude/settings.json을 읽을 수 없어요. \(reason)")
+        case .installed:
+            EmptyView()
+        }
+    }
+
+    private func section(title: String, rows: [RosterRow], highlight: Bool, colorIndex: Int? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if let colorIndex {
+                    Circle().fill(Palette.team(colorIndex)).frame(width: 7, height: 7)
+                }
+                Text(title)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(rows) { row in
+                RosterRowView(row: row, highlight: highlight)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("아직 출근한 직원이 없어요").font(.subheadline.weight(.semibold))
+            Text("터미널에서 claude를 실행하면 팀장이 출근해요.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("이벤트 로그") {
+                NSApp.activate()
+                openWindow(id: WindowID.eventLog)
+            }
+            Button("설정…") {
+                NSApp.activate()
+                openSettings()
+            }
+            Spacer()
+            Button("종료") { NSApp.terminate(nil) }
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+struct RosterRowView: View {
+    let row: RosterRow
+    let highlight: Bool
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Avatar(appearance: row.appearance, kind: row.kind)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.name).font(.system(size: 13, weight: .semibold))
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(subtitle(now: context.date))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            Spacer(minLength: 4)
+            if highlight, row.term != nil {
+                Button("터미널로") { TerminalFocuser.focus(term: row.term) }
+                    .controlSize(.small)
+            } else {
+                StatusChip(status: row.status)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(highlight ? Palette.attention.opacity(0.35) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { TerminalFocuser.focus(term: row.term) }
+        .help(row.term.map { "더블클릭하면 \($0)을(를) 앞으로 가져와요" } ?? "")
+    }
+
+    private func subtitle(now: Date) -> String {
+        var parts: [String] = []
+        if highlight { parts.append(row.teamName) }
+        if let detail = row.detail { parts.append(detail) }
+        let minutes = Int(now.timeIntervalSince(row.since) / 60)
+        if minutes >= 1, row.status == .waitingForInput || row.status == .idle || row.status == .waitingForPermission {
+            parts.append("\(row.status.label) \(minutes)분")
+        }
+        return parts.isEmpty ? row.status.label : parts.joined(separator: " · ")
+    }
+}
+
+struct StatusChip: View {
+    let status: RosterStatus
+
+    var body: some View {
+        Text(status.label)
+            .font(.system(size: 11))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Palette.chip(status.tone), in: Capsule())
+    }
+}
+
+/// 미리보기의 치비 캐릭터를 단순화한 동그란 얼굴 (M3에서 SpriteKit 캐릭터로 바뀝니다)
+struct Avatar: View {
+    let appearance: Appearance
+    let kind: StaffKind
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Palette.top(appearance.topColor))
+            Circle().fill(Palette.skin(appearance.skinTone)).padding(5)
+            if kind == .lead {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: 0xE0B84A))
+                    .offset(x: 9, y: 9)
+            } else if kind == .temporary {
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: 0x5FA77F))
+                    .offset(x: 0, y: -11)
+            }
+        }
+        .frame(width: 26, height: 26)
+    }
+}
+
+extension Banner where Accessory == EmptyView {
+    init(systemImage: String, tint: Color, text: String) {
+        self.init(systemImage: systemImage, tint: tint, text: text) { EmptyView() }
+    }
+}
+
+struct Banner<Accessory: View>: View {
+    let systemImage: String
+    let tint: Color
+    let text: String
+    let accessory: Accessory
+
+    init(systemImage: String, tint: Color, text: String, @ViewBuilder accessory: () -> Accessory) {
+        self.systemImage = systemImage
+        self.tint = tint
+        self.text = text
+        self.accessory = accessory()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: systemImage).foregroundStyle(tint)
+            Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            accessory.controlSize(.small)
+        }
+        .padding(8)
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+}

@@ -5,3 +5,4 @@ __pycache__/
 *.xcodeproj/
 DerivedData/
 build/
+App/Generated/

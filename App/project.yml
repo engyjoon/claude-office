@@ -1,0 +1,61 @@
+# Claude Office macOS 앱 프로젝트 (XcodeGen)
+#   brew install xcodegen
+#   cd App && xcodegen generate   →  ClaudeOffice.xcodeproj 생성 (Git에는 올리지 않음)
+name: ClaudeOffice
+options:
+  bundleIdPrefix: com.engyjoon
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  ClaudeOfficeKit:
+    path: ..
+
+targets:
+  ClaudeOffice:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: ClaudeOfficeKit
+        product: OfficeCore
+      - package: ClaudeOfficeKit
+        product: OfficeServer
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleName: Claude Office
+        CFBundleDisplayName: Claude Office
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Claude Office"
+    settings:
+      base:
+        PRODUCT_NAME: Claude Office
+        PRODUCT_BUNDLE_IDENTIFIER: com.engyjoon.claudeoffice
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # 앱 층은 Swift 5 모드로 두어 처음 빌드할 때의 동시성 오류를 줄입니다 (코어 패키지는 Swift 6)
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        # 연회비 없이 본인 맥에서 실행: 로컬 서명(ad-hoc). 샌드박스 없음 (~/.claude를 고쳐야 하므로)
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+
+schemes:
+  ClaudeOffice:
+    build:
+      targets:
+        ClaudeOffice: all
+    run:
+      config: Debug
+    archive:
+      config: Release

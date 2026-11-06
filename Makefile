@@ -1,12 +1,17 @@
 # Claude Office 개발 명령
 SWIFT ?= swift
+APP_NAME := Claude Office.app
+DERIVED := build/DerivedData
+APP_PATH := $(DERIVED)/Build/Products/Release/$(APP_NAME)
 
-.PHONY: build test demo sounds clean
+.PHONY: build test demo sounds serve replay bootstrap app run install uninstall clean
+
+## ---- 코어 (macOS·Linux) ----
 
 build:
 	$(SWIFT) build
 
-## OfficeCore 단위 테스트 (Linux와 macOS 모두)
+## OfficeCore·OfficeServer 단위 테스트
 test:
 	$(SWIFT) test
 
@@ -18,5 +23,38 @@ demo:
 sounds:
 	$(SWIFT) run -q office-sim sounds build/sounds
 
+## 맥 앱 없이 훅 서버+엔진만 실행 (직원 목록만 출력)
+serve:
+	$(SWIFT) run -q office-sim serve --roster-only
+
+## 실행 중인 앱(또는 serve)으로 관찰 시나리오를 2배속 전송
+replay:
+	$(SWIFT) run -q office-sim replay Scenarios/m0-observed.jsonl --speed 2
+
+## ---- macOS 앱 (Xcode 필요) ----
+
+## XcodeGen으로 App/ClaudeOffice.xcodeproj 생성
+bootstrap:
+	@command -v xcodegen >/dev/null || { echo "xcodegen이 없습니다: brew install xcodegen"; exit 1; }
+	cd App && xcodegen generate
+
+## Release 빌드 (로컬 서명)
+app: bootstrap
+	xcodebuild -project App/ClaudeOffice.xcodeproj -scheme ClaudeOffice -configuration Release \
+		-derivedDataPath $(DERIVED) build | tail -n 20
+
+## 빌드한 앱 실행
+run: app
+	open "$(APP_PATH)"
+
+## /Applications에 복사
+install: app
+	rm -rf "/Applications/$(APP_NAME)"
+	cp -R "$(APP_PATH)" /Applications/
+	@echo "/Applications/$(APP_NAME) 에 설치했습니다."
+
+uninstall:
+	rm -rf "/Applications/$(APP_NAME)"
+
 clean:
-	rm -rf .build build
+	rm -rf .build build App/ClaudeOffice.xcodeproj App/Generated
