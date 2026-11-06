@@ -1,0 +1,640 @@
+import Foundation
+
+/// 연출 타이밍 설정 (설계서 §6.3)
+public struct ChoreographyConfig: Hashable, Sendable {
+    /// 한 활동을 최소로 보여주는 시간(초)
+    public var dwell: Double = 2.5
+    /// 이 시간 안에 읽기가 이만큼 이어지면 책장으로 갑니다
+    public var readBurstCount = 5
+    public var readBurstWindow: Double = 10
+    /// 셸 명령이 이보다 오래 걸리면 서버랙으로 갑니다
+    public var shellMoveDelay: Double = 2
+    /// 다른 구역에서 일이 끝난 뒤 자리로 돌아가기 전에 머무는 시간
+    public var linger: Double = 4
+    /// 입력 대기가 이만큼 이어지면 휴게실, 더 길어지면 자리에서 꾸벅꾸벅
+    public var loungeAfter: Double = 60
+    public var napAfter: Double = 600
+    /// 승인 요청 노크를 다시 울리는 간격과 최대 횟수(첫 노크 포함)
+    public var knockInterval: Double = 30
+    public var maxKnocks = 3
+    public var chatterInterval: Double = 60
+    /// 보고하러 오는 팀원을 팀장이 기다리는 최대 시간
+    public var reportAwaitTimeout: Double = 8
+
+    public init() {}
+}
+
+/// 리듀서의 비트를 씬 지시로 바꾸는 연출 감독.
+///
+/// - 깜빡임 방지: 활동은 `dwell`만큼 유지하고, 그 사이 들어온 활동은 최신 것만 남겼다가 `tick`에서 반영합니다.
+///   다만 더 "바쁜" 활동(대기 → 생각 → 작업)으로 바뀔 때는 바로 반영합니다.
+/// - 자리 이동은 계속될 근거가 있을 때만 합니다 (읽기 연속, 오래 걸리는 셸 명령).
+/// - 승인 대기는 무엇보다 우선합니다.
+public struct Choreographer: Sendable {
+    public var config: ChoreographyConfig
+    public var privacy: PrivacyLevel
+    private let book: DialogueBook
+    private var rng: SeededRandom
+    private var presences: [AgentID: Presence] = [:]
+    private var lastChatter: Date?
+
+    enum Shown: Equatable, Sendable {
+        case idle, thinking
+        case working(ToolCall)
+
+        var rank: Int {
+            switch self {
+            case .idle: 0
+            case .thinking: 1
+            case .working: 2
+            }
+        }
+    }
+
+    /// 서버랙으로 갈지 판단하려고 지켜보는 셸 명령
+    struct ShellWatch: Sendable {
+        var callID: String?
+        var since: Date
+    }
+
+    struct Presence: Sendable {
+        var agent: Agent
+        var spot: Spot
+        var seated = false
+        var shown: Shown = .idle
+        var shownAt: Date
+        var pending: Shown?
+        var pill: StatusPill?
+        var emote: Emote?
+        var readStarts: [Date] = []
+        var shellWatch: ShellWatch?
+        var returnAt: Date?
+        var waiting = false
+        var knocks = 0
+        var nextKnockAt: Date?
+        var idleSince: Date?
+        /// 0: 평소, 1: 휴게실, 2: 낮잠
+        var rest = 0
+    }
+
+    public init(privacy: PrivacyLevel = .detailed, config: ChoreographyConfig = .init(), book: DialogueBook = .korean, seed: UInt64) {
+        self.privacy = privacy
+        self.config = config
+        self.book = book
+        self.rng = SeededRandom(seed: seed)
+    }
+
+    /// 지금 화면에 있는 직원의 위치 (테스트와 인스펙터용)
+    public func spot(of id: AgentID) -> Spot? { presences[id]?.spot }
+    public func isPresent(_ id: AgentID) -> Bool { presences[id] != nil }
+
+    // MARK: - 비트 처리
+
+    public mutating func handle(_ beats: [Beat], at now: Date) -> [Directive] {
+        var out: [Directive] = []
+        for beat in beats {
+            handle(beat, at: now, into: &out)
+        }
+        return out
+    }
+
+    private mutating func handle(_ beat: Beat, at now: Date, into out: inout [Directive]) {
+        switch beat {
+        case .teamOpened(let team):
+            out.append(Directive(nil, .openTeam(team)))
+
+        case .arrived(let agent):
+            enter(agent, at: now, into: &out)
+            if agent.role == .lead {
+                out.append(Directive(agent.id, .gesture(.wave)))
+                out.append(Directive(agent.id, .express(.happy)))
+                say(agent.id, "arrive.lead", into: &out)
+            }
+            modify(agent.id) {
+                $0.shown = .idle
+                $0.shownAt = now
+                $0.idleSince = now
+            }
+
+        case .promptArrived(let agent):
+            touch(agent)
+            resolveWaiting(agent.id, into: &out)
+            wake(agent.id, into: &out)
+            out.append(Directive(nil, .effect(.paperPlane(to: agent.id))))
+            out.append(Directive(agent.id, .express(.surprised)))
+            out.append(Directive(agent.id, .wait(0.6)))
+            setEmote(agent.id, .bulb, into: &out)
+            say(agent.id, "prompt.thinking", kind: .thought, into: &out)
+            show(agent.id, .thinking, at: now, into: &out)
+            modify(agent.id) { $0.idleSince = nil }
+
+        case .working(let agent, let call):
+            touch(agent)
+            offer(agent.id, .working(call), at: now, into: &out)
+
+        case .toolEnded(let agent, let call, let outcome):
+            touch(agent)
+            if let watch = presences[agent.id]?.shellWatch, watch.callID == call.id {
+                modify(agent.id) { $0.shellWatch = nil }
+            }
+            if outcome.isFailure {
+                resolveWaiting(agent.id, into: &out)
+                let repeated = agent.consecutiveErrors >= 3
+                out.append(Directive(agent.id, .express(repeated ? .sad : .troubled)))
+                out.append(Directive(agent.id, .gesture(.scratchHead)))
+                setEmote(agent.id, .sweat, into: &out)
+                out.append(Directive(agent.id, .sound(.error)))
+                say(agent.id, repeated ? "error.repeated" : "error.tool", into: &out)
+                modify(agent.id) {
+                    $0.shown = .thinking
+                    $0.shownAt = now
+                    $0.pending = agent.runningTools.last.map(Shown.working)
+                }
+            } else if let next = agent.runningTools.last {
+                offer(agent.id, .working(next), at: now, into: &out)
+            } else {
+                offer(agent.id, .thinking, at: now, into: &out)
+            }
+
+        case .delegated(let lead, let member):
+            touch(lead)
+            resolveWaiting(lead.id, into: &out)
+            wake(lead.id, into: &out)
+            // 위임은 팀장 자리에서 합니다 (팀원이 책장이나 서버랙으로 찾아가지 않도록)
+            move(lead.id, to: seatSpot(lead), into: &out)
+            modify(lead.id) { $0.returnAt = nil }
+            out.append(Directive(lead.id, .gesture(.beckon)))
+            out.append(Directive(lead.id, .express(.happy)))
+            var variables = ["member": member.profile.displayName]
+            if privacy == .detailed, let task = member.task {
+                variables["task"] = ToolCatalog.truncate(task, 16)
+            }
+            say(lead.id, "delegate.lead", variables, into: &out)
+            modify(lead.id) {
+                $0.shown = .thinking
+                $0.shownAt = now
+            }
+
+            enter(member, at: now, besideFirst: lead.id, into: &out)
+            modify(member.id) {
+                $0.shown = .thinking
+                $0.shownAt = now
+            }
+
+        case .memberAppeared(let member):
+            enter(member, at: now, into: &out)
+            modify(member.id) {
+                $0.shown = .thinking
+                $0.shownAt = now
+            }
+
+        case .permissionAsked(let agent, let call):
+            touch(agent)
+            guard var presence = presences[agent.id] else { return }
+            out.append(Directive(agent.id, .clearQueue))
+            if presence.seated {
+                out.append(Directive(agent.id, .stand))
+                presence.seated = false
+            }
+            presence.waiting = true
+            presence.knocks = 1
+            presence.nextKnockAt = now.addingTimeInterval(config.knockInterval)
+            presence.pending = nil
+            presence.rest = 0
+            presences[agent.id] = presence
+            out.append(Directive(agent.id, .pose(.raisingHand)))
+            out.append(Directive(agent.id, .express(.eager)))
+            setEmote(agent.id, .exclamation, into: &out)
+            out.append(Directive(nil, .sound(.knock)))
+            let (key, variables) = permissionLine(for: call)
+            say(agent.id, key, variables, kind: .shout, persistent: true, silent: true, into: &out)
+
+        case .permissionDenied(let agent, _):
+            touch(agent)
+            resolveWaiting(agent.id, into: &out)
+            out.append(Directive(agent.id, .express(.sad)))
+            say(agent.id, "permission.denied", into: &out)
+            modify(agent.id) {
+                $0.shown = .thinking
+                $0.shownAt = now
+            }
+
+        case .waitingForInput(let agent):
+            touch(agent)
+            out.append(Directive(nil, .sound(.inputWaiting)))
+            if presences[agent.id]?.rest == 0 {
+                setEmote(agent.id, .question, into: &out)
+            }
+
+        case .turnEnded(let agent, let failed):
+            touch(agent)
+            resolveWaiting(agent.id, into: &out)
+            setPill(agent.id, nil, into: &out)
+            out.append(Directive(agent.id, .prop(nil)))
+            move(agent.id, to: seatSpot(agent), into: &out)
+            out.append(Directive(agent.id, .pose(.sitting)))
+            if failed {
+                out.append(Directive(agent.id, .express(.sad)))
+                setEmote(agent.id, .sweat, into: &out)
+                out.append(Directive(nil, .sound(.error)))
+                say(agent.id, "turn.failed", into: &out)
+            } else {
+                out.append(Directive(agent.id, .gesture(.stretch)))
+                out.append(Directive(agent.id, .express(.proud)))
+                setEmote(agent.id, .sparkle, into: &out)
+                out.append(Directive(nil, .sound(.turnComplete)))
+                say(agent.id, "turn.done", into: &out)
+                out.append(Directive(agent.id, .wait(3)))
+                setEmote(agent.id, nil, into: &out)
+                out.append(Directive(agent.id, .express(.neutral)))
+            }
+            modify(agent.id) {
+                $0.shown = .idle
+                $0.shownAt = now
+                $0.pending = nil
+                $0.idleSince = now
+                $0.rest = 0
+                $0.returnAt = nil
+            }
+
+        case .compacting(let agent):
+            touch(agent)
+            out.append(Directive(agent.id, .pose(.sorting)))
+            out.append(Directive(agent.id, .prop(.documents)))
+            out.append(Directive(agent.id, .express(.focus)))
+            say(agent.id, "compact", into: &out)
+            modify(agent.id) {
+                $0.shown = .thinking
+                $0.shownAt = now
+            }
+
+        case .reported(let member, let lead):
+            guard presences[member.id] != nil else { return }
+            touch(member)
+            out.append(Directive(member.id, .clearQueue))
+            resolveWaiting(member.id, into: &out)
+            setPill(member.id, nil, into: &out)
+            out.append(Directive(member.id, .prop(nil)))
+            if let lead, presences[lead.id] != nil {
+                let cue = "report:\(member.id.raw)"
+                move(member.id, to: .beside(lead.id), into: &out)
+                out.append(Directive(member.id, .signal(cue)))
+                out.append(Directive(member.id, .gesture(.highFive)))
+                out.append(Directive(member.id, .express(.proud)))
+                out.append(Directive(member.id, .sound(.memberReport)))
+                say(member.id, "report.member", silent: true, into: &out)
+                out.append(Directive(member.id, .wait(1.2)))
+                out.append(Directive(member.id, .gesture(.wave)))
+
+                out.append(Directive(lead.id, .await(cue, timeout: config.reportAwaitTimeout)))
+                out.append(Directive(lead.id, .gesture(.highFive)))
+                out.append(Directive(lead.id, .express(.proud)))
+                setEmote(lead.id, .sparkle, into: &out)
+                say(lead.id, "report.lead", into: &out)
+                out.append(Directive(lead.id, .wait(2.5)))
+                setEmote(lead.id, nil, into: &out)
+                out.append(Directive(lead.id, .express(.neutral)))
+            }
+            leave(member.id, into: &out)
+
+        case .left(let agent):
+            guard presences[agent.id] != nil else { return }
+            touch(agent)
+            out.append(Directive(agent.id, .clearQueue))
+            resolveWaiting(agent.id, into: &out)
+            setPill(agent.id, nil, into: &out)
+            setEmote(agent.id, nil, into: &out)
+            out.append(Directive(agent.id, .prop(nil)))
+            if agent.role == .lead {
+                say(agent.id, "leave.lead", into: &out)
+            }
+            out.append(Directive(agent.id, .gesture(.wave)))
+            leave(agent.id, into: &out)
+        }
+    }
+
+    // MARK: - 시간 경과
+
+    public mutating func tick(at now: Date) -> [Directive] {
+        var out: [Directive] = []
+        for id in presences.keys.sorted() {
+            tickPresence(id, at: now, into: &out)
+        }
+        tickChatter(at: now, into: &out)
+        return out
+    }
+
+    private mutating func tickPresence(_ id: AgentID, at now: Date, into out: inout [Directive]) {
+        guard let presence = presences[id] else { return }
+
+        if let pending = presence.pending, !presence.waiting, now.timeIntervalSince(presence.shownAt) >= config.dwell {
+            show(id, pending, at: now, into: &out)
+        }
+
+        if let watch = presences[id]?.shellWatch, now.timeIntervalSince(watch.since) >= config.shellMoveDelay {
+            modify(id) { $0.shellWatch = nil }
+            if case .working(let call) = presences[id]!.shown, call.category == .shell, call.id == watch.callID,
+                !presences[id]!.waiting
+            {
+                move(id, to: .serverRack, into: &out)
+                out.append(Directive(id, .pose(.thinking)))
+                out.append(Directive(id, .express(.neutral)))
+                say(id, "shell.wait", kind: .thought, into: &out)
+            }
+        }
+
+        if let returnAt = presences[id]?.returnAt, now >= returnAt {
+            modify(id) { $0.returnAt = nil }
+            let current = presences[id]!
+            if !current.waiting, current.rest == 0 {
+                switch current.shown {
+                case .idle, .thinking:
+                    move(id, to: seatSpot(current.agent), into: &out)
+                    out.append(Directive(id, .pose(current.shown == .idle ? .sitting : .thinking)))
+                    out.append(Directive(id, .prop(nil)))
+                case .working:
+                    break
+                }
+            }
+        }
+
+        if let current = presences[id], current.waiting, let next = current.nextKnockAt, now >= next {
+            if current.knocks < config.maxKnocks {
+                out.append(Directive(nil, .sound(.knock)))
+                let following = next.addingTimeInterval(config.knockInterval)
+                modify(id) {
+                    $0.knocks += 1
+                    $0.nextKnockAt = following
+                }
+            } else {
+                modify(id) { $0.nextKnockAt = nil }
+            }
+        }
+
+        if let current = presences[id], current.agent.role == .lead, current.shown == .idle, !current.waiting,
+            let since = current.idleSince
+        {
+            let elapsed = now.timeIntervalSince(since)
+            if elapsed >= config.napAfter, current.rest < 2 {
+                move(id, to: seatSpot(current.agent), into: &out)
+                out.append(Directive(id, .prop(nil)))
+                out.append(Directive(id, .pose(.sleeping)))
+                out.append(Directive(id, .express(.sleepy)))
+                setEmote(id, .zzz, into: &out)
+                modify(id) { $0.rest = 2 }
+            } else if elapsed >= config.loungeAfter, current.rest == 0 {
+                move(id, to: .lounge, into: &out)
+                out.append(Directive(id, .pose(.holdingCup)))
+                out.append(Directive(id, .prop(.cup)))
+                out.append(Directive(id, .express(.happy)))
+                setEmote(id, .note, into: &out)
+                modify(id) { $0.rest = 1 }
+            }
+        }
+    }
+
+    private mutating func tickChatter(at now: Date, into out: inout [Directive]) {
+        let resting = presences.values.filter { $0.spot == .lounge && $0.rest == 1 }.map(\.agent.id).sorted()
+        guard resting.count >= 2 else { return }
+        if let last = lastChatter, now.timeIntervalSince(last) < config.chatterInterval { return }
+        lastChatter = now
+        if let speaker = resting.randomElement(using: &rng) {
+            say(speaker, "idle.chat", kind: .whisper, into: &out)
+        }
+    }
+
+    // MARK: - 활동 반영
+
+    /// 깜빡임 방지 규칙을 거쳐 활동을 반영합니다.
+    private mutating func offer(_ id: AgentID, _ target: Shown, at now: Date, into out: inout [Directive]) {
+        guard let presence = presences[id] else { return }
+        if case .working(let call) = target, call.category == .read {
+            // 읽기 횟수는 화면에 반영되는지와 상관없이 이벤트가 올 때마다 셉니다
+            let window = config.readBurstWindow
+            modify(id) { $0.readStarts = $0.readStarts.filter { now.timeIntervalSince($0) < window } + [now] }
+        }
+        if presence.waiting {
+            // 승인 대기 중 다른 활동이 왔다 = 승인됨
+            resolveWaiting(id, into: &out)
+            show(id, target, at: now, into: &out)
+            return
+        }
+        if target == presence.shown { return }
+        let elapsed = now.timeIntervalSince(presence.shownAt)
+        if target.rank > presence.shown.rank || elapsed >= config.dwell {
+            show(id, target, at: now, into: &out)
+        } else {
+            modify(id) { $0.pending = target }
+        }
+    }
+
+    private mutating func show(_ id: AgentID, _ target: Shown, at now: Date, into out: inout [Directive]) {
+        guard let previous = presences[id] else { return }
+        modify(id) {
+            $0.pending = nil
+            $0.shown = target
+            $0.shownAt = now
+        }
+
+        switch target {
+        case .working(let call):
+            wake(id, into: &out)
+            var zone = seatSpot(previous.agent)
+            var pose = Pose.typing
+            var prop: Prop?
+            switch call.category {
+            case .read:
+                let recent = previous.readStarts.filter { now.timeIntervalSince($0) < config.readBurstWindow }
+                // 이미 책장에 있으면 읽기가 이어지는 동안 머뭅니다
+                if recent.count >= config.readBurstCount || previous.spot == .bookshelf {
+                    zone = .bookshelf
+                }
+                pose = .reading
+                prop = .book
+            case .web:
+                zone = .research
+                pose = .reading
+                prop = .book
+            case .plan:
+                zone = .whiteboard
+                pose = .writingBoard
+                prop = .marker
+            case .shell:
+                modify(id) { $0.shellWatch = ShellWatch(callID: call.id, since: now) }
+            case .write, .delegate, .mcp, .other:
+                break
+            }
+            if previous.spot == .serverRack, call.category == .shell {
+                zone = .serverRack  // 서버랙에서 명령이 이어지면 그대로 머뭅니다
+            }
+
+            var sameCategory = false
+            if case .working(let earlier) = previous.shown, earlier.category == call.category { sameCategory = true }
+            let moved = previous.spot != zone
+            move(id, to: zone, into: &out)
+            if moved || !sameCategory {
+                out.append(Directive(id, .pose(zone == .serverRack ? .thinking : pose)))
+                out.append(Directive(id, .prop(zone == .serverRack ? nil : prop)))
+                out.append(Directive(id, .express(.focus)))
+            }
+            setPill(id, pill(for: call), into: &out)
+            modify(id) {
+                $0.returnAt = nil
+                $0.idleSince = nil
+            }
+
+        case .thinking:
+            setPill(id, nil, into: &out)
+            if previous.shown != .thinking {
+                out.append(Directive(id, .pose(.thinking)))
+                out.append(Directive(id, .prop(nil)))
+                out.append(Directive(id, .express(.think)))
+            }
+            if !(presences[id]?.spot.isSeat ?? true) {
+                let returnAt = now.addingTimeInterval(config.linger)
+                modify(id) { $0.returnAt = returnAt }
+            }
+
+        case .idle:
+            setPill(id, nil, into: &out)
+            out.append(Directive(id, .prop(nil)))
+            out.append(Directive(id, .pose(presences[id]?.seated == true ? .sitting : .standing)))
+            let returnAt = now.addingTimeInterval(config.linger)
+            modify(id) {
+                $0.idleSince = now
+                if !$0.spot.isSeat { $0.returnAt = returnAt }
+            }
+        }
+    }
+
+    // MARK: - 도우미
+
+    private mutating func enter(_ agent: Agent, at now: Date, besideFirst companion: AgentID? = nil, into out: inout [Directive]) {
+        presences[agent.id] = Presence(agent: agent, spot: .door, shownAt: now)
+        out.append(Directive(agent.id, .spawn(agent, at: .door)))
+        out.append(Directive(agent.id, .sound(.door)))
+        if let companion, presences[companion] != nil {
+            move(agent.id, to: .beside(companion), into: &out)
+            out.append(Directive(agent.id, .gesture(.nod)))
+            out.append(Directive(agent.id, .express(.eager)))
+            say(agent.id, "delegate.member", into: &out)
+        }
+        move(agent.id, to: seatSpot(agent), into: &out)
+        out.append(Directive(agent.id, .express(.neutral)))
+    }
+
+    private mutating func leave(_ id: AgentID, into out: inout [Directive]) {
+        move(id, to: .door, into: &out)
+        out.append(Directive(id, .sound(.door)))
+        out.append(Directive(id, .despawn))
+        presences[id] = nil
+    }
+
+    private mutating func move(_ id: AgentID, to spot: Spot, into out: inout [Directive]) {
+        guard var presence = presences[id], presence.spot != spot else { return }
+        if presence.seated {
+            out.append(Directive(id, .stand))
+            presence.seated = false
+        }
+        out.append(Directive(id, .walk(to: spot)))
+        presence.spot = spot
+        if spot.isSeat {
+            out.append(Directive(id, .sit))
+            presence.seated = true
+        }
+        presences[id] = presence
+    }
+
+    /// 휴게실이나 낮잠에서 깨워 자리로 돌려보냅니다.
+    private mutating func wake(_ id: AgentID, into out: inout [Directive]) {
+        guard let presence = presences[id], presence.rest > 0 else { return }
+        setEmote(id, nil, into: &out)
+        out.append(Directive(id, .prop(nil)))
+        out.append(Directive(id, .express(.surprised)))
+        move(id, to: seatSpot(presence.agent), into: &out)
+        modify(id) { $0.rest = 0 }
+    }
+
+    private mutating func resolveWaiting(_ id: AgentID, into out: inout [Directive]) {
+        guard let presence = presences[id], presence.waiting else { return }
+        out.append(Directive(id, .dismissBubble))
+        setEmote(id, nil, into: &out)
+        if presence.spot.isSeat {
+            out.append(Directive(id, .sit))
+        }
+        modify(id) {
+            $0.waiting = false
+            $0.knocks = 0
+            $0.nextKnockAt = nil
+            $0.seated = $0.spot.isSeat
+        }
+    }
+
+    private mutating func say(
+        _ id: AgentID, _ key: String, _ variables: [String: String] = [:], kind: BubbleKind = .speech,
+        persistent: Bool = false, silent: Bool = false, into out: inout [Directive]
+    ) {
+        guard let text = book.line(key, variables, using: &rng) else { return }
+        if !silent {
+            let voice = presences[id]?.agent.profile.appearance.voice ?? 0
+            let cue: SoundCue = kind == .whisper ? .chatter : .bubble(voice: voice, syllables: min(4, max(2, text.count / 5)))
+            out.append(Directive(id, .sound(cue)))
+        }
+        let bubble = persistent ? Bubble(kind: kind, text: text, duration: nil) : .timed(kind, text)
+        out.append(Directive(id, .say(bubble)))
+    }
+
+    private mutating func setEmote(_ id: AgentID, _ emote: Emote?, into out: inout [Directive]) {
+        guard presences[id]?.emote != emote else { return }
+        out.append(Directive(id, .emote(emote)))
+        modify(id) { $0.emote = emote }
+    }
+
+    private mutating func setPill(_ id: AgentID, _ pill: StatusPill?, into out: inout [Directive]) {
+        guard presences[id] != nil, presences[id]?.pill != pill else { return }
+        out.append(Directive(id, .status(pill)))
+        modify(id) { $0.pill = pill }
+    }
+
+    private func pill(for call: ToolCall) -> StatusPill? {
+        switch privacy {
+        case .detailed:
+            let text: String
+            if call.category == .mcp {
+                text = "MCP · \(call.subject ?? call.name)"
+            } else if let subject = call.subject {
+                text = "\(call.name) · \(subject)"
+            } else {
+                text = call.name
+            }
+            return StatusPill(category: call.category, text: text)
+        case .summary:
+            return StatusPill(category: call.category, text: call.category.summaryLabel)
+        case .hidden:
+            return nil
+        }
+    }
+
+    private func permissionLine(for call: ToolCall?) -> (String, [String: String]) {
+        guard privacy == .detailed, let call else { return ("permission.generic", [:]) }
+        if call.category == .shell, let subject = call.subject {
+            return ("permission.shell", ["subject": ToolCatalog.truncate(subject, 18)])
+        }
+        return ("permission.tool", ["tool": call.name])
+    }
+
+    private func seatSpot(_ agent: Agent) -> Spot {
+        .seat(agent.teamID, agent.seat)
+    }
+
+    private mutating func touch(_ agent: Agent) {
+        if presences[agent.id] != nil {
+            presences[agent.id]!.agent = agent
+        }
+    }
+
+    private mutating func modify(_ id: AgentID, _ body: (inout Presence) -> Void) {
+        guard presences[id] != nil else { return }
+        body(&presences[id]!)
+    }
+}

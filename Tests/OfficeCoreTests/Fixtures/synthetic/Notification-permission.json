@@ -1,0 +1,16 @@
+{
+  "_synthetic": "Claude Code 2.1.318 훅 스키마를 기준으로 만든 합성 픽스처입니다. 실제 수집본은 ../captured/ 에 둡니다.",
+  "captured_at": "2026-11-06T09:00:00+0900",
+  "term_program": "iTerm.app",
+  "payload": {
+    "session_id": "s-demo",
+    "transcript_path": "/Users/demo/.claude/projects/-Users-demo-work-a-sdn-portal/s-demo.jsonl",
+    "cwd": "/Users/demo/work/a-sdn-portal",
+    "permission_mode": "default",
+    "prompt_id": "p-1",
+    "hook_event_name": "Notification",
+    "message": "Claude needs your permission to use Bash",
+    "title": "Claude Code",
+    "notification_type": "permission_prompt"
+  }
+}

@@ -3,7 +3,7 @@
 > Claude Code 에이전트들이 일하는 모습을 보여주는 macOS 네이티브 가상 사무실 앱
 >
 > - 앱 이름: **Claude Office** (번들 ID `com.engyjoon.claudeoffice`)
-> - 문서 상태: 구현 전 설계 확정본. v0.1 대비 변경: 앱 이름, 효과음(§11), 미니 사무실 크기 조절(§10.1), Claude Code 2.1.318 훅 확인 결과(§4)
+> - 문서 상태: v0.3. **M1(코어) 구현 완료** — 구현하면서 바뀐 점은 §6.4에 정리했습니다. v0.2에서 바뀐 점: 앱 이름, 효과음(§11), 미니 사무실 크기 조절(§10.1), Claude Code 2.1.318 훅 확인 결과(§4)
 > - 스타일 미리보기: [`docs/preview/index.html`](preview/index.html)
 > - 훅 수집 안내: [`docs/M0-capture.md`](M0-capture.md)
 
@@ -96,7 +96,7 @@
 | `SessionStart` | `source` (startup / resume / clear / compact) | 팀장 출근, 팀 구역 배정 |
 | `SessionEnd` | `reason` | 팀장 퇴근 |
 | `UserPromptSubmit` | `prompt` | 새 업무 도착 연출 (프롬프트 내용은 기본적으로 표시하지 않음) |
-| `PreToolUse` | `tool_name`, `tool_input`, `tool_use_id` | 활동 시작. `Task`/`Agent` 툴이면 서브에이전트 위임 |
+| `PreToolUse` | `tool_name`, `tool_input`, `tool_use_id` | 활동 시작. `Agent` 툴(구버전 이름 `Task`)이면 서브에이전트 위임 |
 | `PostToolUse` | `tool_name`, `tool_response`, `tool_use_id` | 활동 종료 (성공) |
 | `PostToolUseFailure` (지원 버전만) | `tool_name`, 오류 정보 | 툴 오류 연출. 없으면 `tool_response`로 판단 |
 | `Notification` | `message`, (버전에 따라) `notification_type` | 권한 승인 대기, 입력 대기 |
@@ -155,7 +155,7 @@ exit 0
 }
 ```
 
-설치기는 `claude --version`을 확인해서 2.1.318 이상이면 `SubagentStart`, `PermissionRequest`, `PostToolUseFailure`를 함께 등록합니다. 그보다 낮으면 위 기본 이벤트만 등록합니다. 지원하지 않는 이벤트 이름이 설정 검증 오류를 일으킬 수 있기 때문입니다.
+설치기는 `claude --version`을 확인해서 2.1.318 이상이면 `SubagentStart`, `PermissionRequest`, `PermissionDenied`, `PostToolUseFailure`, `StopFailure`를 함께 등록합니다. 그보다 낮으면 위 기본 이벤트만 등록합니다. 지원하지 않는 이벤트 이름이 설정 검증 오류를 일으킬 수 있기 때문입니다.
 
 **설치기 동작 규칙**
 
@@ -314,6 +314,18 @@ public enum Directive: Equatable, Sendable {
 4. **이동 취소:** 목적지에 도착하기 전에 활동이 끝나면 그 자리에서 돌아섭니다.
 5. **동시 이동 제한:** 한 팀에서 동시에 걷는 캐릭터는 최대 2명입니다.
 
+### 6.4 M1 구현 메모 (설계에서 구체화하거나 바뀐 점)
+
+- **두 단계 구조:** `OfficeState`(리듀서)가 이벤트를 받아 의미 단위의 `Beat`(출근, 위임, 보고, 승인 요청 …)를 내고, `Choreographer`가 `Beat`를 `Directive`로 바꿉니다. 앱은 `OfficeEngine` 하나만 들고 `handle(hookPayload:)`와 `tick(at:)`(0.25초 주기)만 부르면 됩니다.
+- **직원별 대기열:** 씬은 직원마다 지시를 순서대로 실행합니다. `walk`와 `wait`는 다음 지시를 막고, 두 직원의 타이밍은 `signal`/`await`로 맞춥니다 (보고하러 온 팀원이 도착한 뒤 팀장이 하이파이브). 승인 요청·보고·퇴근처럼 급한 연출은 `clearQueue`로 시작합니다. `agent`가 없는 지시(팀 열기, 종이비행기, 알림성 효과음)는 바로 실행합니다.
+- **유지 시간의 예외:** 더 바쁜 활동으로 바뀔 때(대기 → 생각 → 작업)는 2.5초를 기다리지 않고 바로 보여줍니다. 같은 등급끼리나 덜 바쁜 쪽으로 바뀔 때만 기다리고, 그 사이 들어온 활동은 최신 것만 남깁니다.
+- **읽기 횟수:** 책장 이동 판단(10초 안에 5회)은 화면 반영 여부와 상관없이 이벤트가 올 때마다 셉니다. 책장에 이미 있으면 읽기가 이어지는 동안 머뭅니다.
+- **위임은 팀장 자리에서:** 팀장이 책장이나 서버랙에 있을 때 위임하면 먼저 자리로 돌아오고, 팀원은 팀장 자리로 찾아옵니다.
+- **서브에이전트 연결:** `Agent` 툴의 PreToolUse로 팀원을 먼저 만들고, `SubagentStart`의 `agent_id`를 같은 종류의 대기 중인 팀원에 묶습니다. 백그라운드 위임(`run_in_background`)과 `agent_id`가 묶인 팀원은 `PostToolUse(Agent)`가 먼저 와도 `SubagentStop`까지 남습니다.
+- **공동 팀장:** 같은 폴더에서 세션을 여러 개 열면 같은 팀에 "팀장 2", "팀장 3"이 생깁니다.
+- **대사 선택:** 주어진 정보(작업 이름, 직원 이름, 명령)를 가장 많이 쓰는 줄을 우선 고릅니다. 모든 대사는 해요체이며, 테스트가 반말 대사를 잡아냅니다.
+- **효과음 위치:** 직원 대기열 안의 효과음(말풍선 블립, 문 종, 보고 소리)은 그 동작과 함께 울리고, 알림성 소리(노크, 뾰롱, 띠리링)는 바로 울립니다. 승인 요청 노크는 말풍선 블립 없이 노크만 울립니다.
+
 ---
 
 ## 7. 말풍선과 대화 시스템
@@ -348,7 +360,7 @@ public enum Directive: Equatable, Sendable {
   "report.lead":     ["고마워요!", "역시 최고예요", "완벽해요 👍"],
   "permission":      ["{subject} 실행해도 될까요?", "이거 해도 돼요?", "승인 부탁드려요!"],
   "error":           ["어라…?", "앗, 다시 해볼게요", "이상하네…"],
-  "idle.chat":       ["커피 맛있다", "오늘 빌드 잘 되네요", "점심 뭐 먹지?"]
+  "idle.chat":       ["커피 맛있어요", "오늘 빌드 잘 되네요", "점심 뭐 먹을까요?"]
 }
 ```
 
@@ -671,15 +683,19 @@ claude-office/
 ├─ Package.swift                    # OfficeCore 라이브러리 + 테스트 + 도구 (Linux 빌드 가능)
 ├─ Sources/
 │  ├─ OfficeCore/
-│  │  ├─ Hooks/        HookEnvelope, HookParser, HookInstaller(병합 로직)
-│  │  ├─ Model/        OfficeEvent, Agent, Team, Activity, AgentProfile
-│  │  ├─ Engine/       OfficeReducer, Choreographer, Clock, Directive
-│  │  ├─ Dialogue/     DialogueBook, Redactor(민감 정보 가리기)
-│  │  ├─ Sound/        SoundCue, SoundRecipe, SoundPolicy(연속 재생 제한·우선순위)
+│  │  ├─ Support/      JSONValue(키 순서 보존 파서), StableHash, SeededRandom
+│  │  ├─ Hooks/        HookParser, HookSettingsEditor(settings.json 병합), ClaudeVersion, AgentDefinition
+│  │  ├─ Model/        OfficeEvent, ToolCall/ToolCatalog, Agent/Team/AgentProfile/Appearance, OfficeState(리듀서)
+│  │  ├─ Engine/       Choreographer, Directive, OfficeEngine(진입점)
+│  │  ├─ Dialogue/     DialogueBook, PrivacyLevel, Redactor(민감 정보 가리기)
+│  │  ├─ Sound/        SoundCue/SoundGroup, SoundRecipe/SoundLibrary/SoundRenderer(합성), SoundPolicy
 │  │  └─ Resources/    dialogue.ko.json
-│  └─ office-replay/   # 녹화한 훅 이벤트를 앱으로 다시 보내는 CLI (데모·디버깅용)
+│  └─ office-sim/      # 시나리오 → 연출 타임라인 출력, 효과음 WAV 렌더링 (M2에서 앱으로 보내는 replay 추가)
+├─ Scenarios/          # office-sim용 시나리오 (JSON Lines)
 ├─ Tests/OfficeCoreTests/
-│  └─ Fixtures/        # M0에서 수집한 실제 훅 페이로드
+│  └─ Fixtures/
+│     ├─ synthetic/    # 2.1.318 훅 스키마 기준 합성 픽스처
+│     └─ captured/     # M0에서 수집한 실제 훅 페이로드 (export 결과)
 ├─ App/                             # macOS 전용 (Xcode 필요)
 │  ├─ project.yml                   # XcodeGen 설정 → ClaudeOffice.xcodeproj 생성
 │  ├─ Sources/
@@ -703,11 +719,11 @@ claude-office/
 
 | 대상 | 내용 |
 |---|---|
-| `make bootstrap` | `brew install xcodegen` 후 프로젝트 생성 |
 | `make test` | `swift test` (OfficeCore, Linux에서도 실행 가능) |
-| `make app` | `xcodebuild`로 Release 빌드 |
-| `make install` | `/Applications`에 복사 |
-| `make demo` | `office-replay`로 샘플 시나리오 재생 |
+| `make demo` | `office-sim`으로 `Scenarios/delegation.jsonl`의 연출 타임라인 출력 |
+| `make sounds` | 효과음을 `build/sounds/*.wav`로 렌더링 |
+| `make bootstrap` | (M2) `brew install xcodegen` 후 프로젝트 생성 |
+| `make app` / `make install` | (M2) `xcodebuild`로 Release 빌드 / `/Applications`에 복사 |
 
 ---
 
@@ -735,7 +751,7 @@ claude-office/
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | **M0** 준비 | 수집 도구(`scripts/capture.py`), **실제 페이로드 수집** (사용자 맥, [안내](M0-capture.md)), 저장소 골격 | 픽스처 10종 이상 확보, §4 필드 확정 |
-| **M1** 코어 | 이벤트 모델, 파서, 리듀서, 연출 엔진, 대화 템플릿, 단위 테스트 | `swift test` 통과 |
+| **M1** 코어 ✅ | 이벤트 모델, 파서, 리듀서, 연출 엔진, 대화 템플릿, 효과음 레시피·합성·정책, 단위 테스트 68개, `office-sim` | `swift test` 통과 (Swift 6.2.3, Linux) |
 | **M2** 앱 뼈대 | 메뉴바 앱, HookServer, 텍스트 목록 UI, 훅 설치기 | 실제 Claude Code 이벤트가 메뉴바 목록에 실시간 표시 |
 | **M3** 사무실 | 맵, 가구, 캐릭터 리그, 길찾기, 자리 활동 | 출근, 업무, 퇴근 흐름이 화면에 보임 |
 | **M4** 표현 | 표정 10종, 제스처 12종, 말풍선 5종, 대화 스크립트, **효과음** | 위임, 승인 대기, 완료 보고 연출과 소리 동작 |

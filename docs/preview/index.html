@@ -784,7 +784,7 @@ function officeScene(){
   s+=bubble({x:872,y:146,text:'빌드 기다리는 중…',kind:'thought',dx:-36});
   s+=pill(872,80,'Bash · xcodebuild','shell');
   s+=pill(132,428,'WebSearch · SpriteKit','web');
-  s+=bubble({x:796,y:432,text:'커피 맛있다',kind:'whisper',dx:22});
+  s+=bubble({x:796,y:432,text:'커피 맛있어요',kind:'whisper',dx:22});
   s+=emote(764,452,'note');
   return s;
 }
@@ -846,7 +846,7 @@ function renderBubbles(){
   s+=bubble({x:96,y:92,text:'다 했어요!',kind:'speech'});
   s+=bubble({x:288,y:92,text:'음… 어디서 봤더라',kind:'thought'});
   s+=bubble({x:480,y:92,text:'git push 해도 될까요?',kind:'shout',dx:6});
-  s+=bubble({x:672,y:92,text:'점심 뭐 먹지?',kind:'whisper'});
+  s+=bubble({x:672,y:92,text:'점심 뭐 먹을까요?',kind:'whisper'});
   s+=pill(864,62,'Read · auth.ts','read');
   cols.forEach(([x,n,d])=>{ s+=`<text x="${x}" y="134" text-anchor="middle" style="font-family:var(--f-body);font-size:14px;font-weight:600;fill:var(--text)">${n}</text><text x="${x}" y="154" text-anchor="middle" style="font-family:var(--f-body);font-size:12.5px;fill:var(--muted)">${d}</text>`; });
   document.getElementById('bubbleSheet').innerHTML=s;

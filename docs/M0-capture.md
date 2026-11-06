@@ -24,7 +24,7 @@ python3 scripts/capture.py install
 ```
 
 - `~/.claude/settings.json`을 백업한 뒤 수집 훅만 추가합니다. 기존 훅과 설정은 그대로 둡니다.
-- Claude Code 2.1.318 이상이면 `SubagentStart`, `PermissionRequest`, `PostToolUseFailure`도 함께 등록합니다.
+- Claude Code 2.1.318 이상이면 `SubagentStart`, `PermissionRequest`, `PermissionDenied`, `PostToolUseFailure`, `StopFailure`도 함께 등록합니다.
 - 수집 훅은 아무것도 출력하지 않고 바로 끝나므로 Claude Code 사용에는 영향이 없습니다.
 
 설치 후 **새 터미널**에서 `claude`를 실행하고 `/hooks`를 입력해 이벤트 목록이 보이는지 확인해 주세요.

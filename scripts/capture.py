@@ -39,9 +39,9 @@ MARKER = "claude-office-capture.sh"
 BASE_EVENTS = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                "Notification", "Stop", "SubagentStop", "PreCompact"]
 # 2.1.318에서 확인한 확장 이벤트. 이 버전 이상이면 자동으로 함께 등록합니다.
-EXTENDED_EVENTS = ["SubagentStart", "PermissionRequest", "PostToolUseFailure"]
+EXTENDED_EVENTS = ["SubagentStart", "PermissionRequest", "PermissionDenied", "PostToolUseFailure", "StopFailure"]
 EXTENDED_MIN_VERSION = (2, 1, 318)
-TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"}
+TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionDenied"}
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "Tests" / "OfficeCoreTests" / "Fixtures" / "captured"
 
