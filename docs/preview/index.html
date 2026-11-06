@@ -1,0 +1,828 @@
+<title>AgentOffice 설계 미리보기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jua&display=swap">
+<style>
+/* Layout: 한 줄 문서 흐름 + 폭 넓은 '사무실 무대'를 중심에 두고, 아래로 캐릭터 시트·말풍선·화면 구성을 차례로 펼칩니다. */
+:root{
+  /* page */
+  --page:#F3F4EE; --surface:#FFFFFF; --text:#2F2939; --muted:#6D6680; --line:#E0DED6;
+  --accent:#2C8A78; --accent-soft:#DDF0E9; --code-bg:#EFEEE8;
+  --f-display:"Jua","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --f-bubble:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  /* office scene (주간) */
+  --ink-line:#3A3247; --shadow:rgba(58,50,71,.16);
+  --wall:#E7EDEF; --wall-trim:#D3DCE0; --baseboard:#C9C2D6;
+  --floor:#F1E6D6; --floor-line:#E7D8C3;
+  --wood:#D9B48F; --wood-top:#E8C9A6; --wood-dark:#B58C66;
+  --metal:#B9BFD0; --metal-dot:#EEF0F6; --screen-glow:rgba(120,225,195,.42);
+  --plate:#FFF8EC; --plate-ink:#5A4E66;
+  --bubble:#FFFFFF; --bubble-ink:#3A3247; --thought:#F4F0FD; --shout:#F7DE8B; --alert:#F08A6C;
+  --pill-bg:#3A3247; --pill-fg:#FFFFFF;
+  --sky:#BFE0F5; --sky2:#DDEFFA; --cloud:#FFFFFF; --moon:#F7DE8B;
+  --rug-a:#C3E7DC; --rug-b:#F8D4C5; --rug-c:#DDD6F3;
+  --drop:#8CC8EE; --blush:rgba(244,140,140,.45); --mouth:#9A4E5E;
+  --leaf:#86C9A9; --pot:#E9A88A; --board:#FFFFFF; --rack:#5B5670; --rack-dark:#48435C;
+  --lamp:rgba(255,206,110,0); --night:0;
+  /* mock screens */
+  --desk-bg:#D7E3E8; --menubar:rgba(255,255,255,.72); --pop:#FBFBFD; --pop-line:#E6E3EC;
+  --chip-write:#D5F0E7; --chip-read:#E8E2FA; --chip-wait:#FBEBB5; --chip-shell:#DCEDFA; --chip-idle:#ECEAF0; --chip-ink:#3A3247;
+  --ide-bg:#1E1B26; --ide-side:#18161F; --ide-text:#CFC9DC; --ide-dim:#6F6880; --ide-kw:#C7A6F5; --ide-ty:#8FD9C4; --ide-str:#F2C88B;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#17151D; --surface:#211E29; --text:#EEEAF4; --muted:#A49DB3; --line:#34303F;
+    --accent:#7AD3BE; --accent-soft:#213A35; --code-bg:#1C1A23;
+    --ink-line:#221C2C; --shadow:rgba(0,0,0,.28);
+    --wall:#3A3950; --wall-trim:#333247; --baseboard:#2C2A3D;
+    --floor:#4B4359; --floor-line:#443C52;
+    --wood:#9A7A5E; --wood-top:#AE8D70; --wood-dark:#7A604A;
+    --metal:#8E93A6; --metal-dot:#C6CADA; --screen-glow:rgba(120,240,200,.5);
+    --plate:#E8DFD0; --plate-ink:#3A3247;
+    --bubble:#FFFDF7; --thought:#EEE9FB;
+    --pill-bg:#FFFDF7; --pill-fg:#2A2436;
+    --sky:#1F2B4D; --sky2:#2A3A66; --cloud:#FFFFFF;
+    --rug-a:#4F7D72; --rug-b:#8A5E58; --rug-c:#5E5683;
+    --board:#E9E6F0; --rack:#2E2B3D; --rack-dark:#25222F;
+    --lamp:rgba(255,206,110,.38); --night:1;
+    --desk-bg:#2A2C3A; --menubar:rgba(30,28,38,.82); --pop:#2A2633; --pop-line:#3B3646;
+    --chip-write:#2D4A42; --chip-read:#3C3557; --chip-wait:#5A4C22; --chip-shell:#2B3F55; --chip-idle:#36323F; --chip-ink:#EEEAF4;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --page:#17151D; --surface:#211E29; --text:#EEEAF4; --muted:#A49DB3; --line:#34303F;
+  --accent:#7AD3BE; --accent-soft:#213A35; --code-bg:#1C1A23;
+  --ink-line:#221C2C; --shadow:rgba(0,0,0,.28);
+  --wall:#3A3950; --wall-trim:#333247; --baseboard:#2C2A3D;
+  --floor:#4B4359; --floor-line:#443C52;
+  --wood:#9A7A5E; --wood-top:#AE8D70; --wood-dark:#7A604A;
+  --metal:#8E93A6; --metal-dot:#C6CADA; --screen-glow:rgba(120,240,200,.5);
+  --plate:#E8DFD0; --plate-ink:#3A3247;
+  --bubble:#FFFDF7; --thought:#EEE9FB;
+  --pill-bg:#FFFDF7; --pill-fg:#2A2436;
+  --sky:#1F2B4D; --sky2:#2A3A66; --cloud:#FFFFFF;
+  --rug-a:#4F7D72; --rug-b:#8A5E58; --rug-c:#5E5683;
+  --board:#E9E6F0; --rack:#2E2B3D; --rack-dark:#25222F;
+  --lamp:rgba(255,206,110,.38); --night:1;
+  --desk-bg:#2A2C3A; --menubar:rgba(30,28,38,.82); --pop:#2A2633; --pop-line:#3B3646;
+  --chip-write:#2D4A42; --chip-read:#3C3557; --chip-wait:#5A4C22; --chip-shell:#2B3F55; --chip-idle:#36323F; --chip-ink:#EEEAF4;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font-family:var(--f-body);font-size:15px;line-height:1.65}
+.wrap{max-width:1100px;margin:0 auto;padding-block:40px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{font-family:var(--f-display);font-weight:400;line-height:1.25;text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,5vw,46px);letter-spacing:-.01em}
+h2{font-size:26px}
+h3{font-size:18px}
+p{margin:0;max-width:66ch}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.muted{color:var(--muted)}
+section{display:flex;flex-direction:column;gap:18px}
+.sec-head{display:flex;flex-direction:column;gap:8px}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+code{background:var(--code-bg);padding:1px 6px;border-radius:5px}
+
+/* header */
+header{display:flex;flex-direction:column;gap:16px}
+.decisions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.decisions span{font-size:13px;padding:5px 11px;border-radius:999px;background:var(--accent-soft);color:var(--text)}
+.decisions b{font-weight:600;color:var(--accent);margin-right:4px}
+
+/* stage */
+.stage{border-radius:22px;overflow:hidden;border:1px solid var(--line);background:var(--wall)}
+.stage-scroll{overflow-x:auto}
+.stage svg{display:block;width:100%;min-width:760px;height:auto}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;font-size:14px}
+.legend div{display:flex;gap:10px;align-items:baseline}
+.legend dt{font-weight:600;white-space:nowrap}
+.legend dd{margin:0;color:var(--muted)}
+.legend dl{margin:0;display:contents}
+.theme-note{font-size:13px;color:var(--muted)}
+
+/* sheets */
+.sheet{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:10px 12px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.card svg{width:100%;height:118px;display:block}
+.card b{font-weight:600;font-size:14px}
+.card small{color:var(--muted);font-size:12.5px;line-height:1.45}
+
+.bubbles{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow-x:auto}
+.bubbles svg{display:block;min-width:720px;width:100%;height:auto}
+
+.story{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.frame{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.frame svg{display:block;width:100%;height:auto;background:var(--floor)}
+.frame .cap{padding:10px 14px 12px;display:flex;flex-direction:column;gap:2px}
+.frame .cap span{font-family:var(--f-mono);font-size:11.5px;color:var(--accent)}
+.frame .cap p{font-size:13.5px}
+
+/* table */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:14px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:12.5px;color:var(--muted);letter-spacing:.03em}
+tr:last-child td{border-bottom:0}
+td .place{font-weight:600}
+.hl td{background:var(--accent-soft)}
+
+/* mock screens */
+.screens{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}
+.mac{background:var(--desk-bg);border-radius:18px;border:1px solid var(--line);overflow:hidden;min-width:0}
+.menubar{display:flex;align-items:center;gap:14px;padding:5px 14px;background:var(--menubar);font-size:12.5px;white-space:nowrap;overflow:hidden}
+.menubar .sp{flex:1}
+.mb-icon{position:relative;display:inline-flex;align-items:center;padding:1px 6px;border-radius:6px;background:var(--accent-soft)}
+.mb-icon svg{width:20px;height:16px}
+.mb-icon i{position:absolute;top:-3px;right:-5px;font-style:normal;font-size:9.5px;font-weight:600;background:var(--alert);color:#fff;border-radius:999px;padding:0 4px;line-height:14px}
+.drop-area{display:flex;justify-content:flex-end;padding:8px 14px 18px}
+.drop{width:100%;max-width:330px;background:var(--pop);border:1px solid var(--pop-line);border-radius:14px;box-shadow:0 18px 40px -18px rgba(20,16,30,.45);font-size:13px;overflow:hidden}
+.drop-h{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px 6px;font-weight:600}
+.drop-h small{font-weight:400;color:var(--muted);font-size:12px}
+.drop-sec{padding:6px 8px 8px;border-top:1px solid var(--pop-line)}
+.drop-sec .label{font-size:11.5px;color:var(--muted);padding:2px 6px 4px;font-family:var(--f-mono)}
+.row{display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:9px}
+.row svg{width:28px;height:28px;flex:none}
+.row .who{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.row .who b{font-weight:600;font-size:13px}
+.row .who small{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert-row{background:var(--chip-wait)}
+.alert-row .who small{color:var(--chip-ink)}
+.chip{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap;color:var(--chip-ink)}
+.c-write{background:var(--chip-write)}.c-read{background:var(--chip-read)}.c-wait{background:var(--chip-wait)}.c-shell{background:var(--chip-shell)}.c-idle{background:var(--chip-idle)}
+.btn{font:inherit;font-size:12px;border:1px solid var(--pop-line);background:var(--surface);color:var(--text);border-radius:8px;padding:4px 9px;cursor:pointer}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--page)}
+.drop-f{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px 12px;border-top:1px solid var(--pop-line)}
+
+.ide{position:relative;background:var(--ide-bg);border-radius:18px;overflow:hidden;border:1px solid var(--line);min-height:330px;min-width:0}
+.ide-top{display:flex;gap:7px;padding:11px 14px;background:var(--ide-side)}
+.ide-top i{width:11px;height:11px;border-radius:50%;background:#F06A5F}
+.ide-top i:nth-child(2){background:#F5BF4F}.ide-top i:nth-child(3){background:#5FC454}
+.ide-top span{font-family:var(--f-mono);font-size:11.5px;color:var(--ide-dim);margin-left:8px}
+.ide pre{margin:0;padding:14px 18px;font-family:var(--f-mono);font-size:12px;line-height:1.7;color:var(--ide-text);white-space:pre;overflow:hidden}
+.ide .kw{color:var(--ide-kw)}.ide .ty{color:var(--ide-ty)}.ide .st{color:var(--ide-str)}.ide .cm{color:var(--ide-dim)}
+.mini{position:absolute;right:14px;bottom:14px;width:min(250px,62%);border-radius:14px;overflow:hidden;background:var(--wall);box-shadow:0 16px 36px -12px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18)}
+.mini-bar{display:flex;justify-content:space-between;align-items:center;padding:4px 9px;font-size:10.5px;background:var(--menubar);color:var(--text);font-family:var(--f-mono)}
+.mini svg{display:block;width:100%;height:auto}
+
+.mermaid{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;overflow-x:auto;margin:0}
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.principles div{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.principles b{font-weight:600}
+.principles p{font-size:14px;color:var(--muted)}
+
+ol.miles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+ol.miles li{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:3px}
+ol.miles .m{font-family:var(--f-mono);font-size:12px;color:var(--accent)}
+ol.miles b{font-weight:600}
+ol.miles small{color:var(--muted);font-size:13px;line-height:1.5}
+
+.open{background:var(--accent-soft);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.open ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+footer{font-size:13px;color:var(--muted)}
+
+/* ---------- office scene ---------- */
+.o{stroke:var(--ink-line);stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
+.ink{fill:var(--ink-line)}
+.ink-s{fill:none;stroke:var(--ink-line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mouth{fill:var(--mouth)}
+.b-text{font-family:var(--f-bubble);font-size:12px;fill:var(--bubble-ink)}
+.s-text{font-family:var(--f-display);font-size:12.5px;fill:var(--bubble-ink)}
+.w-text{font-family:var(--f-bubble);font-size:10.5px;fill:var(--bubble-ink);opacity:.8}
+.p-text{font-family:var(--f-mono);font-size:9.5px;fill:var(--pill-fg)}
+.plate{font-family:var(--f-mono);font-size:7px;fill:var(--plate-ink);text-anchor:middle}
+.sign{font-family:var(--f-mono);font-size:10px;fill:var(--bubble-ink);text-anchor:middle}
+.night-only{opacity:var(--night)}
+.day-only{opacity:calc(1 - var(--night))}
+.lampglow{fill:var(--lamp)}
+
+.char .bob{animation:breathe 2.8s ease-in-out infinite}
+.eyes{transform-box:fill-box;transform-origin:center;animation:blink 4.6s infinite}
+.noblink .eyes{animation:none}
+.arm{transform:rotate(var(--r));transform-origin:0 0}
+.head{transform-origin:0 20px}
+@keyframes breathe{50%{transform:translateY(-1.3px)}}
+@keyframes blink{0%,93%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}}
+.pose-typing .arm{animation:type .28s ease-in-out infinite alternate}
+.pose-typing .arm-r{animation-delay:-.14s}
+@keyframes type{from{transform:rotate(var(--r))}to{transform:rotate(calc(var(--r) + 9deg))}}
+.pose-wave .arm-r{animation:wave .5s ease-in-out infinite alternate}
+@keyframes wave{from{transform:rotate(-125deg)}to{transform:rotate(-160deg)}}
+.pose-raise .arm-r{animation:raise 1.1s ease-in-out infinite alternate}
+.pose-raise .bob{animation:hop 1.1s ease-in-out infinite alternate}
+@keyframes raise{from{transform:rotate(-146deg)}to{transform:rotate(-160deg)}}
+@keyframes hop{from{transform:translateY(0)}to{transform:translateY(-2.5px)}}
+.pose-cheer .bob{animation:jump .6s cubic-bezier(.3,0,.4,1) infinite alternate}
+.pose-cheer .arm-l{animation:cheerL .3s ease-in-out infinite alternate}
+.pose-cheer .arm-r{animation:cheerR .3s ease-in-out infinite alternate}
+@keyframes jump{from{transform:translateY(0)}to{transform:translateY(-7px)}}
+@keyframes cheerL{from{transform:rotate(140deg)}to{transform:rotate(162deg)}}
+@keyframes cheerR{from{transform:rotate(-140deg)}to{transform:rotate(-162deg)}}
+.pose-stretch .bob{animation:stretch 2.6s ease-in-out infinite}
+@keyframes stretch{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.05) translateY(-1px)}}
+.pose-think .head{transform:rotate(-6deg)}
+.pose-coffee .arm-r{animation:sip 3.4s ease-in-out infinite}
+@keyframes sip{0%,30%{transform:rotate(95deg)}45%,70%{transform:rotate(138deg)}85%,100%{transform:rotate(95deg)}}
+.pose-scratch .arm-r{animation:scratch .22s ease-in-out infinite alternate}
+.pose-scratch .head{transform:rotate(7deg)}
+@keyframes scratch{from{transform:rotate(-163deg)}to{transform:rotate(-174deg)}}
+.pose-nod .head{animation:nod 1.6s ease-in-out infinite}
+@keyframes nod{0%,45%,100%{transform:none}10%,30%{transform:translateY(2.5px)}20%{transform:none}}
+.pose-tilt .head{animation:tilt 2.4s ease-in-out infinite alternate}
+@keyframes tilt{from{transform:rotate(0)}to{transform:rotate(13deg)}}
+.pose-sleep .head{animation:doze 3s ease-in-out infinite}
+@keyframes doze{0%,100%{transform:rotate(6deg) translateY(1px)}50%{transform:rotate(11deg) translateY(3px)}}
+.pose-beckon .arm-r{animation:beckon .45s ease-in-out infinite alternate}
+@keyframes beckon{from{transform:rotate(-95deg)}to{transform:rotate(-128deg)}}
+.pose-highfive .bob{animation:hop .8s ease-in-out infinite alternate}
+.pose-walk .leg-l{animation:step .34s ease-in-out infinite alternate}
+.pose-walk .leg-r{animation:step .34s ease-in-out infinite alternate-reverse}
+.pose-walk .arm-l{animation:swingL .34s ease-in-out infinite alternate}
+.pose-walk .arm-r{animation:swingR .34s ease-in-out infinite alternate}
+@keyframes step{from{transform:translateY(0)}to{transform:translateY(-2.6px)}}
+@keyframes swingL{from{transform:rotate(-4deg)}to{transform:rotate(22deg)}}
+@keyframes swingR{from{transform:rotate(-22deg)}to{transform:rotate(4deg)}}
+.emote{animation:pop 1.8s ease-in-out infinite}
+@keyframes pop{50%{transform:translateY(-3px)}}
+.glow{animation:flicker 2.2s ease-in-out infinite alternate}
+@keyframes flicker{from{opacity:.65}to{opacity:1}}
+.led{animation:led 1.3s steps(2,jump-none) infinite}
+@keyframes led{from{opacity:1}to{opacity:.25}}
+.zz{animation:zz 2.4s ease-in-out infinite}
+@keyframes zz{0%{opacity:0;transform:translate(0,4px)}30%,70%{opacity:1}100%{opacity:0;transform:translate(4px,-6px)}}
+
+/* walker in the hero scene (keyframes injected by script) */
+.walker{transform:translate(720px,428px);animation:walkPath 12s linear infinite}
+.walker .wb{animation:wBubble 12s linear infinite}
+.walker .leg-l{animation:wLegL 12s linear infinite}
+.walker .leg-r{animation:wLegR 12s linear infinite}
+.walker .arm-r{animation:wArm 12s linear infinite}
+.walker .head{animation:wNod 12s linear infinite}
+
+@media (prefers-reduced-motion: reduce){
+  .stage *, .card *, .frame *, .mini *, .bubbles *{animation:none!important}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">AgentOffice · 설계 v0.1 미리보기</div>
+    <h1>에이전트들이 일하는 작은 사무실</h1>
+    <p class="muted">Claude Code 세션은 팀장으로, 서브에이전트는 팀원으로 출근합니다. 이 페이지는 <code>docs/DESIGN.md</code>의 아트 디렉션과 화면 구성을 미리 보여주는 시안입니다. 캐릭터는 실제 앱과 같은 방식(부위별 종이인형 리그)으로 그렸습니다.</p>
+    <div class="decisions">
+      <span><b>①</b>세션 = 팀장, 서브에이전트 = 팀원, 직접 정의한 에이전트 = 고정 직원</span>
+      <span><b>②</b>한 사무실 + 프로젝트별 팀 구역</span>
+      <span><b>③</b>보기 + 알림 + 상세 이동</span>
+      <span><b>④</b>직접 그린 벡터 에셋, 공개 가능 구조</span>
+    </div>
+  </header>
+
+  <section aria-labelledby="s-office">
+    <div class="sec-head">
+      <h2 id="s-office">사무실 전경</h2>
+      <p class="muted">팀 섬 2개가 일하는 순간입니다. 왼쪽 팀은 편집, 파일 탐색, <b>권한 승인 대기</b>를 보여주고, 오른쪽 팀은 새 팀원에게 일을 맡기는 장면입니다. 서버랙, 리서치 코너, 휴게실에도 각자 일이 있습니다.</p>
+    </div>
+    <div class="stage"><div class="stage-scroll"><svg id="office" viewBox="0 0 960 576" role="img" aria-label="가상 사무실 전경: 두 팀이 책상에서 일하고, 한 팀원이 손을 들어 승인을 기다리며, 새 팀원이 문에서 걸어 들어옵니다"></svg></div></div>
+    <div class="legend">
+      <dl><div><dt>팀 섬</dt><dd>편집, 읽기 등 기본 업무</dd></div></dl>
+      <dl><div><dt>책장</dt><dd>파일을 몰아서 탐색할 때</dd></div></dl>
+      <dl><div><dt>서버랙</dt><dd>2초 넘게 걸리는 셸 명령</dd></div></dl>
+      <dl><div><dt>화이트보드</dt><dd>할 일 계획 (TodoWrite)</dd></div></dl>
+      <dl><div><dt>리서치 코너</dt><dd>웹 검색, 문서 조회</dd></div></dl>
+      <dl><div><dt>휴게실</dt><dd>입력 대기 60초 이상</dd></div></dl>
+    </div>
+    <p class="theme-note">macOS가 다크 모드이면 같은 사무실이 야간 모드로 바뀝니다. 창밖에 달이 뜨고 스탠드 조명이 켜집니다. 이 페이지도 보기 모드를 다크로 바꾸면 확인하실 수 있습니다.</p>
+  </section>
+
+  <section aria-labelledby="s-expr">
+    <div class="sec-head">
+      <h2 id="s-expr">표정 10종</h2>
+      <p class="muted">눈, 눈썹, 입, 효과를 조합해서 만듭니다. 몸은 그대로 두고 얼굴 부위만 바꾸기 때문에, 에셋 몇 장으로 모든 직원에게 같은 표정을 적용할 수 있습니다.</p>
+    </div>
+    <div class="sheet" id="exprSheet"></div>
+  </section>
+
+  <section aria-labelledby="s-gest">
+    <div class="sec-head">
+      <h2 id="s-gest">제스처 12종</h2>
+      <p class="muted">팔은 어깨, 머리는 목을 축으로 회전합니다. 숨쉬기와 눈 깜빡임은 모든 동작에 항상 깔려 있습니다.</p>
+    </div>
+    <div class="sheet" id="gestSheet"></div>
+  </section>
+
+  <section aria-labelledby="s-bubble">
+    <div class="sec-head">
+      <h2 id="s-bubble">말풍선 5종</h2>
+      <p class="muted">캐릭터마다 말풍선 1개와 상태 칩 1개까지 띄웁니다. 표시 시간은 1.8초에 글자당 60ms를 더하고, 외침 풍선은 승인될 때까지 남아 있습니다.</p>
+    </div>
+    <div class="bubbles"><svg id="bubbleSheet" viewBox="0 0 960 190" role="img" aria-label="말풍선 종류: 말, 생각, 외침, 속삭임, 상태 칩"></svg></div>
+  </section>
+
+  <section aria-labelledby="s-story">
+    <div class="sec-head">
+      <h2 id="s-story">대화 스크립트: 위임에서 보고까지</h2>
+      <p class="muted">팀장이 <code>Task</code> 툴로 <code>code-reviewer</code>를 호출했을 때 화면에서 일어나는 일입니다.</p>
+    </div>
+    <div class="story" id="story"></div>
+  </section>
+
+  <section aria-labelledby="s-map">
+    <div class="sec-head">
+      <h2 id="s-map">이벤트에서 연출로</h2>
+      <p class="muted">툴 호출은 수십 밀리초 단위로 이어지기 때문에, 한 활동을 최소 2.5초 유지하고 계속될 근거가 있을 때만 자리를 옮깁니다.</p>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Claude Code 이벤트</th><th>위치</th><th>동작</th><th>표정</th><th>말풍선</th></tr></thead>
+      <tbody>
+        <tr><td><code>SessionStart</code></td><td class="place">문 → 팀장석</td><td>걷기, 손 흔들기</td><td>기본</td><td>"좋은 아침이에요!"</td></tr>
+        <tr><td><code>UserPromptSubmit</code></td><td class="place">팀장석</td><td>종이비행기 받기</td><td>놀람 → 기쁨</td><td>💡</td></tr>
+        <tr><td><code>Edit</code> · <code>Write</code></td><td class="place">자리</td><td>타이핑</td><td>집중</td><td>상태 칩 "Edit · 파일명"</td></tr>
+        <tr><td><code>Read</code> · <code>Grep</code> 10초에 5회 이상</td><td class="place">책장</td><td>서류 넘기기</td><td>집중</td><td>상태 칩</td></tr>
+        <tr><td><code>Bash</code> 2초 초과</td><td class="place">서버랙</td><td>턱 괴고 기다리기</td><td>기본</td><td>생각 "빌드 기다리는 중…"</td></tr>
+        <tr><td><code>WebSearch</code> · <code>WebFetch</code></td><td class="place">리서치 코너</td><td>책 읽기</td><td>집중</td><td>상태 칩</td></tr>
+        <tr><td><code>Task</code> / <code>Agent</code></td><td class="place">팀장석</td><td>손짓</td><td>기쁨</td><td>"{task} 부탁해요!"</td></tr>
+        <tr class="hl"><td><code>Notification</code> (권한)</td><td class="place">자리에서 일어남</td><td>손 들기 반복</td><td>간절</td><td>외침 "{명령} 실행해도 될까요?" + macOS 알림</td></tr>
+        <tr><td>툴 오류</td><td class="place">자리</td><td>머리 긁적</td><td>곤란</td><td>💦 "어라…?"</td></tr>
+        <tr><td><code>SubagentStop</code></td><td class="place">팀원석 → 팀장석</td><td>하이파이브</td><td>뿌듯</td><td>"다 했어요!" / "고마워요!"</td></tr>
+        <tr><td>입력 대기 10분 이상</td><td class="place">자리</td><td>꾸벅꾸벅</td><td>졸림</td><td>💤</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="s-screens">
+    <div class="sec-head">
+      <h2 id="s-screens">맥에서 보이는 모습</h2>
+      <p class="muted">메뉴바에서 상태를 확인하고, 화면 구석의 미니 사무실은 포커스를 빼앗지 않은 채 전체화면 IDE 위에도 떠 있습니다.</p>
+    </div>
+    <div class="screens">
+      <div class="mac">
+        <div class="menubar"><b>Xcode</b><span>File</span><span>Edit</span><span>View</span><span class="sp"></span>
+          <span class="mb-icon" aria-label="AgentOffice 메뉴바 아이콘, 승인 대기 1건"><svg viewBox="0 0 20 16"><path class="o" d="M3,15 V6 L10,2 L17,6 V15 Z" style="fill:var(--accent-soft)"/><rect x="8" y="10" width="4" height="5" class="ink"/><circle cx="16" cy="4" r="3" style="fill:var(--shout)" class="o"/></svg><i>1</i></span>
+          <span>금 오후 3:42</span></div>
+        <div class="drop-area"><div class="drop">
+          <div class="drop-h">사무실 현황 <small>팀 2 · 직원 9</small></div>
+          <div class="drop-sec">
+            <div class="label">승인 대기 1</div>
+            <div class="row alert-row"><svg data-avatar="tester" viewBox="-26 -92 52 52"></svg><div class="who"><b>test-runner</b><small>a-sdn-portal · npm test 실행 승인 필요</small></div><button class="btn primary" type="button">터미널로</button></div>
+          </div>
+          <div class="drop-sec">
+            <div class="label">a-sdn-portal</div>
+            <div class="row"><svg data-avatar="leadA" viewBox="-26 -92 52 52"></svg><div class="who"><b>팀장</b><small>DeviceService.java</small></div><span class="chip c-write">편집 중</span></div>
+            <div class="row"><svg data-avatar="reviewer" viewBox="-26 -92 52 52"></svg><div class="who"><b>code-reviewer</b><small>RouterConfig.java</small></div><span class="chip c-read">읽는 중</span></div>
+            <div class="row"><svg data-avatar="researcher" viewBox="-26 -92 52 52"></svg><div class="who"><b>researcher</b><small>SpriteKit 문서</small></div><span class="chip c-read">검색 중</span></div>
+          </div>
+          <div class="drop-sec">
+            <div class="label">claude-office</div>
+            <div class="row"><svg data-avatar="leadB" viewBox="-26 -92 52 52"></svg><div class="who"><b>팀장</b><small>새 팀원에게 위임</small></div><span class="chip c-write">위임 중</span></div>
+            <div class="row"><svg data-avatar="builder" viewBox="-26 -92 52 52"></svg><div class="who"><b>builder</b><small>xcodebuild</small></div><span class="chip c-shell">실행 중</span></div>
+            <div class="row"><svg data-avatar="lounger" viewBox="-26 -92 52 52"></svg><div class="who"><b>팀장 (세션 2)</b><small>입력 대기 3분</small></div><span class="chip c-idle">휴식</span></div>
+          </div>
+          <div class="drop-f"><button class="btn" type="button">사무실 열기</button><button class="btn" type="button">미니 사무실 끄기</button><button class="btn" type="button">설정…</button></div>
+        </div></div>
+      </div>
+      <div class="ide">
+        <div class="ide-top"><i></i><i></i><i></i><span>CharacterNode.swift — AgentOffice</span></div>
+<pre><span class="kw">final class</span> <span class="ty">CharacterNode</span>: <span class="ty">SKNode</span> {
+  <span class="kw">let</span> head = <span class="ty">SKNode</span>()
+  <span class="kw">let</span> armFront = <span class="ty">SKNode</span>()
+
+  <span class="kw">func</span> express(<span class="kw">_</span> e: <span class="ty">Expression</span>) {
+    eyes.texture = atlas.eyes(e)
+    mouth.texture = atlas.mouth(e)
+  }
+
+  <span class="kw">func</span> gesture(<span class="kw">_</span> g: <span class="ty">Gesture</span>) {
+    <span class="cm">// 어깨 축 회전 + 이징</span>
+    armFront.run(g.action, withKey: <span class="st">"gesture"</span>)
+  }
+}</pre>
+        <div class="mini" aria-label="미니 사무실 패널">
+          <div class="mini-bar"><span>미니 사무실</span><span>a-sdn-portal ▾</span></div>
+          <svg id="miniOffice" viewBox="40 196 470 300" role="img" aria-label="미니 사무실: 왼쪽 팀만 확대해서 보여줍니다"></svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-arch">
+    <div class="sec-head">
+      <h2 id="s-arch">구조</h2>
+      <p class="muted">판단은 코어가 하고, 씬은 받은 지시대로 그리기만 합니다. 코어는 리눅스에서도 빌드하고 테스트할 수 있습니다.</p>
+    </div>
+<pre class="mermaid">
+flowchart LR
+  CC["Claude Code 세션들"] -- "훅 JSON" --> SH["agent-office.sh<br/>curl, 1초 제한"]
+  SH -- "POST /v1/hook" --> SV
+  subgraph APP["AgentOffice.app"]
+    SV["HookServer<br/>127.0.0.1 + 토큰"] --> PA["HookParser"]
+    PA --> RD["OfficeReducer"]
+    RD --> CH["Choreographer"]
+    CH -- "Directive" --> SC["SpriteKit 사무실"]
+    CH --> UI["SwiftUI 메뉴바 · 인스펙터"]
+    CH --> NT["macOS 알림"]
+  end
+</pre>
+    <div class="principles">
+      <div><b>Claude Code를 막지 않습니다</b><p>훅 스크립트는 아무것도 출력하지 않고 즉시 종료합니다. 앱이 꺼져 있어도 조용히 넘어갑니다.</p></div>
+      <div><b>모르는 이벤트는 버립니다</b><p>Claude Code 버전마다 페이로드가 다를 수 있어서, 실제로 수집한 픽스처를 기준으로 관대하게 파싱합니다.</p></div>
+      <div><b>로컬에서만 받습니다</b><p>127.0.0.1에만 열고, 실행할 때마다 바뀌는 토큰과 Origin 헤더 거부로 브라우저 경유 공격을 막습니다.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-miles">
+    <div class="sec-head">
+      <h2 id="s-miles">진행 순서</h2>
+    </div>
+    <ol class="miles">
+      <li><span class="m">M0</span><b>준비</b><small>저장소 골격, 맥에서 실제 훅 페이로드 수집</small></li>
+      <li><span class="m">M1</span><b>코어</b><small>파서, 리듀서, 연출 엔진, 대화 템플릿, 단위 테스트</small></li>
+      <li><span class="m">M2</span><b>앱 뼈대</b><small>메뉴바, 로컬 서버, 텍스트 목록, 훅 설치기</small></li>
+      <li><span class="m">M3</span><b>사무실</b><small>맵, 가구, 캐릭터 리그, 길찾기</small></li>
+      <li><span class="m">M4</span><b>표현</b><small>표정, 제스처, 말풍선, 대화 스크립트</small></li>
+      <li><span class="m">M5</span><b>편의</b><small>미니 사무실, 알림, 인스펙터, 설정</small></li>
+      <li><span class="m">M6</span><b>다듬기</b><small>야간 모드, 성능 목표, make install 배포</small></li>
+    </ol>
+  </section>
+
+  <section class="open" aria-labelledby="s-open">
+    <h3 id="s-open">정해 주셔야 할 것</h3>
+    <ul>
+      <li><b>앱 이름:</b> Desklings, Little Desk, Agent Burrow, 콩사무소 중에서 고르시거나 다른 이름을 정해 주세요</li>
+      <li><b>캐릭터 말투:</b> 모두 해요체 (기본) / 직원마다 성격을 다르게</li>
+      <li><b>효과음:</b> 없음 (기본) / 작은 효과음 옵션</li>
+      <li><b>미니 사무실 위치:</b> 오른쪽 아래 (기본) / 노치 아래 가운데</li>
+    </ul>
+  </section>
+
+  <footer>AgentOffice 설계 v0.1 · 이 페이지의 모든 캐릭터와 가구는 직접 그린 벡터이며, 앱 에셋 규격의 시안입니다.</footer>
+</div>
+
+<script>
+(function(){
+/* ---------- measuring ---------- */
+const mctx = document.createElement('canvas').getContext('2d');
+function tw(text, font){ mctx.font = font; return mctx.measureText(text).width; }
+const FB = '12px "Gowun Dodum", "Apple SD Gothic Neo", sans-serif';
+const FS = '12.5px "Jua", "Apple SD Gothic Neo", sans-serif';
+const FW = '10.5px "Gowun Dodum", "Apple SD Gothic Neo", sans-serif';
+const FP = '9.5px "JetBrains Mono", Menlo, monospace';
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* ---------- character parts ---------- */
+const SKIN = ['#FBDDC8','#F3C6A5','#D9A47F','#B07A5C'];
+const ARM = {
+  idle:[12,-12], typing:[-38,38], read:[-34,34], wave:[12,-140], raise:[12,-152], think:[12,125],
+  coffee:[12,95], thumbs:[12,-95], cheer:[150,-150], stretch:[166,-166], scratch:[12,-168],
+  highfive:[12,-140], beckon:[12,-110], walk:[8,-8], sleep:[-34,34], nod:[12,-12], tilt:[12,-12]
+};
+function star5(cx,cy,r){ let d=''; for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5, rr=i%2?r*.45:r; d+=(i?'L':'M')+(cx+rr*Math.cos(a)).toFixed(2)+','+(cy+rr*Math.sin(a)).toFixed(2);} return d+'Z'; }
+function star4(cx,cy,r){ return `M${cx},${cy-r} Q${cx},${cy} ${cx+r},${cy} Q${cx},${cy} ${cx},${cy+r} Q${cx},${cy} ${cx-r},${cy} Q${cx},${cy} ${cx},${cy-r} Z`; }
+
+const BOB_BACK = h=>`<path class="o" fill="${h}" d="M-24,6 C-26,-22 -12,-27 0,-27 C12,-27 26,-22 24,6 C24,12 20,15 16,15 L-16,15 C-20,15 -24,12 -24,6 Z"/>`;
+const BOB_FRONT = h=>`<path class="o" fill="${h}" d="M-21.5,-3 C-22,-19 -11,-24.5 0,-24.5 C11,-24.5 22,-19 21.5,-3 C17,-9 11,-11.5 5,-9.5 C1,-14 -9,-14 -13,-9 C-16,-8 -19,-6 -21.5,-3 Z"/>`;
+const SHORT_BACK = h=>`<circle class="o" fill="${h}" cx="0" cy="-3" r="22.5"/>`;
+const SPIKY_FRONT = h=>`<path class="o" fill="${h}" d="M-21.5,-2 C-22.5,-18 -11,-25 0,-25 C11,-25 22.5,-18 21.5,-2 L17,-9 L13,-5 L10,-12 L5,-7 L1,-13 L-4,-8 L-8,-13 L-12,-7 L-16,-10 Z"/>`;
+const SWEPT_FRONT = h=>`<path class="o" fill="${h}" d="M-21.5,-1 C-22,-19 -9,-25 1,-24.5 C13,-24 22,-17 21.5,-3 C13,-5 5,-10 -1,-16 C-5,-9 -13,-4 -21.5,-1 Z"/>`;
+const HAIRS = {
+  bob:   {back:BOB_BACK, front:BOB_FRONT},
+  short: {back:SHORT_BACK, front:SPIKY_FRONT},
+  long:  {back:h=>`<path class="o" fill="${h}" d="M-24,2 C-26,-23 -12,-27 0,-27 C12,-27 26,-23 24,2 L26,30 C18,34 -18,34 -26,30 Z"/>`, front:SWEPT_FRONT},
+  bun:   {back:h=>`<circle class="o" fill="${h}" cx="0" cy="-27" r="8.5"/>`+SHORT_BACK(h), front:BOB_FRONT},
+  side:  {back:SHORT_BACK, front:SWEPT_FRONT}
+};
+const ACC = {
+  glasses:`<g class="ink-s" stroke-width="1.6"><circle cx="-8" cy="1.5" r="5.4"/><circle cx="8" cy="1.5" r="5.4"/><path d="M-2.6,1 Q0,-0.5 2.6,1"/></g>`,
+  headphones:`<path d="M-23,2 C-24,-31 24,-31 23,2" fill="none" stroke="#7B6FB0" stroke-width="4" stroke-linecap="round"/><rect class="o" x="-27" y="-4" width="7" height="12" rx="3" fill="#C7BCEB"/><rect class="o" x="20" y="-4" width="7" height="12" rx="3" fill="#C7BCEB"/>`,
+  beanie:`<path class="o" fill="#F6B9A0" d="M-22,-7 C-22,-31 22,-31 22,-7 Z"/><rect class="o" x="-23" y="-11" width="46" height="7" rx="3.5" fill="#EE9F84"/><circle class="o" cx="0" cy="-29" r="4.5" fill="#FFFFFF"/>`,
+  ribbon:`<g transform="translate(14,-19) rotate(20)"><path class="o" fill="#F4A3B4" d="M0,0 L-8,-5 L-8,5 Z M0,0 L8,-5 L8,5 Z"/><circle class="o" r="2.2" fill="#F4A3B4"/></g>`,
+  sprout:`<path d="M0,-24 C0,-30 1,-33 0,-36" stroke="#5FA77F" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse class="o" cx="-5" cy="-37" rx="5" ry="3" transform="rotate(-25 -5 -37)" fill="#9FD8C7"/><ellipse class="o" cx="5" cy="-39" rx="5" ry="3" transform="rotate(25 5 -39)" fill="#9FD8C7"/>`
+};
+const EY = dx=>`<ellipse cx="${dx}" cy="1" rx="2.5" ry="3.1" class="ink"/><circle cx="${dx+0.9}" cy="-0.3" r="0.85" fill="#FFFFFF"/>`;
+const WORRY = `<path class="ink-s" stroke-width="1.6" d="M-11,-5 L-5,-7.5"/><path class="ink-s" stroke-width="1.6" d="M5,-7.5 L11,-5"/>`;
+const EXPR = {
+  neutral:{eyes:EY(-8)+EY(8), mouth:`<path class="ink-s" d="M-3.5,10 Q0,13 3.5,10"/>`},
+  happy:{noblink:1, blush:.75, eyes:`<path class="ink-s" stroke-width="2.3" d="M-11,2.5 Q-8,-1.5 -5,2.5"/><path class="ink-s" stroke-width="2.3" d="M5,2.5 Q8,-1.5 11,2.5"/>`, mouth:`<path class="o mouth" d="M-6,8 Q0,16.5 6,8 Z"/>`},
+  focus:{eyes:`<ellipse cx="-8" cy="2" rx="2.5" ry="2.2" class="ink"/><ellipse cx="8" cy="2" rx="2.5" ry="2.2" class="ink"/>`, brows:`<path class="ink-s" d="M-11.5,-0.6 L-4.5,0.2"/><path class="ink-s" d="M4.5,0.2 L11.5,-0.6"/><path class="ink-s" stroke-width="1.6" d="M-11,-6.5 L-5,-5"/><path class="ink-s" stroke-width="1.6" d="M5,-5 L11,-6.5"/>`, mouth:`<path class="ink-s" d="M-3,11 L3,11"/>`},
+  think:{eyes:`<ellipse cx="-6.5" cy="-0.5" rx="2.3" ry="2.9" class="ink"/><ellipse cx="9.5" cy="-0.5" rx="2.3" ry="2.9" class="ink"/>`, brows:`<path class="ink-s" stroke-width="1.6" d="M-11,-6 Q-8,-8 -5,-6.5"/><path class="ink-s" stroke-width="1.6" d="M5,-8 Q8,-10 11,-8.5"/>`, mouth:`<circle cx="3" cy="11" r="1.8" class="ink-s" stroke-width="1.6"/>`},
+  surprised:{eyes:`<circle cx="-8" cy="1" r="3.8" fill="#FFFFFF" class="o" stroke-width="1.4"/><circle cx="-8" cy="1.4" r="2" class="ink"/><circle cx="8" cy="1" r="3.8" fill="#FFFFFF" class="o" stroke-width="1.4"/><circle cx="8" cy="1.4" r="2" class="ink"/>`, brows:`<path class="ink-s" stroke-width="1.6" d="M-11,-8 Q-8,-10.5 -5,-8"/><path class="ink-s" stroke-width="1.6" d="M5,-8 Q8,-10.5 11,-8"/>`, mouth:`<ellipse cx="0" cy="11.5" rx="2.6" ry="3.2" class="o mouth"/>`},
+  troubled:{eyes:EY(-8)+EY(8), brows:WORRY, mouth:`<path class="ink-s" stroke-width="1.7" d="M-4.5,11.5 q1.5,-2 3,0 t3,0"/>`, fx:`<path class="o" style="fill:var(--drop)" stroke-width="1.4" d="M18,-14 q-4.5,6.5 0,8.5 q4.5,-2 0,-8.5 Z"/>`},
+  sleepy:{noblink:1, eyes:`<path class="ink-s" d="M-11,2 L-5,2"/><path class="ink-s" d="M5,2 L11,2"/>`, mouth:`<ellipse cx="0" cy="11" rx="1.6" ry="1.2" class="ink"/>`},
+  proud:{noblink:1, blush:.75, eyes:`<path class="ink" d="${star4(-8,1,4)}"/><path class="ink" d="${star4(8,1,4)}"/>`, mouth:`<path class="o mouth" d="M-6.5,8.5 Q0,16 6.5,8.5 Z"/>`, fx:`<path class="o" fill="#F7DE8B" stroke-width="1.3" d="${star4(22,-20,5.5)}"/><path class="o" fill="#F7DE8B" stroke-width="1.1" d="${star4(-23,-14,3.5)}"/>`},
+  sad:{eyes:`<ellipse cx="-8" cy="1" rx="2.2" ry="2.8" class="ink"/><ellipse cx="8" cy="1" rx="2.2" ry="2.8" class="ink"/><path d="M-8,5.5 L-8,10" stroke="#8CC8EE" stroke-width="2.2" stroke-linecap="round"/><path d="M8,5.5 L8,10" stroke="#8CC8EE" stroke-width="2.2" stroke-linecap="round"/>`, brows:WORRY, mouth:`<path class="ink-s" d="M-3.5,13.5 Q0,10.5 3.5,13.5"/>`},
+  eager:{blush:.7, eyes:`<circle cx="-8" cy="1" r="3.4" class="ink"/><circle cx="-6.8" cy="-0.3" r="1.25" fill="#FFFFFF"/><circle cx="-9" cy="2.4" r="0.6" fill="#FFFFFF"/><circle cx="8" cy="1" r="3.4" class="ink"/><circle cx="9.2" cy="-0.3" r="1.25" fill="#FFFFFF"/><circle cx="7" cy="2.4" r="0.6" fill="#FFFFFF"/>`, brows:`<path class="ink-s" stroke-width="1.6" d="M-11,-7.5 Q-8,-9.5 -5,-7.5"/><path class="ink-s" stroke-width="1.6" d="M5,-7.5 Q8,-9.5 11,-7.5"/>`, mouth:`<path class="o mouth" d="M-4.5,8.5 Q0,15 4.5,8.5 Z"/>`}
+};
+function armSVG(top, skin, prop){
+  let p='';
+  if(prop==='cup') p=`<g transform="translate(0,17)"><rect class="o" x="-4.5" y="-6" width="9" height="9" rx="2" fill="#FFFFFF"/><path class="ink-s" stroke-width="1.4" d="M4.5,-4 q4,1 0,5"/></g>`;
+  if(prop==='thumb') p=`<rect class="o" x="2" y="12.5" width="6.5" height="4" rx="2" fill="${skin}"/>`;
+  return `<rect class="o" x="-3.6" y="-2" width="7.2" height="17" rx="3.6" fill="${top}"/><circle class="o" cx="0" cy="16" r="4.2" fill="${skin}"/>${p}`;
+}
+function character(c){
+  const skin=c.skin||SKIN[0], hair=c.hair||'#3B2F3A', top=c.top||'#9FD8C7', pants=c.pants||'#5D5670';
+  const pose=c.pose||'idle', ex=EXPR[c.expr||'neutral'], hs=HAIRS[c.hairStyle||'bob'];
+  const [rl,rr] = ARM[pose]||ARM.idle;
+  const delay = ((c.seed||0)%5)*0.83;
+  const blushA = ex.blush||.45;
+  const book = c.prop==='book' ? `<g transform="translate(0,-28)"><rect class="o" x="-12" y="-7.5" width="24" height="15" rx="2" fill="${c.bookColor||'#C7BCEB'}"/><rect x="-10" y="-5.5" width="20" height="11" rx="1" fill="#FFFFFF"/><path class="ink-s" stroke-width="1.1" d="M0,-5.5 L0,5.5 M-8,-2.5 L-3,-2.5 M-8,0.5 L-3,0.5 M3,-2.5 L8,-2.5 M3,0.5 L7,0.5"/></g>` : '';
+  return `<g class="char pose-${pose}${ex.noblink?' noblink':''}${c.cls?' '+c.cls:''}">
+    <ellipse cx="0" cy="0" rx="17" ry="4.5" style="fill:var(--shadow)"/>
+    <g class="bob">
+      <rect class="o leg leg-l" x="-10" y="-17" width="8.5" height="17" rx="4" fill="${pants}"/>
+      <rect class="o leg leg-r" x="1.5" y="-17" width="8.5" height="17" rx="4" fill="${pants}"/>
+      <g transform="translate(0,-62)"><g class="head">${hs.back(hair)}</g></g>
+      <rect class="o" x="-15" y="-44" width="30" height="30" rx="12" fill="${top}"/>
+      ${c.lead?`<path class="o" stroke-width="1.3" fill="#F7DE8B" d="${star5(7,-31,4.6)}"/>`:''}
+      <g transform="translate(0,-62)"><g class="head">
+        <circle class="o" r="21" fill="${skin}"/>
+        <ellipse cx="-13" cy="7" rx="3.8" ry="2.4" fill="#F48C8C" opacity="${blushA}"/><ellipse cx="13" cy="7" rx="3.8" ry="2.4" fill="#F48C8C" opacity="${blushA}"/>
+        <g class="eyes" style="animation-delay:${delay}s">${ex.eyes}</g>
+        ${ex.mouth}
+        ${hs.front(hair)}
+        ${ex.brows||''}
+        ${c.acc?ACC[c.acc]:''}
+        ${ex.fx||''}
+      </g></g>
+      <g transform="translate(-14,-38)"><g class="arm arm-l" style="--r:${rl}deg">${armSVG(top,skin)}</g></g>
+      <g transform="translate(14,-38)"><g class="arm arm-r" style="--r:${rr}deg">${armSVG(top,skin,c.armProp)}</g></g>
+      ${book}
+    </g>
+  </g>`;
+}
+const at = (x,y,inner,extra='') => `<g transform="translate(${x},${y})"${extra}>${inner}</g>`;
+
+/* ---------- bubbles, pills, emotes ---------- */
+function tailRect(x0,y0,w,h,r,tx,tipx,tipy){
+  tx=Math.max(x0+r+6,Math.min(x0+w-r-6,tx));
+  return `M${x0+r},${y0} H${x0+w-r} Q${x0+w},${y0} ${x0+w},${y0+r} V${y0+h-r} Q${x0+w},${y0+h} ${x0+w-r},${y0+h} H${tx+6} L${tipx},${tipy} L${tx-6},${y0+h} H${x0+r} Q${x0},${y0+h} ${x0},${y0+h-r} V${y0+r} Q${x0},${y0} ${x0+r},${y0} Z`;
+}
+function bubble(o){
+  const kind=o.kind||'speech', dx=o.dx||0, x=o.x, y=o.y;
+  const font = kind==='shout'?FS:kind==='whisper'?FW:FB;
+  const padX = kind==='whisper'?8:11, h = kind==='whisper'?21:27;
+  const w = Math.ceil(tw(o.text,font))+padX*2;
+  const x0 = x+dx-w/2, y0 = y-10-h, cls = kind==='shout'?'s-text':kind==='whisper'?'w-text':'b-text';
+  const tx = x0+w/2+ (o.tail||0);
+  const txt = `<text class="${cls}" x="${x0+padX}" y="${y0+h/2+4.3}">${esc(o.text)}</text>`;
+  let shape='';
+  if(kind==='speech') shape=`<path class="o" style="fill:var(--bubble)" d="${tailRect(x0,y0,w,h,11,x,x,y-1)}"/>`;
+  if(kind==='shout') shape=`<path class="o" stroke-width="2.4" style="fill:var(--shout)" d="${tailRect(x0,y0,w,h,9,x,x,y-1)}"/>
+     <path class="ink-s" stroke-width="1.8" d="M${x0-5},${y0-3} l-5,-4 M${x0+w+5},${y0-3} l5,-4 M${x0+w+6},${y0+8} l7,0"/>
+     <g transform="translate(${x0+2},${y0+1})"><circle class="o" r="8" style="fill:var(--alert)"/><text x="0" y="4.2" text-anchor="middle" fill="#FFFFFF" style="font-family:var(--f-display);font-size:12px">!</text></g>`;
+  if(kind==='thought') shape=`<rect class="o" x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${h/2}" style="fill:var(--thought)"/>
+     <circle class="o" cx="${x+dx*0.45}" cy="${y-6.5}" r="3.4" style="fill:var(--thought)"/><circle class="o" cx="${x+dx*0.15}" cy="${y-0.5}" r="2" style="fill:var(--thought)"/>`;
+  if(kind==='whisper') shape=`<path class="o" stroke-width="1.3" stroke-dasharray="3 3" style="fill:var(--bubble)" d="${tailRect(x0,y0,w,h,10,x,x,y-1)}"/>`;
+  return `<g class="bubble${o.cls?' '+o.cls:''}">${shape}${txt}</g>`;
+}
+const CAT = {write:'#7FD6B6', read:'#B9A8F2', shell:'#8CC8EE', web:'#F2C88B'};
+function pill(x,y,text,cat){
+  const w = Math.ceil(tw(text,FP))+26, x0=x-w/2;
+  return `<g class="pill"><rect x="${x0}" y="${y}" width="${w}" height="17" rx="8.5" style="fill:var(--pill-bg)"/><circle cx="${x0+10}" cy="${y+8.5}" r="3" fill="${CAT[cat]||'#CCCCCC'}"/><text class="p-text" x="${x0+17}" y="${y+11.8}">${esc(text)}</text></g>`;
+}
+function emote(x,y,type){
+  let g='';
+  if(type==='!') g=`<circle class="o" r="8.5" style="fill:var(--alert)"/><text y="4.4" text-anchor="middle" fill="#FFFFFF" style="font-family:var(--f-display);font-size:13px">!</text>`;
+  if(type==='?') g=`<circle class="o" r="8.5" fill="#C7BCEB"/><text y="4.4" text-anchor="middle" class="ink" style="font-family:var(--f-display);font-size:13px">?</text>`;
+  if(type==='bulb') g=`<path class="ink-s" stroke-width="1.6" d="M-12,-4 l-4,-2 M12,-4 l4,-2 M0,-15 l0,-4 M-9,-12 l-3,-3 M9,-12 l3,-3"/><circle class="o" cy="-3" r="8" fill="#F7DE8B"/><rect class="o" x="-4" y="5" width="8" height="5" rx="1.5" fill="#B9BFD0"/>`;
+  if(type==='sweat') g=`<path class="o" style="fill:var(--drop)" d="M0,-8 q-6,8 0,11 q6,-3 0,-11 Z"/>`;
+  if(type==='sparkle') g=`<path class="o" fill="#F7DE8B" stroke-width="1.4" d="${star4(0,0,8)}"/><path class="o" fill="#F7DE8B" stroke-width="1.1" d="${star4(11,-8,4)}"/>`;
+  if(type==='zzz') g=`<text class="zz ink" style="font-family:var(--f-display);font-size:13px">z</text><text class="zz ink" x="8" y="-9" style="font-family:var(--f-display);font-size:16px;animation-delay:-.8s">Z</text>`;
+  if(type==='note') g=`<text class="ink" style="font-family:var(--f-display);font-size:17px">♪</text>`;
+  return `<g transform="translate(${x},${y})"><g class="emote">${g}</g></g>`;
+}
+
+/* ---------- furniture ---------- */
+function chair(x,y,color){ return `<rect class="o" x="${x-17}" y="${y-60}" width="34" height="36" rx="11" fill="${color}"/>`; }
+function desk(x,y,o={}){
+  const dx=o.dx??-27;
+  const pw=o.name?Math.ceil(tw(o.name,'7px "JetBrains Mono", monospace'))+12:0;
+  return at(x,y,`
+    ${o.glow?`<ellipse class="glow" cx="${dx}" cy="-47" rx="19" ry="8" style="fill:var(--screen-glow)"/>`:''}
+    <rect class="o" x="-41" y="-33" width="82" height="11" rx="4" style="fill:var(--wood-top)"/>
+    <rect class="o" x="-41" y="-24" width="82" height="27" rx="5" style="fill:var(--wood)"/>
+    <rect class="o" x="${dx-13}" y="-46" width="26" height="14" rx="3" style="fill:var(--metal)"/>
+    <circle cx="${dx}" cy="-39" r="2" style="fill:var(--metal-dot)"/>
+    ${o.plant?`<g transform="translate(29,-33)"><path class="o" fill="#86C9A9" d="M0,-6 C-9,-10 -10,-20 -4,-22 C-1,-16 0,-12 0,-6 Z M0,-6 C8,-11 10,-19 5,-22 C1,-17 0,-12 0,-6 Z"/><rect class="o" x="-5.5" y="-7" width="11" height="8" rx="2.5" style="fill:var(--pot)"/></g>`:''}
+    ${o.mug?`<g transform="translate(30,-33)"><rect class="o" x="-4.5" y="-9" width="9" height="9" rx="2" fill="#FFFFFF"/><path class="ink-s" stroke-width="1.3" d="M4.5,-7 q4,1 0,5"/></g>`:''}
+    ${o.name?`<rect class="o" stroke-width="1.2" x="${-pw/2}" y="-17" width="${pw}" height="11" rx="3" style="fill:var(--plate)"/><text class="plate" x="0" y="-9.2">${esc(o.name)}</text>`:''}
+  `);
+}
+function plant(x,y,s=1){ return at(x,y,`<g transform="scale(${s})"><path class="o" fill="#86C9A9" d="M0,-20 C-16,-24 -22,-44 -12,-52 C-6,-40 -2,-32 0,-20 Z"/><path class="o" fill="#9FD8C7" d="M0,-20 C14,-28 20,-46 10,-54 C4,-42 1,-32 0,-20 Z"/><path class="o" fill="#7CBF9E" d="M0,-20 C-4,-34 -2,-50 2,-58 C6,-46 4,-32 0,-20 Z"/><path class="o" style="fill:var(--pot)" d="M-12,-22 H12 L9,0 H-9 Z"/></g>`); }
+
+/* ---------- cast ---------- */
+const CAST = {
+  leadA:{skin:SKIN[1], hair:'#3B2F3A', hairStyle:'short', top:'#9FD8C7', lead:1, seed:1},
+  reviewer:{skin:SKIN[0], hair:'#6B4A3A', hairStyle:'long', top:'#C7BCEB', acc:'glasses', seed:2},
+  tester:{skin:SKIN[2], hair:'#2F2A33', hairStyle:'bob', top:'#F7DE8B', pants:'#4F5A7A', acc:'headphones', seed:3},
+  researcher:{skin:SKIN[0], hair:'#A86B4C', hairStyle:'long', top:'#A9D3F0', acc:'ribbon', seed:4},
+  leadB:{skin:SKIN[0], hair:'#5A4256', hairStyle:'bun', top:'#F6B9A0', lead:1, seed:5},
+  designer:{skin:SKIN[3], hair:'#2F2A33', hairStyle:'side', top:'#B9E3D5', acc:'beanie', seed:6},
+  newbie:{skin:SKIN[1], hair:'#E2B866', hairStyle:'bob', top:'#C7BCEB', acc:'sprout', seed:7},
+  builder:{skin:SKIN[2], hair:'#3D3550', hairStyle:'short', top:'#A9D3F0', pants:'#46506E', seed:8},
+  lounger:{skin:SKIN[1], hair:'#8A5A6A', hairStyle:'side', top:'#F6B9A0', lead:1, seed:9}
+};
+const C = (k,extra)=>character(Object.assign({},CAST[k],extra));
+
+/* ---------- office scene ---------- */
+function officeScene(){
+  let s='';
+  // wall
+  s+=`<rect x="0" y="0" width="960" height="160" style="fill:var(--wall)"/>`;
+  s+=`<rect x="0" y="150" width="960" height="10" style="fill:var(--baseboard)"/>`;
+  // floor + planks
+  s+=`<rect x="0" y="160" width="960" height="416" style="fill:var(--floor)"/>`;
+  for(let y=196,i=0;y<576;y+=36,i++){ s+=`<rect x="0" y="${y}" width="960" height="2" style="fill:var(--floor-line)"/>`; for(let x=(i%2?60:150);x<960;x+=210){ s+=`<rect x="${x}" y="${y-34}" width="2" height="34" style="fill:var(--floor-line)"/>`; } }
+  // windows
+  [[285,30],[395,30]].forEach(([x,y])=>{
+    s+=`<rect class="o" x="${x}" y="${y}" width="96" height="84" rx="8" style="fill:var(--wall-trim)"/>
+        <rect x="${x+6}" y="${y+6}" width="84" height="72" rx="5" style="fill:var(--sky)"/>
+        <rect x="${x+6}" y="${y+48}" width="84" height="30" rx="5" style="fill:var(--sky2)"/>
+        <g class="day-only"><ellipse cx="${x+30}" cy="${y+28}" rx="14" ry="6" style="fill:var(--cloud)"/><ellipse cx="${x+40}" cy="${y+24}" rx="10" ry="7" style="fill:var(--cloud)"/><ellipse cx="${x+66}" cy="${y+44}" rx="11" ry="5" style="fill:var(--cloud)" opacity=".8"/></g>
+        <g class="night-only"><circle cx="${x+22}" cy="${y+20}" r="1.3" fill="#FFFFFF"/><circle cx="${x+56}" cy="${y+14}" r="1.1" fill="#FFFFFF"/><circle cx="${x+74}" cy="${y+36}" r="1.4" fill="#FFFFFF"/><circle cx="${x+40}" cy="${y+40}" r="0.9" fill="#FFFFFF"/></g>
+        <rect x="${x+46}" y="${y+6}" width="4" height="72" style="fill:var(--wall-trim)"/>
+        <rect class="o" x="${x-4}" y="${y+82}" width="104" height="8" rx="3" style="fill:var(--wall-trim)"/>`;
+  });
+  s+=`<g class="night-only"><circle cx="${395+70}" cy="52" r="10" style="fill:var(--moon)"/><circle cx="${395+75}" cy="48" r="9" style="fill:var(--sky)"/></g>`;
+  s+=plant(339,113,.62);
+  // bookshelf
+  s+=`<rect class="o" x="30" y="34" width="132" height="122" rx="6" style="fill:var(--wood-dark)"/>
+      <rect x="38" y="42" width="116" height="106" rx="3" style="fill:var(--wood)"/>`;
+  const books=['#9FD8C7','#F6B9A0','#C7BCEB','#F7DE8B','#A9D3F0','#F4A3B4'];
+  [[44,72],[44,108],[44,144]].forEach(([bx,by],row)=>{
+    let x=bx; for(let i=0;i<9;i++){ const w=8+(i*7+row*3)%5, hgt=20+((i*5+row*2)%4)*3; if(x+w>150)break; s+=`<rect class="o" stroke-width="1.3" x="${x}" y="${by-hgt}" width="${w}" height="${hgt}" rx="1.5" fill="${books[(i+row*2)%6]}"/>`; x+=w+1.5; }
+    s+=`<rect x="38" y="${by}" width="116" height="4" style="fill:var(--wood-dark)"/>`;
+  });
+  // clock
+  s+=`<g transform="translate(222,62)"><circle class="o" r="18" fill="#FFFFFF"/><path class="ink-s" d="M0,0 L0,-11 M0,0 L8,4"/><circle r="2" class="ink"/></g>`;
+  // whiteboard
+  s+=`<rect class="o" x="512" y="36" width="128" height="80" rx="6" style="fill:var(--board)"/>
+      <path class="ink-s" stroke-width="1.5" d="M528,54 h8 v8 h-8 z M542,58 h56 M528,72 h8 v8 h-8 z M542,76 h44 M528,90 h8 v8 h-8 z M542,94 h66"/>
+      <path d="M529,57 l3,3 l5,-6 M529,75 l3,3 l5,-6" stroke="#2C8A78" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <rect class="o" x="532" y="116" width="88" height="6" rx="3" style="fill:var(--wall-trim)"/>
+      <rect x="600" y="111" width="12" height="5" rx="2" fill="#F08A6C"/>`;
+  // door
+  s+=`<rect class="o" x="676" y="48" width="72" height="112" rx="6" style="fill:var(--wood-dark)"/>
+      <rect class="o" x="684" y="56" width="56" height="104" rx="4" style="fill:var(--wood)"/>
+      <rect class="o" x="696" y="68" width="32" height="30" rx="4" style="fill:var(--sky)"/>
+      <circle class="o" cx="730" cy="114" r="3.5" fill="#F7DE8B"/>
+      <rect class="o" stroke-width="1.3" x="690" y="30" width="44" height="14" rx="4" style="fill:var(--plate)"/><text class="plate" style="font-size:8px" x="712" y="40">입구</text>
+      <rect class="o" x="680" y="162" width="64" height="10" rx="5" style="fill:var(--rug-c)"/>`;
+  // server racks
+  [[790,64],[858,64]].forEach(([x,w],i)=>{
+    s+=`<rect class="o" x="${x}" y="20" width="${w}" height="140" rx="7" style="fill:var(--rack)"/>`;
+    for(let k=0;k<6;k++){ const yy=32+k*20; s+=`<rect x="${x+8}" y="${yy}" width="${w-16}" height="14" rx="3" style="fill:var(--rack-dark)"/>
+      <circle class="led" style="animation-delay:-${((k*3+i*5)%7)*0.19}s" cx="${x+16}" cy="${yy+7}" r="2.2" fill="${k%3===0?'#7FD6B6':k%3===1?'#8CC8EE':'#F7DE8B'}"/>
+      <rect x="${x+24}" y="${yy+5}" width="${w-40}" height="3" rx="1.5" fill="#FFFFFF" opacity=".25"/>`; }
+  });
+  // rugs
+  s+=`<rect x="100" y="262" width="314" height="114" rx="28" style="fill:var(--rug-a)"/>`;
+  s+=`<rect x="512" y="262" width="314" height="114" rx="28" style="fill:var(--rug-b)"/>`;
+  s+=`<rect x="640" y="452" width="306" height="112" rx="30" style="fill:var(--rug-c)"/>`;
+  s+=`<ellipse cx="118" cy="514" rx="96" ry="40" style="fill:var(--rug-a)" opacity=".7"/>`;
+  // team signs
+  [[257,'a-sdn-portal','#9FD8C7'],[669,'claude-office','#F6B9A0']].forEach(([x,t,c])=>{ const w=tw(t,'10px "JetBrains Mono", monospace')+28; s+=`<g transform="translate(${x},392)"><rect class="o" stroke-width="1.4" x="${-w/2}" y="-11" width="${w}" height="20" rx="10" style="fill:var(--plate)"/><circle cx="${-w/2+11}" cy="-1" r="4" fill="${c}" class="o" stroke-width="1"/><text class="sign" x="7" y="2.6">${t}</text></g>`; });
+
+  // ---- team A
+  const yA=346;
+  s+=chair(165,yA,'#B6A6E4')+chair(257,yA,'#7FC9B3')+chair(349,yA,'#E9CB6C');
+  s+=at(165,yA,C('reviewer',{pose:'read',expr:'focus',prop:'book',bookColor:'#F6B9A0'}));
+  s+=at(257,yA,C('leadA',{pose:'typing',expr:'focus'}));
+  s+=at(349,yA-12,C('tester',{pose:'raise',expr:'eager'}));
+  s+=desk(165,yA,{name:'code-reviewer',mug:1});
+  s+=desk(257,yA,{name:'★ 팀장',glow:1,plant:1});
+  s+=desk(349,yA,{name:'test-runner'});
+  // ---- team B
+  s+=chair(577,yA,'#9FD8C7')+chair(669,yA,'#F0A58B')+chair(761,yA,'#C7BCEB');
+  s+=at(577,yA,C('designer',{pose:'think',expr:'think'}));
+  s+=at(669,yA,C('leadB',{pose:'beckon',expr:'happy'}));
+  s+=desk(577,yA,{name:'designer',mug:1});
+  s+=desk(669,yA,{name:'★ 팀장',plant:1,glow:1});
+  s+=desk(761,yA,{name:'새 팀원'});
+
+  // ---- server rack worker
+  s+=at(872,236,C('builder',{pose:'think',expr:'neutral'}));
+  // ---- research corner
+  s+=`<g transform="translate(62,520)"><rect class="o" x="-4" y="-40" width="8" height="40" style="fill:var(--wood-dark)"/><ellipse class="o" cx="0" cy="0" rx="16" ry="4.5" style="fill:var(--wood-dark)"/>
+      <circle class="o" cx="0" cy="-58" r="20" fill="#A9D3F0"/><path class="o" stroke-width="1.4" fill="#9FD8C7" d="M-12,-66 C-6,-72 2,-70 4,-64 C2,-58 -6,-60 -10,-56 C-14,-58 -15,-62 -12,-66 Z M6,-52 C10,-54 15,-50 12,-45 C8,-44 5,-47 6,-52 Z"/>
+      <path class="ink-s" stroke-width="1.6" d="M-22,-50 A24,24 0 0 0 14,-38"/></g>`;
+  s+=`<g transform="translate(28,470)"><ellipse class="lampglow night-only" cx="0" cy="-70" rx="34" ry="28"/><rect class="o" x="-2" y="-62" width="4" height="62" style="fill:var(--rack)"/><path class="o" fill="#F7DE8B" d="M-12,-62 L12,-62 L7,-80 L-7,-80 Z"/><ellipse class="o" cx="0" cy="0" rx="10" ry="3" style="fill:var(--rack)"/></g>`;
+  s+=at(132,534,C('researcher',{pose:'read',expr:'focus',prop:'book',bookColor:'#9FD8C7'}));
+  // ---- lounge
+  s+=plant(668,500,1);
+  s+=`<g transform="translate(910,470)"><rect class="o" x="-30" y="-6" width="60" height="44" rx="6" style="fill:var(--wood)"/><rect class="o" x="-16" y="-44" width="32" height="38" rx="6" style="fill:var(--rack)"/><rect x="-9" y="-36" width="18" height="8" rx="2" fill="#7FD6B6"/><rect class="o" x="-6" y="-20" width="12" height="10" rx="2" fill="#FFFFFF"/></g>`;
+  s+=`<g transform="translate(796,522)"><rect class="o" x="-62" y="-50" width="124" height="38" rx="16" fill="#9C8FCF"/></g>`;
+  s+=at(796,520,C('lounger',{pose:'coffee',expr:'happy',armProp:'cup'}));
+  s+=`<g transform="translate(796,522)"><rect class="o" x="-58" y="-22" width="116" height="26" rx="10" fill="#B3A7E2"/><rect class="o" x="-70" y="-38" width="18" height="44" rx="9" fill="#9C8FCF"/><rect class="o" x="52" y="-38" width="18" height="44" rx="9" fill="#9C8FCF"/></g>`;
+
+  // ---- walker (new member)
+  s+=`<g class="walker">${C('newbie',{pose:'idle',expr:'eager'})}${bubble({x:0,y:-88,text:'맡겨주세요!',kind:'speech',dx:-8,cls:'wb'})}</g>`;
+
+  // ---- overlay: bubbles, pills, emotes
+  s+=bubble({x:165,y:258,text:'여기 null 체크가…',kind:'thought',dx:-56});
+  s+=pill(257,238,'Edit · DeviceService.java','write');
+  s+=bubble({x:349,y:246,text:'npm test 실행해도 될까요?',kind:'shout',dx:60});
+  s+=bubble({x:577,y:258,text:'꼬리 각도는…',kind:'thought',dx:-30});
+  s+=bubble({x:669,y:258,text:'레이아웃 정리 부탁해요!',kind:'speech',dx:28});
+  s+=bubble({x:872,y:146,text:'빌드 기다리는 중…',kind:'thought',dx:-36});
+  s+=pill(872,80,'Bash · xcodebuild','shell');
+  s+=pill(132,428,'WebSearch · SpriteKit','web');
+  s+=bubble({x:796,y:432,text:'커피 맛있다',kind:'whisper',dx:22});
+  s+=emote(764,452,'note');
+  return s;
+}
+
+/* walker keyframes */
+function walkerKeyframes(){
+  let l='',r='';
+  for(let p=3,i=0;p<=42;p+=1.5,i++){ const up=i%2===0; l+=`${p.toFixed(1)}%{transform:translateY(${up?-2.6:0}px)}`; r+=`${p.toFixed(1)}%{transform:translateY(${up?0:-2.6}px)}`; }
+  let arm='0%,46%{transform:rotate(-8deg)}'; [48,51,54,57,60].forEach((p,i)=>arm+=`${p}%{transform:rotate(${i%2?-125:-155}deg)}`); arm+='64%,100%{transform:rotate(-8deg)}';
+  return `@keyframes walkPath{0%{transform:translate(712px,182px);opacity:0}3%{transform:translate(712px,182px);opacity:1}15%{transform:translate(842px,262px)}33%{transform:translate(842px,404px)}42%,96%{transform:translate(720px,428px);opacity:1}100%{transform:translate(720px,428px);opacity:0}}
+  @keyframes wBubble{0%,45%{opacity:0}48%,92%{opacity:1}95%,100%{opacity:0}}
+  @keyframes wLegL{0%{transform:none}${l}43%,100%{transform:none}}
+  @keyframes wLegR{0%{transform:none}${r}43%,100%{transform:none}}
+  @keyframes wArm{${arm}}
+  @keyframes wNod{0%,66%{transform:none}69%,75%{transform:translateY(2.5px)}72%{transform:none}78%,100%{transform:none}}`;
+}
+
+/* ---------- sheets ---------- */
+const EXPR_LIST = [
+  ['neutral','기본','평소 상태'],['happy','기쁨','인사, 위임, 커피'],['focus','집중','읽기, 편집'],['think','생각','프롬프트 직후, 서버랙 대기'],
+  ['surprised','놀람','새 업무 도착'],['troubled','곤란','툴 오류'],['sleepy','졸림','입력 대기 10분 이상'],['proud','뿌듯','완료, 하이파이브'],
+  ['sad','슬픔','연속 오류 3회 이상'],['eager','간절','권한 승인 대기']
+];
+const EXPR_CAST = ['leadA','leadB','reviewer','designer','newbie','tester','lounger','researcher','builder','tester'];
+const GEST_LIST = [
+  ['wave','손 흔들기','출근, 퇴근 인사'],['typing','타이핑','Edit, Write'],['think','턱 괴기','생각, 기다리기'],['raise','손 들기','권한 승인 대기'],
+  ['thumbs','엄지척','팀장의 칭찬'],['cheer','만세','큰 작업 완료'],['highfive','하이파이브','서브에이전트 보고'],['tilt','고개 갸웃','질문, 애매한 결과'],
+  ['scratch','머리 긁적','툴 오류'],['stretch','기지개','응답 완료 (Stop)'],['coffee','커피 마시기','휴게실 대기'],['nod','끄덕임','지시 수락']
+];
+const GEST_EXPR = {wave:'happy',typing:'focus',think:'think',raise:'eager',thumbs:'happy',cheer:'proud',highfive:'proud',tilt:'think',scratch:'troubled',stretch:'happy',coffee:'happy',nod:'happy'};
+const GEST_CAST = ['newbie','leadA','designer','tester','leadB','reviewer','builder','researcher','tester','lounger','lounger','newbie'];
+
+function cardSVG(inner, vb='-46 -106 92 114'){ return `<svg viewBox="${vb}" aria-hidden="true"><ellipse cx="0" cy="1" rx="34" ry="7" style="fill:var(--floor)"/>${inner}</svg>`; }
+function renderSheets(){
+  document.getElementById('exprSheet').innerHTML = EXPR_LIST.map(([k,n,d],i)=>{
+    let extra='';
+    if(k==='sleepy') extra=emote(22,-80,'zzz');
+    if(k==='eager') extra=emote(-26,-82,'!');
+    if(k==='surprised') extra=emote(25,-84,'bulb');
+    return `<div class="card">${cardSVG(C(EXPR_CAST[i],{expr:k,pose:k==='sleepy'?'sleep':k==='think'?'think':'idle'})+extra)}<b>${n}</b><small>${d}</small></div>`;
+  }).join('');
+  document.getElementById('gestSheet').innerHTML = GEST_LIST.map(([k,n,d],i)=>{
+    let inner;
+    if(k==='highfive'){
+      inner = at(-20,0,C('builder',{pose:'highfive',expr:'proud'}))+at(22,0,`<g transform="scale(-1,1)">${C('leadB',{pose:'highfive',expr:'happy'})}</g>`)+emote(1,-88,'sparkle');
+      return `<div class="card"><svg viewBox="-56 -104 112 112" aria-hidden="true"><ellipse cx="0" cy="1" rx="50" ry="7" style="fill:var(--floor)"/>${inner}</svg><b>${n}</b><small>${d}</small></div>`;
+    }
+    inner = C(GEST_CAST[i],{pose:k,expr:GEST_EXPR[k],armProp:k==='coffee'?'cup':k==='thumbs'?'thumb':undefined});
+    if(k==='scratch') inner+=emote(-24,-84,'sweat');
+    if(k==='tilt') inner+=emote(24,-86,'?');
+    if(k==='thumbs') inner+=emote(32,-62,'sparkle');
+    if(k==='coffee') inner+=emote(24,-82,'note');
+    return `<div class="card">${cardSVG(inner, k==='cheer'||k==='stretch'?'-46 -110 92 118':'-46 -106 92 114')}<b>${n}</b><small>${d}</small></div>`;
+  }).join('');
+}
+function renderBubbles(){
+  let s='';
+  const cols=[[96,'말','대화, 인사, 보고'],[288,'생각','생각 중, 기다리는 중'],[480,'외침','권한 승인 대기'],[672,'속삭임','휴게실 잡담'],[864,'상태 칩','현재 툴과 대상']];
+  s+=bubble({x:96,y:92,text:'다 했어요!',kind:'speech'});
+  s+=bubble({x:288,y:92,text:'음… 어디서 봤더라',kind:'thought'});
+  s+=bubble({x:480,y:92,text:'git push 해도 될까요?',kind:'shout',dx:6});
+  s+=bubble({x:672,y:92,text:'점심 뭐 먹지?',kind:'whisper'});
+  s+=pill(864,62,'Read · auth.ts','read');
+  cols.forEach(([x,n,d])=>{ s+=`<text x="${x}" y="134" text-anchor="middle" style="font-family:var(--f-body);font-size:14px;font-weight:600;fill:var(--text)">${n}</text><text x="${x}" y="154" text-anchor="middle" style="font-family:var(--f-body);font-size:12.5px;fill:var(--muted)">${d}</text>`; });
+  document.getElementById('bubbleSheet').innerHTML=s;
+}
+function renderStory(){
+  const fr=(inner)=>`<svg viewBox="0 0 260 170" aria-hidden="true"><rect x="0" y="0" width="260" height="44" style="fill:var(--wall)"/><rect x="0" y="40" width="260" height="5" style="fill:var(--baseboard)"/><rect x="196" y="4" width="40" height="40" rx="4" class="o" style="fill:var(--wood)"/><rect x="20" y="96" width="220" height="70" rx="22" style="fill:var(--rug-b)"/>${inner}</svg>`;
+  const leadDesk = (pose,expr)=>chair(80,150,'#F0A58B')+at(80,150,C('leadB',{pose,expr}))+desk(80,150,{name:'★ 팀장',plant:1});
+  const memDesk = (who)=>chair(180,150,'#C7BCEB')+(who||'')+desk(180,150,{name:'code-reviewer'});
+  const rev = (o)=>C('reviewer',o);
+  const frames = [
+    ['t = 0.0s','팀장이 손짓하며 일을 맡깁니다.', leadDesk('beckon','happy')+memDesk()+bubble({x:80,y:64,text:'RouterConfig 리뷰 부탁해요!',kind:'speech',dx:40})],
+    ['t = 0.3s','고정 직원 code-reviewer가 문으로 들어옵니다.', leadDesk('idle','happy')+memDesk()+at(216,82,rev({pose:'walk',expr:'eager'}))],
+    ['t = 2.5s','고개를 끄덕이고 자기 자리로 갑니다.', leadDesk('typing','focus')+memDesk()+at(132,128,rev({pose:'nod',expr:'happy'}))+bubble({x:132,y:40,text:'맡겨주세요!',kind:'speech',dx:20})],
+    ['SubagentStop','끝나면 팀장에게 돌아와 하이파이브로 보고합니다.', leadDesk('highfive','proud')+memDesk()+at(130,146,`<g transform="scale(-1,1)">${rev({pose:'highfive',expr:'proud'})}</g>`)+emote(106,80,'sparkle')+bubble({x:134,y:58,text:'다 했어요!',kind:'speech',dx:44})]
+  ];
+  document.getElementById('story').innerHTML = frames.map(([t,c,inner])=>`<div class="frame">${fr(inner)}<div class="cap"><span>${t}</span><p>${c}</p></div></div>`).join('');
+}
+function renderAvatars(){
+  document.querySelectorAll('svg[data-avatar]').forEach(el=>{ el.setAttribute('aria-hidden','true'); el.innerHTML = `<g class="noblink">${C(el.dataset.avatar,{expr: el.dataset.avatar==='tester'?'eager':el.dataset.avatar==='lounger'?'happy':'neutral'})}</g>`; });
+}
+
+function render(){
+  const style = document.getElementById('walkerKF') || Object.assign(document.createElement('style'),{id:'walkerKF'});
+  style.textContent = walkerKeyframes(); document.head.appendChild(style);
+  const scene = officeScene();
+  document.getElementById('office').innerHTML = scene;
+  document.getElementById('miniOffice').innerHTML = scene;
+  renderSheets(); renderBubbles(); renderStory(); renderAvatars();
+}
+render();
+if(document.fonts && document.fonts.ready){ document.fonts.ready.then(render).catch(()=>{}); }
+})();
+</script>
