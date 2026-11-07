@@ -132,20 +132,19 @@
 
 ```sh
 #!/bin/sh
-# Claude Office 훅: 어떤 경우에도 Claude Code를 막지 않습니다.
-# - 아무것도 출력하지 않습니다 (SessionStart/UserPromptSubmit의 stdout은 컨텍스트에 추가되기 때문)
-# - 앱이 꺼져 있거나 응답이 없어도 즉시 종료합니다
-ENDPOINT_FILE="$HOME/Library/Application Support/ClaudeOffice/endpoint"
+# 아무것도 출력하지 않고 항상 exit 0. 앱이 꺼져 있으면 연결이 바로 거부되어 즉시 끝납니다.
+ENDPOINT_FILE="${CLAUDE_OFFICE_ENDPOINT:-$HOME/Library/Application Support/ClaudeOffice/endpoint}"
 [ -r "$ENDPOINT_FILE" ] || { cat >/dev/null; exit 0; }
 read -r PORT TOKEN < "$ENDPOINT_FILE"
-payload=$(cat)
-( printf '%s' "$payload" | curl -s -m 1 -X POST \
-    -H "Content-Type: application/json" \
-    -H "X-Office-Token: $TOKEN" \
-    -H "X-Office-Term: ${TERM_PROGRAM:-unknown}" \
-    --data-binary @- "http://127.0.0.1:$PORT/v1/hook" >/dev/null 2>&1 & )
+curl -s --connect-timeout 0.3 -m 1 -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Office-Token: $TOKEN" \
+  -H "X-Office-Term: ${TERM_PROGRAM:-unknown}" \
+  --data-binary @- "http://127.0.0.1:$PORT/v1/hook" >/dev/null 2>&1
 exit 0
 ```
+
+> **동기 전송인 이유 (M2 첫 실행에서 발견):** 처음에는 curl을 백그라운드로 띄우고 바로 끝냈는데, Claude Code는 훅을 별도 프로세스 그룹에서 실행하고 훅이 끝나면 그룹 전체를 종료합니다. 그래서 백그라운드 curl이 보내기 전에 죽어 훅이 하나도 도착하지 않았습니다. 지금은 응답(202)을 받을 때까지 기다리며, 앱이 응답하기 전에 바로 202를 돌려주므로 보통 수 밀리초 안에 끝납니다. 이벤트가 순서대로 도착하는 효과도 있습니다. `OfficeServerTests`의 "프로세스 그룹이 종료되어도" 테스트가 이 경우를 재현합니다.
 
 - `X-Office-Term`으로 iTerm2, Apple Terminal, VS Code, Ghostty 등을 구분합니다. "터미널로 이동" 기능에 씁니다.
 - `endpoint` 파일에는 앱이 실행될 때마다 `포트 토큰`을 기록합니다. 기본 포트는 47821이며, 사용 중이면 다른 포트를 고르고 파일을 갱신합니다.
@@ -342,7 +341,8 @@ public enum Directive: Equatable, Sendable {
 ### 6.5 M2 구현 메모
 
 - **훅 서버는 Network.framework 대신 BSD 소켓으로** 만들었습니다 (`OfficeServer`). macOS와 Linux에서 같은 코드가 돌아서, 서버·토큰 검증·훅 스크립트를 클라우드에서도 끝에서 끝까지 테스트할 수 있습니다. `poll` 기반 대기 루프라 멈출 때 깔끔하게 끝납니다.
-- 훅은 연결마다 동시에 받되 **도착 순서대로** 엔진에 넘깁니다. 그래도 훅 스크립트가 curl을 백그라운드로 보내므로 몇 밀리초 차이의 Pre/Post가 뒤바뀔 수 있어, 리듀서가 이미 끝난 `tool_use_id`의 늦은 시작을 무시합니다.
+- 훅은 연결마다 동시에 받되 **도착 순서대로** 엔진에 넘깁니다. 병렬 툴 호출처럼 훅 자체가 동시에 실행되면 순서가 뒤바뀔 수 있어, 리듀서가 이미 끝난 `tool_use_id`의 늦은 시작을 무시합니다.
+- **훅 스크립트는 동기 전송입니다** (§4.2). 백그라운드 curl은 Claude Code의 프로세스 그룹 정리 때문에 도착하지 못했습니다.
 - 훅 스크립트는 앱 번들(패키지 리소스)에 들어 있고, 설치할 때 `~/.claude/hooks/claude-office.sh`로 복사합니다. 앱이 업데이트되어 스크립트가 바뀌면 "다시 설치" 배너가 뜹니다.
 - 메뉴바 목록은 코어의 `Roster`가 만듭니다 (상태 이름, 승인 대기 모음, 표시 수준 적용). 앱은 그리기만 합니다.
 - 앱 타깃은 Swift 5 언어 모드 + 최소 동시성 검사로 둡니다 (코어 패키지는 Swift 6). 서버 콜백은 `DispatchQueue.main`으로 옮겨 순서를 지킵니다.

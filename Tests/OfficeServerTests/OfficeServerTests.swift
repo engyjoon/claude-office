@@ -204,6 +204,35 @@ struct HookServerTests {
         #expect(directives.contains { if case .status(let pill) = $0.action { pill?.text == "Bash · npm test" } else { false } })
     }
 
+    /// Claude Code는 훅을 별도 프로세스 그룹에서 실행하고, 끝나면 그룹 전체를 종료합니다.
+    /// 백그라운드로 보내던 첫 버전은 이 경우 훅이 도착하지 않았습니다 (M2 첫 실행에서 발견).
+    @Test(
+        "훅이 끝나자마자 프로세스 그룹이 종료되어도 훅이 도착한다",
+        .enabled(if: FileManager.default.isExecutableFile(atPath: "/usr/bin/setsid"), "setsid가 있는 Linux에서만 실행")
+    )
+    func survivesProcessGroupKill() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let inbox = Inbox()
+        let token = HookRequestPolicy.makeToken()
+        let server = HookServer(token: token) { inbox.append($0) }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        let endpoint = directory.appendingPathComponent("endpoint")
+        try EndpointFile.write(port: port, token: token, to: endpoint)
+        let script = directory.appendingPathComponent("claude-office.sh")
+        try HookInstaller.bundledScript.write(to: script, atomically: true, encoding: .utf8)
+        let payloadFile = directory.appendingPathComponent("payload.json")
+        try #"{"session_id":"g","hook_event_name":"SessionStart","source":"startup"}"#.write(to: payloadFile, atomically: true, encoding: .utf8)
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["CLAUDE_OFFICE_ENDPOINT"] = endpoint.path
+        let result = try run("/usr/bin/setsid", ["/bin/sh", "-c", "sh '\(script.path)' < '\(payloadFile.path)'; kill -TERM 0"], environment: environment)
+        #expect(result.output.isEmpty)
+        let delivered = await inbox.wait(for: 1, timeout: 3)
+        #expect(delivered.count == 1)
+    }
+
     @Test("앱이 꺼져 있어도(엔드포인트 없음, 서버 없음) 훅 스크립트는 조용히 성공한다")
     func hookScriptWithoutApp() throws {
         let directory = try temporaryDirectory()

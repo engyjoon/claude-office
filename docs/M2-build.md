@@ -74,6 +74,6 @@ make replay
 |---|---|
 | 빌드 오류 | 오류 메시지 전체를 알려 주세요. 앱 층은 Swift 5 모드로 두어 동시성 오류를 줄였습니다 |
 | "Claude Office.app은 손상되었거나…" | 로컬 서명 앱을 다른 맥으로 옮기면 생깁니다. 직접 빌드한 맥에서는 생기지 않습니다 |
-| 직원이 나타나지 않음 | 연결 확인 결과, 새 터미널에서 claude를 실행했는지, `cat "$HOME/Library/Application Support/ClaudeOffice/endpoint"` 파일이 있는지 |
+| 직원이 나타나지 않음 | 메뉴에 "훅 스크립트를 업데이트해야 해요"가 보이면 **다시 설치** 후 새 터미널에서 claude 실행. 그래도 안 되면 이벤트 로그 창, `cat "$HOME/Library/Application Support/ClaudeOffice/endpoint"` 파일, Claude Code 안에서 `/hooks` 목록을 확인 |
 | 버전 확인 실패로 기본 이벤트만 등록됨 | 로그인 셸에서 `claude --version`이 되는지. 되면 다시 설치를 눌러 주세요 |
 | 훅을 완전히 지우고 싶음 | 설정 → 연동 → 제거. 다른 훅은 그대로 남습니다 |
