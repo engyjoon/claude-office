@@ -4,6 +4,15 @@ APP_NAME := Claude Office.app
 DERIVED := build/DerivedData
 APP_PATH := $(DERIVED)/Build/Products/Release/$(APP_NAME)
 
+# xcode-select가 Command Line Tools를 가리켜도 Xcode.app이 있으면 그것을 사용
+ifeq ($(origin DEVELOPER_DIR),undefined)
+  ifneq ($(findstring CommandLineTools,$(shell xcode-select -p 2>/dev/null)),)
+    ifneq ($(wildcard /Applications/Xcode.app/Contents/Developer),)
+      export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+    endif
+  endif
+endif
+
 .PHONY: build test demo sounds serve replay bootstrap app run install uninstall clean
 
 ## ---- 코어 (macOS·Linux) ----
@@ -40,7 +49,7 @@ bootstrap:
 
 ## Release 빌드 (로컬 서명)
 app: bootstrap
-	xcodebuild -project App/ClaudeOffice.xcodeproj -scheme ClaudeOffice -configuration Release \
+	set -o pipefail; xcodebuild -project App/ClaudeOffice.xcodeproj -scheme ClaudeOffice -configuration Release \
 		-derivedDataPath $(DERIVED) build | tail -n 20
 
 ## 빌드한 앱 실행
