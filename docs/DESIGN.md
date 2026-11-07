@@ -61,7 +61,7 @@
 │  hooks: SessionStart / UserPromptSubmit / PreToolUse /    │
 │         PostToolUse / Notification / Stop / Subagent* …   │
 └───────────────┬───────────────────────────────────────────┘
-                │ stdin JSON → claude-office.sh → curl (비동기, 1초 타임아웃)
+                │ stdin JSON → claude-office.sh → curl (동기, 최대 1초)
                 ▼
 ┌──────────────────────── Claude Office.app ─────────────────────────┐
 │ [HookServer]  127.0.0.1:47821  POST /v1/hook  (토큰 검증)          │

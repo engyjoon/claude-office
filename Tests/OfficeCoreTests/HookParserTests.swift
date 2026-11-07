@@ -112,12 +112,14 @@ struct HookParserTests {
 
 @Suite("실제 수집 픽스처")
 struct CapturedFixtureTests {
-    @Test("captured/ 폴더의 실제 페이로드도 오류 없이 처리한다")
+    @Test("captured/ 폴더의 실제 페이로드를 모두 이벤트로 읽고 오류 없이 처리한다")
     func capturedFixtures() throws {
         for file in Fixture.files(in: "captured") {
             let record = try JSONValue.parse(Data(contentsOf: file))
             let payload = try #require(record["payload"], "\(file.lastPathComponent)")
-            _ = HookParser.parse(payload, term: record["term_program"]?.stringValue, receivedAt: Fixture.epoch)
+            // 실제 수집본은 모두 사무실이 다루는 이벤트입니다 (무시되는 것이 없어야 합니다)
+            let parsed = HookParser.parse(payload, term: record["term_program"]?.stringValue, receivedAt: Fixture.epoch)
+            #expect(parsed != nil, "\(file.lastPathComponent)")
             var engine = OfficeEngine(seed: 1)
             if let event = HookParser.parse(payload, receivedAt: Fixture.epoch) {
                 _ = engine.handle(event)
