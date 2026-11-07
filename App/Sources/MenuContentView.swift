@@ -8,6 +8,9 @@ struct MenuContentView: View {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    /// 메뉴바 창 안의 ScrollView는 내용 높이를 스스로 정하지 않아 0으로 접힐 수 있습니다 (M2 첫 실행에서 발견).
+    /// 내용 높이를 재서 직접 맞춥니다.
+    @State private var contentHeight: CGFloat = 120
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -27,8 +30,16 @@ struct MenuContentView: View {
                     }
                 }
                 .padding(12)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: ContentHeightKey.self, value: geometry.size.height)
+                    }
+                )
             }
-            .frame(maxHeight: 420)
+            .frame(height: min(max(contentHeight, 60), 420))
+            .onPreferenceChange(ContentHeightKey.self) { height in
+                contentHeight = height
+            }
             Divider()
             footer
         }
@@ -110,6 +121,14 @@ struct MenuContentView: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
