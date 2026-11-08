@@ -96,7 +96,7 @@ struct LayoutTests {
         // 패널을 숨기면 더 넓게
         #expect(OfficeLayout.capacity(width: 1400, height: 708).columns == 14)
         // 언제나 3행 (사무실 창이 3행 높이보다 낮아지지 않고, 더 낮은 화면은 줄여서 보여 줌). 아무리 커도 3행까지
-        #expect(OfficeLayout.minHeight == 342 + 150 * 2 + 36)
+        #expect(OfficeLayout.minHeight == 366 + 140 * 2 + 36)
         #expect(OfficeLayout.capacity(width: 1140, height: 520).rows == 3)
         #expect(OfficeLayout.capacity(width: 2400, height: 1600).rows == 3)
         #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 600) < 1)
@@ -113,11 +113,11 @@ struct LayoutTests {
         }
     }
 
-    @Test("행 간격은 최소 150이고, 화면이 높으면 3행이 아래 빈 공간까지 고르게 쓰도록 벌어진다")
+    @Test("행 간격은 최소 140이고, 화면이 높으면 3행이 아래 빈 공간까지 고르게 쓰도록 벌어진다")
     func rowSpacingFollowsHeight() {
-        #expect(OfficeLayout.rowSpacing(height: 500) == 150)
-        #expect(OfficeLayout.rowSpacing(height: 708) == 165)
-        #expect(OfficeLayout.rowSpacing(height: 1000) == 311)
+        #expect(OfficeLayout.rowSpacing(height: 500) == 140)
+        #expect(OfficeLayout.rowSpacing(height: 708) == 153)
+        #expect(OfficeLayout.rowSpacing(height: 1000) == 299)
         for height in [708.0, 900, 1200] {
             let layout = OfficeLayout(width: 1140, height: height, rooms: (0..<3).map { .init(team: TeamID("t\($0)"), desks: 1) })
             // 마지막 행 아래에는 여백만 남습니다

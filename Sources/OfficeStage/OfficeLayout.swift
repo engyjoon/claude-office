@@ -51,9 +51,9 @@ public struct OfficeLayout: Hashable, Sendable {
     public static let wallBottom = 160.0
     public static let walkTop = 172.0
     /// 첫 행의 책상 줄 y (앉은 직원의 발 위치)
-    public static let firstDeskY = 342.0
+    public static let firstDeskY = 366.0
     /// 행 간격의 최솟값. 화면이 높으면 3행이 아래 빈 공간까지 고르게 쓰도록 더 벌립니다 (`rowSpacing(height:)`).
-    public static let minRowSpacing = 150.0
+    public static let minRowSpacing = 140.0
     /// 한 화면에 보여 주는 최대 행 수 (2026-11-08 결정)
     public static let maxRows = 3
     /// 메인 책상 x
