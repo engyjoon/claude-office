@@ -238,6 +238,7 @@ public struct OfficeState: Sendable {
     // MARK: - 행과 세션 직원
 
     private mutating func ensureLead(for event: OfficeEvent, beats: inout [Beat]) -> AgentID {
+        summonRoot(for: event, beats: &beats)
         if let part = parts[event.session], agents[part.lead] != nil {
             if let hint = event.hint { absorb(hint, for: event.session, beats: &beats) }
             return part.lead
@@ -276,6 +277,20 @@ public struct OfficeState: Sendable {
         // 이 세션이 띄운 세션이 다른 행의 메인으로 와 있었으면 그 행을 합칩니다
         reconcileTeams(beats: &beats)
         return id
+    }
+
+    /// 서브 세션이 왔는데 그 최상위 세션(메인)이 데스크톱 앱에 열려 있으면서 사무실에 아직 없으면(쉬고 있어 훅을 보내지 않음),
+    /// 메인을 먼저 입력 대기로 앉힙니다. 서브가 먼저 메인 자리에 와 있었으면 "늦게 온 부모"처럼 메인 자리를 넘겨받습니다.
+    private mutating func summonRoot(for event: OfficeEvent, beats: inout [Beat]) {
+        guard let hint = event.hint, hint.rootIsOpen, let root = hint.ancestors.last, root != event.session,
+            parts[root] == nil || agents[parts[root]!.lead] == nil
+        else { return }
+        let arrival = OfficeEvent(
+            session: root, cwd: hint.rootCwd ?? event.cwd, term: event.term, at: event.at, kind: .sessionStarted(source: nil),
+            hint: SessionHint(hostSession: hint.rootHostSession, rootCwd: hint.rootCwd, title: hint.rootTitle))
+        let id = ensureLead(for: arrival, beats: &beats)
+        update(id) { $0.setActivity(.waitingForInput, at: event.at) }
+        beats.append(.waitingForInput(agents[id]!))
     }
 
     private mutating func openTeam(folder: String, beats: inout [Beat]) -> TeamID {

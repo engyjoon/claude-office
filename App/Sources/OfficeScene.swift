@@ -80,11 +80,19 @@ final class OfficeScene: SKScene {
         return window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
 
+    /// 장면이나 그 뷰가 멈춰 있으면 풉니다 (모델이 0.25초마다 부름)
+    func resumeIfPaused() {
+        if isPaused { isPaused = false }
+        if let view, view.isPaused { view.isPaused = false }
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:)는 쓰지 않습니다")
     }
 
     override func didMove(to view: SKView) {
+        // 창을 닫으면 SwiftUI가 장면을 멈춘 채로 두기도 해서, 다시 보일 때 풀어 줍니다 (M5(4) 화면 확인: 미니 → 사무실 창에서 캐릭터가 멈춤)
+        resumeIfPaused()
         furnitureSignature = ""
         view.window?.acceptsMouseMovedEvents = true
         sync()

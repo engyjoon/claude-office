@@ -32,6 +32,8 @@ struct DesktopSessionTests {
         #expect(side.ancestors == [SessionID("cli-main")])
         #expect(side.rootCwd == "/w/office")
         #expect(side.hostSession == "local_side")
+        #expect(side.rootHostSession == "local_main" && side.rootTitle == "메인 작업" && side.rootIsOpen)
+        #expect(!main.rootIsOpen && main.rootHostSession == nil)
 
         let grand = try #require(directory.hint(forHostSession: "local_grand"))
         #expect(grand.ancestors == [SessionID("cli-side"), SessionID("cli-main")])

@@ -52,6 +52,42 @@ struct RoomTests {
         state.agents(in: team).map(\.seat.desk)
     }
 
+    // MARK: - 쉬고 있는 메인 불러오기 (M5(4) 화면 확인)
+
+    @Test("서브 세션이 먼저 와도, 데스크톱 앱에 열려 있는 메인을 먼저 입력 대기로 앉히고 서브로 들어간다")
+    func summonsOpenRoot() throws {
+        var state = OfficeState()
+        let hint = SessionHint(
+            hostSession: "local_side", ancestors: [SessionID("main")], rootCwd: Self.folder, title: "M5(4) 검토",
+            rootHostSession: "local_main", rootTitle: "클로드 오피스 개발", rootIsOpen: true)
+        _ = apply(&state, session: "side", hint: hint)
+        #expect(rows(state) == [["메인", "서브"]])
+        let main = try #require(state.lead(of: SessionID("main")))
+        #expect(main.isMain && main.activity == .waitingForInput)
+        #expect(state.parts[SessionID("main")]?.title == "클로드 오피스 개발")
+        #expect(state.parts[SessionID("main")]?.hostSession == "local_main")
+        // 나중에 메인이 일을 시작하면 같은 사람
+        _ = apply(&state, session: "main", "UserPromptSubmit", JSONObject([("prompt", .string("x"))]), at: 5)
+        #expect(state.lead(of: SessionID("main"))?.id == main.id)
+        #expect(rows(state) == [["메인", "서브"]])
+    }
+
+    @Test("서브가 이미 메인 자리에 있었으면 다음 훅 때 열린 메인이 메인 자리를 넘겨받는다. 보관한 메인은 불러오지 않는다")
+    func summonsRootLater() throws {
+        var state = OfficeState()
+        _ = apply(&state, session: "side", hint: child(of: "main"))
+        #expect(rows(state) == [["메인"]])
+        let open = SessionHint(hostSession: "local_side", ancestors: [SessionID("main")], rootCwd: Self.folder, rootIsOpen: true)
+        _ = apply(&state, session: "side", "UserPromptSubmit", hint: open, JSONObject([("prompt", .string("x"))]), at: 2)
+        #expect(rows(state) == [["메인", "서브"]])
+        #expect(state.lead(of: SessionID("main"))?.isMain == true)
+
+        var closed = OfficeState()
+        _ = apply(&closed, session: "side", hint: SessionHint(hostSession: "local_side", ancestors: [SessionID("main")], rootIsOpen: false))
+        #expect(rows(closed) == [["메인"]])
+        #expect(closed.lead(of: SessionID("main")) == nil)
+    }
+
     // MARK: - 메인 판별
 
     @Test("직접 연 세션은 각자 메인 (같은 폴더·터미널 세션도). 메인이 둘이 되면 '메인' → '메인1', '메인2'")

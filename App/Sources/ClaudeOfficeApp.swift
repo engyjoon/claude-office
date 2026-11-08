@@ -49,7 +49,7 @@ struct OfficeWindowView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                SpriteView(scene: model.officeScene, preferredFramesPerSecond: 30)
+                OfficeSpriteView(scene: model.officeScene)
                     // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
                     .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
                     .background(Color(red: 0.945, green: 0.902, blue: 0.839))
@@ -143,6 +143,38 @@ struct OfficeWindowView: View {
             frame.origin.x = max(visible.minX, min(center - frame.width / 2, visible.maxX - frame.width))
             window.setFrame(frame, display: true, animate: true)
         }
+    }
+}
+
+/// 사무실 장면을 담는 SpriteKit 뷰. 같은 장면을 창을 닫았다 열 때마다 새 뷰에 붙이므로,
+/// 창이 닫히면 장면을 떼어 내고(옛 뷰에 붙은 채 멈추지 않게) 열릴 때 멈춤을 풀어 붙입니다 (M5(4) 화면 확인: 캐릭터가 멈춤).
+struct OfficeSpriteView: NSViewRepresentable {
+    let scene: OfficeScene
+
+    func makeNSView(context: Context) -> SKView {
+        let view = OfficeSKView()
+        view.preferredFramesPerSecond = 30
+        view.presentScene(scene)
+        scene.resumeIfPaused()
+        return view
+    }
+
+    func updateNSView(_ view: SKView, context: Context) {
+        if view.scene !== scene { view.presentScene(scene) }
+        scene.resumeIfPaused()
+    }
+
+    static func dismantleNSView(_ view: SKView, coordinator: ()) {
+        view.presentScene(nil)
+    }
+}
+
+/// 창에 붙을 때 마우스 이동(말풍선 전체 보기)을 받게 하고 멈춤을 풉니다
+final class OfficeSKView: SKView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+        (scene as? OfficeScene)?.resumeIfPaused()
     }
 }
 

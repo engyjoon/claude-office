@@ -120,7 +120,11 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
             rootRecord = parent
             parentID = parent.parentLocalID
         }
-        return SessionHint(hostSession: record.localID, ancestors: ancestors, rootCwd: rootRecord.folder, title: record.title)
+        let hasRoot = !ancestors.isEmpty && rootRecord.localID != record.localID
+        return SessionHint(
+            hostSession: record.localID, ancestors: ancestors, rootCwd: rootRecord.folder, title: record.title,
+            rootHostSession: hasRoot ? rootRecord.localID : nil, rootTitle: hasRoot ? rootRecord.title : nil,
+            rootIsOpen: hasRoot && !rootRecord.isArchived && rootRecord.cliSessionID == ancestors.last?.raw)
     }
 
     /// 데스크톱 앱에 열려 있는(보관하지 않은) 세션들의 디렉토리 목록. 폴더 이름순.

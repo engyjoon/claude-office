@@ -41,12 +41,23 @@ public struct SessionHint: Hashable, Sendable {
     public var rootCwd: String?
     /// 데스크톱 앱이 붙인 세션 제목
     public var title: String?
+    /// 최상위 세션(메인)의 데스크톱 세션 id·제목과, 데스크톱 앱에 아직 열려 있는지(보관하지 않음).
+    /// 열려 있는 메인이 아직 훅을 보내지 않았으면(쉬고 있음) 서브가 올 때 메인을 먼저 앉힙니다 (M5(4) 화면 확인).
+    public var rootHostSession: String?
+    public var rootTitle: String?
+    public var rootIsOpen: Bool
 
-    public init(hostSession: String? = nil, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil) {
+    public init(
+        hostSession: String? = nil, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil,
+        rootHostSession: String? = nil, rootTitle: String? = nil, rootIsOpen: Bool = false
+    ) {
         self.hostSession = hostSession
         self.ancestors = ancestors
         self.rootCwd = rootCwd
         self.title = title
+        self.rootHostSession = rootHostSession
+        self.rootTitle = rootTitle
+        self.rootIsOpen = rootIsOpen
     }
 }
 
