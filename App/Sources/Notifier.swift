@@ -170,12 +170,34 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-/// Claude 데스크톱 앱을 앞으로 가져옵니다.
+/// Claude 데스크톱 앱을 앞으로 가져오고, 세션 id를 알면 그 Code 세션을 엽니다.
 ///
-/// 데스크톱 앱에는 `claude://` URL 스킴이 있지만 특정 Code 세션을 여는 경로는 공개되어 있지 않습니다.
-/// 그래서 앱을 활성화만 하고, 세션은 사용자가 사이드바에서 고릅니다 (M5(3) 한계).
+/// M5(7b): 데스크톱 앱의 `claude://code/continue?session=local_…` 딥링크(Dock·Spotlight의 "세션 이어 하기"가 쓰는 것)로
+/// 그 세션 화면까지 엽니다. 앱은 보관하지 않은 세션 중 id가 같은 세션으로 가고, 못 찾으면 Code 첫 화면으로 갑니다.
+/// 공개 문서에 있는 경로는 아니라(앱 4.23118에서 확인) 앱이 바뀌면 다시 앱 활성화만 될 수 있습니다.
+/// 데스크톱 설정에서 딥링크를 꺼 두었으면 앱은 링크를 무시하지만, 링크를 열 때 앱은 앞으로 옵니다(`activates`).
 enum DesktopAppFocuser {
     static let bundleID = "com.anthropic.claudefordesktop"
+
+    /// 앱이 받아들이는 세션 id 모양 (앱의 검사와 같음)
+    static func sessionURL(_ session: String) -> URL? {
+        guard session.range(of: #"^local_[A-Za-z0-9-]{1,64}$"#, options: .regularExpression) != nil else { return nil }
+        return URL(string: "claude://code/continue?session=\(session)")
+    }
+
+    /// 세션 id가 있으면 그 세션을 열고, 없거나 열 수 없으면 앱만 앞으로
+    @discardableResult
+    static func focus(session: String?) -> Bool {
+        if let session, let url = sessionURL(session),
+            let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+            return true
+        }
+        return focus()
+    }
 
     @discardableResult
     static func focus() -> Bool {

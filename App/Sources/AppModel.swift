@@ -452,9 +452,9 @@ final class AppModel {
     }
 
     private func focus(hostSession: String?, term: String?) {
-        if hostSession != nil {
-            // 특정 세션까지 여는 공개된 방법이 없어 앱만 앞으로 가져옵니다
-            DesktopAppFocuser.focus()
+        if let hostSession {
+            // 데스크톱 앱의 세션 이어 하기 딥링크로 그 세션 화면까지 엽니다 (M5(7b))
+            DesktopAppFocuser.focus(session: hostSession)
         } else {
             TerminalFocuser.focus(term: term)
         }

@@ -32,7 +32,8 @@ struct AgentCard: View {
             ScrollView(.vertical) { content }
         }
         .frame(width: Self.width, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        // 반투명 재질은 다크 모드에서 밝은 사무실 위에 탁한 회색이 되어 소제목이 묻혀서(화면 확인), 창 배경색을 꽉 채워 씁니다
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.team(team.colorIndex), lineWidth: 2))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
     }
@@ -60,7 +61,7 @@ struct AgentCard: View {
             Avatar(appearance: row.appearance, isLead: row.isMain, size: 48, tint: Palette.team(team.colorIndex).opacity(0.45))
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name).font(.system(size: 15, weight: .bold))
-                Text(kindLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(kindLabel).font(.system(size: 11)).foregroundStyle(Self.labelColor)
             }
             Spacer(minLength: 8)
             Button(action: onClose) {
@@ -118,7 +119,7 @@ struct AgentCard: View {
                     label("폴더")
                     Text(Self.abbreviated(team.folder))
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Self.labelColor)
                         .lineLimit(2)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
@@ -131,7 +132,7 @@ struct AgentCard: View {
                         HStack(spacing: 6) {
                             StatusChip(status: row.status)
                             if let elapsed = StatusLine.elapsed(context.date.timeIntervalSince(row.since)) {
-                                Text(elapsed).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                                Text(elapsed).font(.system(size: 11)).foregroundStyle(Self.labelColor).monospacedDigit()
                             }
                         }
                     }
@@ -148,7 +149,7 @@ struct AgentCard: View {
                 label("세션")
                 Text(String(row.session.raw.prefix(8)))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Self.labelColor)
                     .textSelection(.enabled)
                     .help(row.session.raw)
             }
@@ -161,7 +162,7 @@ struct AgentCard: View {
                             Button(focus, action: onFocus)
                                 .controlSize(.mini)
                                 .help(row.hostSession != nil
-                                    ? "Claude 데스크톱 앱을 앞으로 가져와요 (세션까지 바로 열지는 못해요). 캐릭터를 더블클릭해도 돼요."
+                                    ? "Claude 데스크톱 앱에서 이 세션을 열어요. 캐릭터를 더블클릭해도 돼요."
                                     : "이 세션이 열린 \(place) 창을 앞으로 가져와요. 캐릭터를 더블클릭해도 돼요.")
                         }
                     }
@@ -211,7 +212,7 @@ struct AgentCard: View {
                 }
             }
             if items.isEmpty {
-                Text("아직 기록이 없어요").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("아직 기록이 없어요").font(.system(size: 11)).foregroundStyle(Self.labelColor)
             } else {
                 // 새 일은 아래에 붙습니다 (시간 순서). 접혀 있으면 앞이 더 있다는 표시만.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -247,15 +248,18 @@ struct AgentCard: View {
         }
     }
 
+    /// 소제목·시각 글자색: `.secondary`보다 진하게 (화면 확인: 다크 모드에서 잘 안 보임)
+    static let labelColor = Color.primary.opacity(0.68)
+
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Self.labelColor)
             .gridColumnAlignment(.trailing)
     }
 
     private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+        Text(text).font(.system(size: 11, weight: .bold)).foregroundStyle(Self.labelColor)
     }
 
     static func abbreviated(_ path: String) -> String {
@@ -280,7 +284,7 @@ private struct TimelineRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(item.when(now: now))
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AgentCard.labelColor)
                 .monospacedDigit()
                 .frame(width: 52, alignment: .trailing)
             Text(styled(now: now))
