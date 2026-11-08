@@ -51,6 +51,8 @@ final class AppModel {
     private(set) var directories: [DesktopFolder] = []
     /// 사무실 아래 실시간 현황 줄 (고른 사람의 흐름, 아니면 고른 디렉토리의 최근 일)
     private(set) var statusLine: StatusLine = .empty
+    /// 고른 사람의 최근 일 (인스펙터 타임라인, M5(7)). 현황 줄과 같은 때 다시 만듭니다.
+    private(set) var inspectorTimeline: AgentTimeline = .empty
     /// 알림 설정 (설계서 §10 알림, M5(3)). 승인 대기 켬, 응답 완료 끔이 기본.
     private(set) var notificationSettings: NotificationSettings
     /// macOS 알림 권한 상태
@@ -125,8 +127,12 @@ final class AppModel {
             band: true)
         miniScene = OfficeScene(store: miniStore, framing: .band(top: MiniOffice.top))
         officeScene.onSelect = { [weak self] id in self?.select(id) }
+        officeScene.onActivate = { [weak self] id in self?.focusAgent(id) }
+        officeScene.hoverHelp = { [weak self] id in self?.hoverHelp(for: id, mini: false) }
         officeScene.onViewportChange = { [weak self] size in self?.setViewport(size) }
         miniScene.onSelect = { [weak self] id in self?.openOfficeFromMini(id) }
+        miniScene.onActivate = { [weak self] id in self?.focusFromMini(id) }
+        miniScene.hoverHelp = { [weak self] id in self?.hoverHelp(for: id, mini: true) }
         miniScene.onViewportChange = { [weak self] size in self?.setMiniViewport(size) }
         notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
         notifier.onOpen = { [weak self] target in self?.open(target) }
@@ -248,11 +254,15 @@ final class AppModel {
         refreshStatusLine()
     }
 
-    /// 현황 줄을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
+    /// 현황 줄과 인스펙터 타임라인을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
     private func refreshStatusLine() {
         let line = StatusLine.make(
             state: engine.state, journal: engine.journal, privacy: privacy, selected: selectedAgent, folder: selectedFolder)
         if line != statusLine { statusLine = line }
+        let timeline = selectedAgent.map {
+            AgentTimeline.make(agent: $0, state: engine.state, journal: engine.journal, privacy: privacy)
+        } ?? .empty
+        if timeline != inspectorTimeline { inspectorTimeline = timeline }
     }
 
     /// 연출 지시를 무대에 넘기고(화면에 보일 사람만, `OfficeFloor`), 로그에도 남깁니다.
@@ -421,6 +431,26 @@ final class AppModel {
         focus(hostSession: row.hostSession, term: row.term)
     }
 
+    /// 캐릭터·세션 줄 더블클릭, 인스펙터 [앱으로]/[터미널로] (M5(7)): 그 사람이 속한 세션의 Claude 앱이나 터미널을 앞으로.
+    /// 서브에이전트도 자기가 속한 세션 기준이고(`RosterRow.hostSession`·`term`은 세션의 것), 미리 출근해 쉬는 데스크톱 세션도 앱으로 갑니다.
+    func focusAgent(_ id: AgentID) {
+        guard let row = roster.row(for: id) else { return }
+        guard row.focusLabel != nil else {
+            append(.system, "\(row.name): 앞으로 가져올 앱을 몰라요")
+            return
+        }
+        focusSession(of: row)
+        append(.system, "\(row.name) 세션으로 이동: \(row.hostSession != nil ? "Claude 데스크톱 앱" : TerminalFocuser.displayName(for: row.term) ?? "터미널")")
+    }
+
+    /// 마우스를 올린 캐릭터의 도움말 (M5(7)). 미니는 한 번 누르면 사무실 창이 열린다는 것도 알려 줍니다.
+    func hoverHelp(for id: AgentID, mini: Bool) -> String? {
+        guard let row = roster.row(for: id) else { return nil }
+        let jump = row.focusLabel.map { "더블클릭하면 \($0) 이동" }
+        if mini { return [row.name, "누르면 사무실 창", jump].compactMap { $0 }.joined(separator: " · ") }
+        return [row.name, jump].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private func focus(hostSession: String?, term: String?) {
         if hostSession != nil {
             // 특정 세션까지 여는 공개된 방법이 없어 앱만 앞으로 가져옵니다
@@ -495,12 +525,7 @@ final class AppModel {
     /// 미니를 누르면(어디든) 미니를 숨기고 사무실 창을 엽니다. 캐릭터를 눌렀으면 그 사람을 고르고,
     /// 완료를 보여 주던 중이면 확인한 것으로 쳐서 사무실 창을 닫은 뒤에는 다음 순위를 보여 줍니다.
     func openOfficeFromMini(_ id: AgentID?) {
-        if miniFocus.tier == .completed, let team = miniFocus.team, let main = engine.state.main(of: team),
-            let done = engine.state.parts[main.session]?.completedAt
-        {
-            miniAcknowledged[main.session] = done
-            refreshMiniFocus()
-        }
+        acknowledgeMiniCompletion()
         miniHiddenUntil = Date().addingTimeInterval(1.5)
         miniPanel?.hide()
         openOfficeWindow()
@@ -508,6 +533,21 @@ final class AppModel {
             if visibleRoster.row(for: id) == nil { selectAllFolders() }
             select(id)
         }
+    }
+
+    /// 미니에서 캐릭터를 더블클릭 (M5(7)): 미니는 그대로 두고 그 세션의 앱·터미널로. 완료를 보여 주던 중이면 확인한 것으로 칩니다.
+    func focusFromMini(_ id: AgentID) {
+        acknowledgeMiniCompletion()
+        focusAgent(id)
+    }
+
+    /// 완료를 보여 주던 중이면 확인한 것으로 쳐서 다음 순위를 보여 줍니다
+    private func acknowledgeMiniCompletion() {
+        guard miniFocus.tier == .completed, let team = miniFocus.team, let main = engine.state.main(of: team),
+            let done = engine.state.parts[main.session]?.completedAt
+        else { return }
+        miniAcknowledged[main.session] = done
+        refreshMiniFocus()
     }
 
     /// SwiftUI 장면의 창 열기 동작을 받아 둡니다 (메뉴바 아이콘·메뉴가 나타날 때)

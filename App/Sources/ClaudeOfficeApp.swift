@@ -54,9 +54,13 @@ struct OfficeWindowView: View {
                     .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
                     .background(Color(red: 0.945, green: 0.902, blue: 0.839))
                     .overlay(alignment: .topTrailing) {
-                        // 캐릭터를 클릭하면 누구인지 보여줍니다. 빈 곳 클릭·✕·Esc로 닫습니다.
+                        // 캐릭터(또는 세션 패널의 줄)를 고르면 인스펙터를 보여줍니다 (M5(7)). 빈 곳 클릭·✕·Esc로 닫습니다.
                         if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
-                            AgentCard(row: row, team: team, privacy: model.privacy) { model.select(nil) }
+                            AgentCard(
+                                row: row, team: team, privacy: model.privacy, timeline: model.inspectorTimeline,
+                                onSelect: { model.select($0) },
+                                onFocus: { model.focusAgent(id) },
+                                onClose: { model.select(nil) })
                                 .padding(12)
                                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
                         }

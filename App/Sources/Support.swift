@@ -77,3 +77,12 @@ enum TerminalFocuser {
         return false
     }
 }
+
+extension RosterRow {
+    /// 이동 버튼·더블클릭 도움말 문구 (M5(7)): 데스크톱 앱 세션이면 "앱으로", 아는 터미널(에디터)이면 "터미널로", 갈 곳을 모르면 nil
+    var focusLabel: String? {
+        if hostSession != nil { return "앱으로" }
+        if let term, TerminalFocuser.bundleIDs[term] != nil { return "터미널로" }
+        return nil
+    }
+}

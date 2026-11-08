@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 사무실 창 오른쪽 패널 (2026-11-08): 위는 Claude 데스크톱 앱에 열려 있는 디렉토리 드롭다운(하나만 고르기),
 /// 아래 "세션"은 고른 디렉토리의 메인과 그 서브들이 무엇을 하는지 보여 줍니다.
-/// 줄을 누르면 사무실에서 그 캐릭터를 고른 것과 같습니다 (발밑 고리 + 신원 카드).
+/// 줄을 누르면 사무실에서 그 캐릭터를 고른 것과 같고(발밑 고리 + 인스펙터), 더블클릭하면 그 세션의 앱·터미널로 갑니다 (M5(7)).
 struct StaffPanel: View {
     let model: AppModel
 
@@ -86,7 +86,16 @@ struct StaffPanel: View {
             .padding(.horizontal, 4)
             ForEach(team.rows) { row in
                 StaffRow(row: row, colorIndex: team.colorIndex, selected: model.selectedAgent == row.id)
-                    .onTapGesture { model.select(model.selectedAgent == row.id ? nil : row.id) }
+                    .onTapGesture {
+                        // 더블클릭(M5(7))은 두 번째 클릭에서 그 세션으로 이동합니다. 한 번 누르기는 고르기/풀기 그대로라
+                        // 두 번 누르기를 기다리느라 늦어지지 않게, 지금 클릭이 몇 번째인지로 가릅니다.
+                        if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
+                            model.select(row.id)
+                            model.focusAgent(row.id)
+                        } else {
+                            model.select(model.selectedAgent == row.id ? nil : row.id)
+                        }
+                    }
             }
         }
     }
@@ -237,7 +246,7 @@ private struct StaffRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(selected ? Palette.team(colorIndex) : Color.clear, lineWidth: 1.5))
         .contentShape(Rectangle())
-        .help("누르면 사무실에서 이 직원을 보여줘요")
+        .help(["누르면 사무실에서 이 직원을 보여줘요", row.focusLabel.map { "더블클릭하면 \($0) 이동" }].compactMap { $0 }.joined(separator: " · "))
     }
 
     private func subtitle(now: Date) -> String {

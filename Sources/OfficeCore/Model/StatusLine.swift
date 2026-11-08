@@ -108,14 +108,7 @@ public struct StatusLine: Hashable, Sendable {
 
     static func agentLine(_ agent: Agent, state: OfficeState, journal: ActivityJournal, privacy: PrivacyLevel) -> StatusLine {
         let words = Words(state: state, privacy: privacy)
-        var groups: [Group] = []
-        for entry in journal.entries(of: agent.id) {
-            if let last = groups.last, last.canAbsorb(entry, key: words.toolLabel) {
-                groups[groups.count - 1].entries.append(entry)
-            } else {
-                groups.append(Group(entries: [entry]))
-            }
-        }
+        let groups = agentGroups(agent.id, journal: journal, words: words)
         var segments = groups.suffix(maxAgentSegments).map { words.agentSegment($0) }
         if segments.isEmpty {
             segments = [Segment(text: RosterStatus.from(agent.activity).label, tone: .muted)]
@@ -123,6 +116,19 @@ public struct StatusLine: Hashable, Sendable {
         return StatusLine(
             mode: .agent, head: agent.displayName, colorIndex: state.teams[agent.teamID]?.colorIndex,
             segments: segments, truncated: groups.count > maxAgentSegments)
+    }
+
+    /// 한 사람의 기록을 오래된 것부터, 이어진 같은 도구는 묶어서 (현황 줄과 인스펙터 타임라인이 같이 씀)
+    static func agentGroups(_ agent: AgentID, journal: ActivityJournal, words: Words) -> [Group] {
+        var groups: [Group] = []
+        for entry in journal.entries(of: agent) {
+            if let last = groups.last, last.canAbsorb(entry, key: words.toolLabel) {
+                groups[groups.count - 1].entries.append(entry)
+            } else {
+                groups.append(Group(entries: [entry]))
+            }
+        }
+        return groups
     }
 
     // MARK: 사무실

@@ -48,6 +48,12 @@ final class OfficeScene: SKScene {
     private var furnitureSignature = ""
     /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
     var onSelect: ((AgentID?) -> Void)?
+    /// 캐릭터 더블클릭 (M5(7)): 그 세션의 Claude 앱이나 터미널을 앞으로
+    var onActivate: ((AgentID) -> Void)?
+    /// 마우스를 올린 캐릭터의 도움말 ("메인1 · 더블클릭하면 앱으로 이동"). 뷰의 toolTip으로 보여 줍니다.
+    var hoverHelp: ((AgentID) -> String?)?
+    /// 미니에서 캐릭터를 한 번 누른 뒤 두 번째 클릭을 기다리는 중 (그동안은 사무실 창을 열지 않음)
+    private var pendingClick: (agent: AgentID, work: DispatchWorkItem)?
     /// 사무실 영역 크기가 바뀜 (모델이 들어가는 수를 다시 셉니다). 띠면 보이는 지도 폭(왼쪽 여백 뺀 폭)과 높이.
     var onViewportChange: ((CGSize) -> Void)?
     /// 띠에서 끌어 창을 옮긴 뒤 (모서리에 붙이기)
@@ -209,27 +215,66 @@ final class OfficeScene: SKScene {
 
     // MARK: - 클릭
 
+    /// 사무실 창: 한 번 누르면 바로 고르고(빈 곳이면 닫기), 두 번째 클릭(더블클릭)이면 그 세션으로 이동합니다.
+    /// 미니 사무실: 끌면 패널을 옮기고, 빈 곳을 누르면 바로 사무실 창을 엽니다. 캐릭터를 누르면 더블클릭 간격만큼 기다려
+    /// 두 번째 클릭이 없으면 사무실 창을 열어 그 사람을 고르고, 있으면 미니는 그대로 두고 그 세션으로 이동합니다
+    /// (첫 클릭에 미니가 숨으면 두 번째 클릭을 받을 수 없어서).
     override func mouseDown(with event: NSEvent) {
         let point = event.location(in: world)
         let hit = character(at: point)
         if case .band = framing, let window = view?.window {
-            // 미니 사무실: 끌면 패널을 옮기고, 그냥 누르면 (캐릭터든 빈 곳이든) 고릅니다
-            if MiniWindowDrag.track(event, in: window) {
-                onWindowDragged?()
-            } else {
-                onSelect?(hit)
+            if event.clickCount >= 2, let pending = pendingClick {
+                pending.work.cancel()
+                pendingClick = nil
+                _ = MiniWindowDrag.track(event, in: window)
+                onActivate?(pending.agent)
+                return
             }
+            if MiniWindowDrag.track(event, in: window) {
+                cancelPendingClick()
+                onWindowDragged?()
+            } else if let hit {
+                cancelPendingClick()
+                let work = DispatchWorkItem { [weak self] in
+                    self?.pendingClick = nil
+                    self?.onSelect?(hit)
+                }
+                pendingClick = (hit, work)
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.miniClickDelay, execute: work)
+            } else {
+                cancelPendingClick()
+                onSelect?(nil)
+            }
+            return
+        }
+        if event.clickCount >= 2, let hit {
+            onSelect?(hit)
+            onActivate?(hit)
             return
         }
         onSelect?(hit)
     }
 
+    /// 미니에서 캐릭터 한 번 누름을 확정하기까지 기다리는 시간 (시스템 더블클릭 간격, 너무 길면 0.4초)
+    static var miniClickDelay: TimeInterval { min(NSEvent.doubleClickInterval, 0.4) }
+
+    private func cancelPendingClick() {
+        pendingClick?.work.cancel()
+        pendingClick = nil
+    }
+
     override func mouseMoved(with event: NSEvent) {
-        hoveredAgent = character(at: event.location(in: world))
+        setHovered(character(at: event.location(in: world)))
     }
 
     override func mouseExited(with event: NSEvent) {
-        hoveredAgent = nil
+        setHovered(nil)
+    }
+
+    private func setHovered(_ id: AgentID?) {
+        guard id != hoveredAgent else { return }
+        hoveredAgent = id
+        view?.toolTip = id.flatMap { hoverHelp?($0) }
     }
 
     /// 겹쳐 있으면 앞(화면 아래쪽)에 선 직원을 고릅니다. 몸보다 조금 넓게 잡아 작은 캐릭터도 누르기 쉽게 합니다.
