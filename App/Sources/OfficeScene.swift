@@ -49,7 +49,7 @@ final class OfficeScene: SKScene {
     var onSelect: ((AgentID?) -> Void)?
     /// 사무실 영역 크기가 바뀜 (모델이 들어가는 수를 다시 셉니다). 띠면 보이는 지도 폭(왼쪽 여백 뺀 폭)과 높이.
     var onViewportChange: ((CGSize) -> Void)?
-    /// 띠에서 빈 곳을 끌어 창을 옮긴 뒤 (모서리에 붙이기)
+    /// 띠에서 끌어 창을 옮긴 뒤 (모서리에 붙이기)
     var onWindowDragged: (() -> Void)?
     private var reportedSize: CGSize?
     var selectedAgent: AgentID? {
@@ -185,10 +185,13 @@ final class OfficeScene: SKScene {
     override func mouseDown(with event: NSEvent) {
         let point = event.location(in: world)
         let hit = character(at: point)
-        if case .band = framing, hit == nil {
-            // 미니 사무실: 빈 곳을 끌면 패널을 옮깁니다
-            view?.window?.performDrag(with: event)
-            onWindowDragged?()
+        if case .band = framing, let window = view?.window {
+            // 미니 사무실: 끌면 패널을 옮기고, 그냥 누르면 (캐릭터든 빈 곳이든) 고릅니다
+            if MiniWindowDrag.track(event, in: window) {
+                onWindowDragged?()
+            } else {
+                onSelect?(hit)
+            }
             return
         }
         onSelect?(hit)

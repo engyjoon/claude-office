@@ -43,10 +43,10 @@ struct MiniOfficeTests {
         FloorHarness(width: MiniOffice.visibleMapWidth(), height: OfficeLayout.minHeight, band: true)
     }
 
-    @Test("패널 390×204: 메인 + 서브 2명 + \"+N\"이 배율 1로 들어감, 휴게 공간은 보이지 않음")
+    @Test("패널 390×200: 메인 + 서브 2명 + \"+N\"이 배율 1로 들어감, 휴게 공간은 보이지 않음")
     func size() {
         let extent = MiniOffice.extent()
-        #expect(MiniOffice.panelWidth == 390 && MiniOffice.panelHeight == 204)
+        #expect(MiniOffice.panelWidth == 390 && MiniOffice.panelHeight == 200)
         #expect(OfficeLayout.columns(width: MiniOffice.visibleMapWidth()) >= 1 + MiniOffice.subSlots)
         #expect(extent.maxY == OfficeLayout.firstDeskY + 40)
         #expect(extent.y > OfficeLayout.sofas[0].maxY)

@@ -59,9 +59,10 @@ final class AppModel {
     private(set) var focusAccess: FocusDetector.Access = .notDetermined
     /// 미니 사무실 (M5(4)): 지금 보여 주는 행과 그 까닭, 사용자가 고정한 행, 설정
     private(set) var miniFocus: MiniFocus = .empty
-    private(set) var miniPinned: TeamID?
     /// 미니에서 확인한 완료 (세션 → 확인한 완료 시각). 확인한 완료는 우선순위 ②에서 내려갑니다.
     private(set) var miniAcknowledged: [SessionID: Date] = [:]
+    /// 미니를 눌러 사무실 창을 여는 중 (창이 뜨기 전에 미니가 다시 나타나지 않게)
+    @ObservationIgnored private var miniHiddenUntil = Date.distantPast
     private(set) var miniSettings: MiniOfficeSettings
 
     @ObservationIgnored private var engine: OfficeEngine
@@ -125,7 +126,7 @@ final class AppModel {
         miniScene = OfficeScene(store: miniStore, framing: .band(top: MiniOffice.top))
         officeScene.onSelect = { [weak self] id in self?.select(id) }
         officeScene.onViewportChange = { [weak self] size in self?.setViewport(size) }
-        miniScene.onSelect = { [weak self] id in self?.openFromMini(id) }
+        miniScene.onSelect = { [weak self] id in self?.openOfficeFromMini(id) }
         miniScene.onViewportChange = { [weak self] size in self?.setMiniViewport(size) }
         notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
         notifier.onOpen = { [weak self] target in self?.open(target) }
@@ -135,7 +136,8 @@ final class AppModel {
         startTicking()
         startDirectoryRefresh()
         miniPanel = MiniOfficePanelController(model: self)
-        if mini.enabled { miniPanel?.show() }
+        // 앱(NSApp)이 준비된 뒤에 미니를 띄웁니다 (init 때는 NSApp이 아직 없음)
+        DispatchQueue.main.async { [weak self] in self?.syncMiniPanel() }
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -197,6 +199,7 @@ final class AppModel {
             tickAccumulator = 0
             record(engine.tick(at: now))
             refreshMiniFocus(now: now)
+            syncMiniPanel()
         }
         // 두 무대가 같은 지시를 받으므로 효과음은 한쪽에서만: 사무실 창이 보이면 사무실, 아니면 미니가 보일 때 미니
         let officeEvents = stageStore.floor.drainEvents()
@@ -405,24 +408,14 @@ final class AppModel {
 
     // MARK: - 미니 사무실 (M5(4))
 
-    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 답변 필요 → 고정한 행 → 완료 → 가장 마지막에 요청
+    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 답변 필요 → 완료 → 가장 마지막에 요청
     private func refreshMiniFocus(now: Date = Date()) {
-        if let pinned = miniPinned, engine.state.teams[pinned] == nil { miniPinned = nil }
         miniAcknowledged = miniAcknowledged.filter { engine.state.parts[$0.key]?.completedAt == $0.value }
         let next = MiniFocus.next(
-            previous: miniFocus, state: engine.state, pinned: miniPinned, acknowledged: miniAcknowledged,
+            previous: miniFocus, state: engine.state, pinned: nil, acknowledged: miniAcknowledged,
             autoSwitch: miniSettings.autoSwitch, now: now)
         if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
         if next != miniFocus { miniFocus = next }
-    }
-
-    /// 미니 머리줄의 [앱으로]/[터미널로]: 그 세션으로 가고, 완료였으면 확인한 것으로 칩니다
-    func openFromMiniHeader(_ row: RosterRow) {
-        focusSession(of: row)
-        if let done = engine.state.parts[row.session]?.completedAt, row.isMain {
-            miniAcknowledged[row.session] = done
-            refreshMiniFocus()
-        }
     }
 
     /// 답변을 기다리는 까닭 ("승인 대기", "질문 답 대기", "계획 승인 대기")
@@ -431,17 +424,11 @@ final class AppModel {
         return "승인 대기"
     }
 
-    /// 머리줄에서 행을 고르면 그 행으로 고정 (nil이면 자동)
-    func pinMini(_ team: TeamID?) {
-        miniPinned = team
-        refreshMiniFocus()
-    }
-
     func setMiniSettings(_ settings: MiniOfficeSettings) {
         let old = miniSettings
         miniSettings = settings
         settings.save(to: .standard)
-        if settings.enabled != old.enabled { settings.enabled ? miniPanel?.show() : miniPanel?.hide() }
+        if settings.enabled != old.enabled { syncMiniPanel() }
         if settings.opacity != old.opacity { miniPanel?.setOpacity(settings.opacity) }
         if settings.autoSwitch != old.autoSwitch { refreshMiniFocus() }
     }
@@ -460,12 +447,29 @@ final class AppModel {
         miniStore.floor.setViewport(width: Double(size.width), height: OfficeLayout.minHeight, engine: engine)
     }
 
-    /// 미니에서 캐릭터를 누르면 사무실 창을 열고 그 사람을 고릅니다
-    private func openFromMini(_ id: AgentID?) {
-        guard let id, roster.row(for: id) != nil else { return }
+    /// 미니 사무실은 켜져 있고 사무실 창이 닫혀 있을 때만 보입니다 (사무실 창을 닫으면 다시 나타남)
+    private func syncMiniPanel() {
+        let wanted = miniSettings.enabled && !isOfficeWindowOpen && Date() >= miniHiddenUntil
+        guard let miniPanel, wanted != miniPanel.isShown else { return }
+        wanted ? miniPanel.show() : miniPanel.hide()
+    }
+
+    /// 미니를 누르면(어디든) 미니를 숨기고 사무실 창을 엽니다. 캐릭터를 눌렀으면 그 사람을 고르고,
+    /// 완료를 보여 주던 중이면 확인한 것으로 쳐서 사무실 창을 닫은 뒤에는 다음 순위를 보여 줍니다.
+    func openOfficeFromMini(_ id: AgentID?) {
+        if miniFocus.tier == .completed, let team = miniFocus.team, let main = engine.state.main(of: team),
+            let done = engine.state.parts[main.session]?.completedAt
+        {
+            miniAcknowledged[main.session] = done
+            refreshMiniFocus()
+        }
+        miniHiddenUntil = Date().addingTimeInterval(1.5)
+        miniPanel?.hide()
         openOfficeWindow()
-        if visibleRoster.row(for: id) == nil { selectAllFolders() }
-        select(id)
+        if let id, roster.row(for: id) != nil {
+            if visibleRoster.row(for: id) == nil { selectAllFolders() }
+            select(id)
+        }
     }
 
     /// SwiftUI 장면의 창 열기 동작을 받아 둡니다 (메뉴바 아이콘·메뉴가 나타날 때)
@@ -483,7 +487,8 @@ final class AppModel {
     }
 
     private var isOfficeWindowOpen: Bool {
-        NSApp.windows.contains { $0.title == OfficeWindowView.title && $0.isVisible && !$0.isMiniaturized }
+        guard let app = NSApp else { return false }
+        return app.windows.contains { $0.title == OfficeWindowView.title && $0.isVisible && !$0.isMiniaturized }
     }
 
     // MARK: - 설정

@@ -116,7 +116,7 @@ struct DisplaySettings: View {
                 }
                 Button("기본 위치로 (화면 오른쪽 아래)") { model.resetMiniPosition() }
                     .disabled(!model.miniSettings.enabled)
-                Text("화면 구석에 메인 한 명과 일하는 서브 2명을 사무실 그대로(줄이지 않고) 보여 줘요. 자동이면 내 답변이 필요한 메인 → 응답을 끝낸 메인(10분 동안, [앱으로]를 누르면 확인) → 가장 마지막에 요청한 메인 순이에요. 머리줄에서 메인을 고르면 고정돼요.")
+                Text("화면 구석에 메인 한 명과 일하는 서브 2명을 사무실 그대로(줄이지 않고) 보여 줘요. 자동이면 내 답변이 필요한 메인 → 응답을 끝낸 메인(10분 동안, [앱으로]를 누르면 확인) → 가장 마지막에 요청한 메인 순이에요. 미니를 누르면 미니는 숨고 사무실 창이 열려요(사무실 창을 닫으면 다시 나타나요).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

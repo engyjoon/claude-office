@@ -14,7 +14,7 @@ public enum MiniOffice {
     public static let bottom = OfficeLayout.firstDeskY + 40
     public static var sceneHeight: Double { bottom - top }
     /// 패널 위 머리줄 높이
-    public static let headerHeight = 24.0
+    public static let headerHeight = 20.0
     /// 패널 크기 (고정): 메인 + 서브 2명 + 행 끝 "+N"
     public static var panelHeight: Double { headerHeight + sceneHeight }
     public static let panelWidth = 390.0
