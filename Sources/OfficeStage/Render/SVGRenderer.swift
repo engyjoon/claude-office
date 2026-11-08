@@ -5,13 +5,15 @@ import OfficeCore
 /// SpriteKit 렌더러와 같은 그림 데이터(OfficeArt, CharacterArt)와 같은 자세 계산(RigAnimator)을 씁니다.
 public enum SVGRenderer {
     /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
-    public static func render(stage: Stage, overlay: OverlayOptions? = .init()) -> String {
+    /// `crop`을 주면 그 지도 영역만 잘라 그립니다 (미니 사무실, 말풍선도 그 안에 가둠).
+    public static func render(stage: Stage, overlay: OverlayOptions? = .init(), crop: MapRect? = nil) -> String {
         let layout = stage.layout
         // 사무실 둘레에 여백을 두고(앱과 같음), 여백에는 벽·바닥만 이어 그립니다
         let pad = OfficeLayout.padding
-        let width = layout.width + pad * 2
-        let height = layout.height + pad * 2
-        let extent = MapRect(-pad, -pad, width, height)
+        let extent = crop ?? MapRect(-pad, -pad, layout.width + pad * 2, layout.height + pad * 2)
+        let (width, height) = (extent.width, extent.height)
+        var overlay = overlay
+        if crop != nil, overlay != nil, overlay?.bounds == nil { overlay?.bounds = extent }
         var body = ""
         let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent)
             + OfficeArt.liveLayers(stage: stage)
@@ -50,7 +52,7 @@ public enum SVGRenderer {
             }
         }
         return """
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="\(f(-pad)) \(f(-pad)) \(f(width)) \(f(height))" width="\(f(width))" height="\(f(height))" \
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="\(f(extent.x)) \(f(extent.y)) \(f(width)) \(f(height))" width="\(f(width))" height="\(f(height))" \
             font-family="Apple SD Gothic Neo, Noto Sans CJK KR, Noto Sans KR, WenQuanYi Zen Hei, sans-serif">\(body)</svg>
             """
     }

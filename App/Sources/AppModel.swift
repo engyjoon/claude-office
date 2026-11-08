@@ -5,6 +5,7 @@ import OfficeCore
 import UserNotifications
 import OfficeServer
 import OfficeStage
+import SwiftUI
 
 /// 앱 전체 상태. 훅 서버 → 엔진 → 로스터를 잇고, 화면은 이 값만 봅니다.
 ///
@@ -56,6 +57,10 @@ final class AppModel {
     private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
     /// 집중 모드 상태를 읽을 수 있는지
     private(set) var focusAccess: FocusDetector.Access = .notDetermined
+    /// 미니 사무실 (M5(4)): 지금 보여 주는 행과 그 까닭, 사용자가 고정한 행, 설정
+    private(set) var miniFocus: MiniFocus = .empty
+    private(set) var miniPinned: TeamID?
+    private(set) var miniSettings: MiniOfficeSettings
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -70,6 +75,12 @@ final class AppModel {
     /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
     let stageStore = StageStore()
     let officeScene: OfficeScene
+    /// 미니 사무실 무대 (한 행 띠, 배율 1). 사무실 창과 같은 연출 지시를 받고, 보여 줄 행만 다릅니다.
+    let miniStore = StageStore()
+    let miniScene: OfficeScene
+    @ObservationIgnored private var miniPanel: MiniOfficePanelController?
+    /// 사무실 창 열기 (SwiftUI 장면의 openWindow. 메뉴바 아이콘이 나타날 때 등록)
+    @ObservationIgnored private var openOfficeWindowAction: (() -> Void)?
     @ObservationIgnored private let soundPlayer: SoundPlayer
     @ObservationIgnored private let notifier = Notifier()
     @ObservationIgnored private var lastFrame = Date()
@@ -103,8 +114,17 @@ final class AppModel {
         self.selection = selection
         stageStore.floor = OfficeFloor(selection: selection)
         officeScene = OfficeScene(store: stageStore)
+        let mini = MiniOfficeSettings(defaults: defaults)
+        miniSettings = mini
+        miniStore.privacy = saved
+        miniStore.floor = OfficeFloor(
+            selection: .nobody, width: MiniOffice.visibleMapWidth(panelWidth: MiniOffice.defaultWidth), height: OfficeLayout.minHeight,
+            band: true)
+        miniScene = OfficeScene(store: miniStore, framing: .band(top: MiniOffice.top))
         officeScene.onSelect = { [weak self] id in self?.select(id) }
         officeScene.onViewportChange = { [weak self] size in self?.setViewport(size) }
+        miniScene.onSelect = { [weak self] id in self?.openFromMini(id) }
+        miniScene.onViewportChange = { [weak self] size in self?.setMiniViewport(size) }
         notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
         notifier.onOpen = { [weak self] target in self?.open(target) }
         focusAccess = FocusDetector.access
@@ -112,6 +132,8 @@ final class AppModel {
         startServer()
         startTicking()
         startDirectoryRefresh()
+        miniPanel = MiniOfficePanelController(model: self)
+        if mini.enabled { miniPanel?.show() }
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -167,12 +189,18 @@ final class AppModel {
         let dt = min(max(now.timeIntervalSince(lastFrame), 0), 0.1)
         lastFrame = now
         stageStore.floor.update(dt: dt)
+        miniStore.floor.update(dt: dt)
         tickAccumulator += dt
         if tickAccumulator >= 0.25 {
             tickAccumulator = 0
             record(engine.tick(at: now))
+            refreshMiniFocus(now: now)
         }
-        playSounds(stageStore.floor.drainEvents())
+        // 두 무대가 같은 지시를 받으므로 효과음은 한쪽에서만: 사무실 창이 보이면 사무실, 아니면 미니가 보일 때 미니
+        let officeEvents = stageStore.floor.drainEvents()
+        let miniEvents = miniStore.floor.drainEvents()
+        let useMini = !officeScene.isVisibleOnScreen && miniScene.isVisibleOnScreen
+        playSounds(useMini ? miniEvents : officeEvents)
     }
 
     /// 무대에서 나온 효과음을 재생기에 넘깁니다. 알림성 소리는 창이 안 보여도, 장식성 소리는 보일 때만 울립니다.
@@ -183,7 +211,8 @@ final class AppModel {
             if context == nil {
                 // 집중 모드면 알림성 소리까지 줄입니다 (설계서 §11.3, 읽을 수 있을 때만)
                 let focused = soundSettings.respectFocusMode && FocusDetector.isFocused
-                context = SoundContext(officeVisible: officeScene.isVisibleOnScreen, focusModeActive: focused)
+                let visible = officeScene.isVisibleOnScreen || miniScene.isVisibleOnScreen
+                context = SoundContext(officeVisible: visible, focusModeActive: focused)
             }
             soundPlayer.play(cue, context: context!)
         }
@@ -200,6 +229,7 @@ final class AppModel {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
         }
         roster = Roster.make(from: engine.state, privacy: privacy)
+        refreshMiniFocus(now: delivery.receivedAt)
         // 고른 직원이 퇴근하면 카드를 닫습니다
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
         refreshStatusLine()
@@ -222,6 +252,7 @@ final class AppModel {
     private func record(_ directives: [Directive]) {
         guard !directives.isEmpty else { return }
         stageStore.floor.apply(directives, engine: engine)
+        miniStore.floor.apply(directives, engine: engine)
         updateHidden()
         for directive in directives {
             append(.directive, directive.description)
@@ -370,6 +401,69 @@ final class AppModel {
         }
     }
 
+    // MARK: - 미니 사무실 (M5(4))
+
+    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 승인 대기 → 고정한 행 → 최근 활동
+    private func refreshMiniFocus(now: Date = Date()) {
+        if let pinned = miniPinned, engine.state.teams[pinned] == nil { miniPinned = nil }
+        let next = MiniFocus.next(
+            previous: miniFocus, state: engine.state, journal: engine.journal, pinned: miniPinned,
+            autoSwitch: miniSettings.autoSwitch, now: now)
+        if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
+        if next != miniFocus { miniFocus = next }
+    }
+
+    /// 머리줄에서 행을 고르면 그 행으로 고정 (nil이면 자동)
+    func pinMini(_ team: TeamID?) {
+        miniPinned = team
+        refreshMiniFocus()
+    }
+
+    func setMiniSettings(_ settings: MiniOfficeSettings) {
+        let old = miniSettings
+        miniSettings = settings
+        settings.save(to: .standard)
+        if settings.enabled != old.enabled { settings.enabled ? miniPanel?.show() : miniPanel?.hide() }
+        if settings.opacity != old.opacity { miniPanel?.setOpacity(settings.opacity) }
+        if settings.autoSwitch != old.autoSwitch { refreshMiniFocus() }
+    }
+
+    func setMiniEnabled(_ enabled: Bool) {
+        var settings = miniSettings
+        settings.enabled = enabled
+        setMiniSettings(settings)
+    }
+
+    func resetMiniPosition() {
+        miniPanel?.resetPosition()
+    }
+
+    private func setMiniViewport(_ size: CGSize) {
+        miniStore.floor.setViewport(width: Double(size.width), height: OfficeLayout.minHeight, engine: engine)
+    }
+
+    /// 미니에서 캐릭터를 누르면 사무실 창을 열고 그 사람을 고릅니다
+    private func openFromMini(_ id: AgentID?) {
+        guard let id, roster.row(for: id) != nil else { return }
+        openOfficeWindow()
+        if visibleRoster.row(for: id) == nil { selectAllFolders() }
+        select(id)
+    }
+
+    /// SwiftUI 장면의 창 열기 동작을 받아 둡니다 (메뉴바 아이콘·메뉴가 나타날 때)
+    func registerOpenWindow(_ action: OpenWindowAction) {
+        openOfficeWindowAction = { action(id: WindowID.office) }
+    }
+
+    func openOfficeWindow() {
+        NSApp.activate()
+        if let open = openOfficeWindowAction {
+            open()
+        } else if let window = NSApp.windows.first(where: { $0.title == OfficeWindowView.title }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
     private var isOfficeWindowOpen: Bool {
         NSApp.windows.contains { $0.title == OfficeWindowView.title && $0.isVisible && !$0.isMiniaturized }
     }
@@ -389,6 +483,7 @@ final class AppModel {
     func setPrivacy(_ level: PrivacyLevel) {
         privacy = level
         stageStore.privacy = level
+        miniStore.privacy = level
         engine.privacy = level
         UserDefaults.standard.set(level.rawValue, forKey: Self.privacyKey)
         roster = Roster.make(from: engine.state, privacy: level)

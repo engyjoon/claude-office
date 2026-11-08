@@ -82,6 +82,14 @@ struct ConnectionSettings: View {
 struct DisplaySettings: View {
     let model: AppModel
 
+    private func mini<Value>(_ keyPath: WritableKeyPath<MiniOfficeSettings, Value>) -> Binding<Value> {
+        Binding(get: { model.miniSettings[keyPath: keyPath] }, set: { value in
+            var settings = model.miniSettings
+            settings[keyPath: keyPath] = value
+            model.setMiniSettings(settings)
+        })
+    }
+
     var body: some View {
         Form {
             Section("말풍선과 상태에 보여줄 내용") {
@@ -92,6 +100,23 @@ struct DisplaySettings: View {
                 }
                 .pickerStyle(.radioGroup)
                 Text("회의에서 화면을 공유할 때는 요약이나 비공개를 권해요. 비밀번호·토큰처럼 보이는 값과 프롬프트 내용은 어느 수준에서도 보여주지 않아요.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("미니 사무실") {
+                Toggle("미니 사무실 보기", isOn: mini(\.enabled))
+                Toggle("승인 대기가 생기면 그 메인의 행으로 바꾸기", isOn: mini(\.autoSwitch))
+                Slider(value: mini(\.opacity), in: 0.5...1) {
+                    Text("투명도")
+                } minimumValueLabel: {
+                    Text("50%").font(.caption)
+                } maximumValueLabel: {
+                    Text("100%").font(.caption)
+                }
+                Button("기본 위치로 (화면 오른쪽 아래)") { model.resetMiniPosition() }
+                    .disabled(!model.miniSettings.enabled)
+                Text("화면 구석에 메인 한 명의 행을 사무실 그대로(줄이지 않고) 보여 줘요. 머리줄에서 보여 줄 메인을 고르면 고정되고, 자동이면 승인 대기 → 최근에 일한 메인 순으로 보여 줘요. 폭만 늘리고 줄일 수 있어요.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

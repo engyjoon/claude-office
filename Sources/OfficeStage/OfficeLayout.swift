@@ -105,12 +105,16 @@ public struct OfficeLayout: Hashable, Sendable {
 
     /// 화면(사무실 영역) 크기에 들어가는 책상 수와 행 수. 배율 1 기준이고, 최소 크기보다 작으면 최소 크기로 셉니다.
     public static func capacity(width: Double, height: Double) -> Capacity {
-        let w = max(width, minWidth)
         let h = max(height, minHeight)
-        let room = w - 8 - moreBadgeWidth - deskWidth / 2 - firstDeskX - mainGap
-        let columns = 1 + max(0, Int((room / deskSpacing).rounded(.down)))
         let rows = 1 + max(0, Int(((h - bottomMargin - firstDeskY) / minRowSpacing).rounded(.down)))
-        return Capacity(columns: columns, rows: min(maxRows, rows))
+        return Capacity(columns: columns(width: max(width, minWidth)), rows: min(maxRows, rows))
+    }
+
+    /// 지도 x 0부터 `width`까지 보일 때 한 행에 들어가는 책상 수 (메인 포함, 행 끝 "+N" 자리까지 남김).
+    /// 최소 폭으로 올려 잡지 않습니다 (미니 사무실처럼 사무실 일부만 잘라 보여 줄 때도 씀).
+    public static func columns(width: Double) -> Int {
+        let room = width - 8 - moreBadgeWidth - deskWidth / 2 - firstDeskX - mainGap
+        return 1 + max(0, Int((room / deskSpacing).rounded(.down)))
     }
 
     /// 화면 높이에 맞춘 행 간격: 3행이 첫 행부터 아래 여백까지 고르게 들어가게 벌리고, 최소 `minRowSpacing`.

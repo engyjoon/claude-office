@@ -8,16 +8,29 @@ public struct FloorSelection: Hashable, Sendable {
     public var all: Bool
     /// `all`이 아닐 때 고른 디렉토리 (`Team.folder`와 같은 형식: 워크트리는 원래 폴더)
     public var folders: Set<String>
+    /// 행 하나만 고름 (미니 사무실, M5(4)). 정해져 있으면 `all`·`folders`보다 우선합니다.
+    public var team: TeamID?
 
-    public init(all: Bool = true, folders: Set<String> = []) {
+    public init(all: Bool = true, folders: Set<String> = [], team: TeamID? = nil) {
         self.all = all
         self.folders = folders
+        self.team = team
     }
 
     public static let everyone = FloorSelection()
+    /// 아무도 보여 주지 않음
+    public static let nobody = FloorSelection(all: false)
 
-    public func contains(folder: String) -> Bool { all || folders.contains(folder) }
-    public func contains(_ team: Team) -> Bool { contains(folder: team.folder) }
+    /// 행 하나만 (nil이면 아무도)
+    public static func only(_ team: TeamID?) -> FloorSelection {
+        team.map { FloorSelection(all: false, team: $0) } ?? .nobody
+    }
+
+    public func contains(folder: String) -> Bool { team == nil && (all || folders.contains(folder)) }
+    public func contains(_ team: Team) -> Bool {
+        if let only = self.team { return team.id == only }
+        return contains(folder: team.folder)
+    }
 }
 
 /// 화면에 무엇을 보여 줄지 (순수 계산). 고른 메인의 행을 온 순서대로 위에서부터 놓고,
@@ -72,16 +85,24 @@ public struct OfficeFloor: Sendable {
     public private(set) var selection: FloorSelection
     public private(set) var plan = FloorPlan.empty
     public private(set) var viewport: (width: Double, height: Double)
+    /// 한 행 띠 (미니 사무실, M5(4)): 첫 행 하나만 보여 주고, 책상 수는 보이는 폭(`viewport.width`, 지도 x 0부터)으로 셉니다.
+    /// 무대 배치는 사무실과 같아서(최소 크기로 올려 잡음) 휴게 공간·화이트보드·출입문 자리가 그대로입니다.
+    public let isBand: Bool
 
     public init(config: StageConfig = .init(), selection: FloorSelection = .everyone,
-                width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight) {
+                width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight, band: Bool = false) {
         stage = Stage(config: config)
         self.selection = selection
+        isBand = band
         viewport = (width, height)
         stage.setViewport(width: width, height: height)
     }
 
-    public var capacity: OfficeLayout.Capacity { OfficeLayout.capacity(width: viewport.width, height: viewport.height) }
+    public var capacity: OfficeLayout.Capacity {
+        isBand
+            ? OfficeLayout.Capacity(columns: OfficeLayout.columns(width: viewport.width), rows: 1)
+            : OfficeLayout.capacity(width: viewport.width, height: viewport.height)
+    }
 
     // MARK: - 지시 흘리기
 

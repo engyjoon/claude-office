@@ -22,7 +22,16 @@ final class StageStore {
 /// 사무실 크기가 창 크기를 따라가고, 들어가지 않는 행·서브는 `OfficeFloor`가 숨깁니다.
 /// 창이 최소 크기(`OfficeLayout.minWidth`·`minHeight`)보다 작을 때만 줄입니다.
 final class OfficeScene: SKScene {
+    /// 무엇을 어떻게 보여 줄지
+    enum Framing {
+        /// 사무실 창: 사무실 전체를 둘레 여백 안쪽에 (창이 최소 크기보다 작을 때만 줄임)
+        case office
+        /// 미니 사무실 (M5(4)): 지도 y `top`부터 아래를 배율 1로 잘라 보여 줌 (한 행 띠)
+        case band(top: Double)
+    }
+
     private let store: StageStore
+    let framing: Framing
     /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
     private let world = SKNode()
     private let furniture = SKNode()
@@ -38,8 +47,10 @@ final class OfficeScene: SKScene {
     private var furnitureSignature = ""
     /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
     var onSelect: ((AgentID?) -> Void)?
-    /// 사무실 영역 크기가 바뀜 (모델이 들어가는 수를 다시 셉니다)
+    /// 사무실 영역 크기가 바뀜 (모델이 들어가는 수를 다시 셉니다). 띠면 보이는 지도 폭(왼쪽 여백 뺀 폭)과 높이.
     var onViewportChange: ((CGSize) -> Void)?
+    /// 띠에서 빈 곳을 끌어 창을 옮긴 뒤 (모서리에 붙이기)
+    var onWindowDragged: (() -> Void)?
     private var reportedSize: CGSize?
     var selectedAgent: AgentID? {
         didSet {
@@ -49,8 +60,9 @@ final class OfficeScene: SKScene {
         }
     }
 
-    init(store: StageStore) {
+    init(store: StageStore, framing: Framing = .office) {
         self.store = store
+        self.framing = framing
         super.init(size: CGSize(width: OfficeLayout.defaultWidth, height: OfficeLayout.defaultHeight))
         scaleMode = .resizeFill
         anchorPoint = .zero
@@ -90,9 +102,12 @@ final class OfficeScene: SKScene {
     private func sync() {
         if reportedSize != size, size.width > 1, size.height > 1 {
             reportedSize = size
-            // 사무실은 둘레 여백 안쪽 크기를 따릅니다
+            // 사무실은 둘레 여백 안쪽 크기를 따릅니다 (띠는 왼쪽 여백만)
             let pad = OfficeLayout.padding * 2
-            onViewportChange?(CGSize(width: max(size.width - pad, 1), height: max(size.height - pad, 1)))
+            switch framing {
+            case .office: onViewportChange?(CGSize(width: max(size.width - pad, 1), height: max(size.height - pad, 1)))
+            case .band: onViewportChange?(CGSize(width: max(size.width - pad / 2, 1), height: size.height))
+            }
         }
         let stage = store.stage
         let height = stage.layout.height
@@ -127,7 +142,12 @@ final class OfficeScene: SKScene {
     /// 말풍선·상태 칩·아이콘을 무대에서 계산한 그대로 옮깁니다 (배치와 줄임은 OfficeStage의 Overlay가 정함)
     private func syncOverlays(_ stage: Stage, extent: MapRect) {
         let height = stage.layout.height
-        let visible = MapRect(max(extent.x, 0), 0, min(extent.width, stage.layout.width), min(extent.height, height))
+        let visible: MapRect
+        switch framing {
+        case .office: visible = MapRect(max(extent.x, 0), 0, min(extent.width, stage.layout.width), min(extent.height, height))
+        // 띠: 잘라 보여 주는 영역 안에 말풍선을 가둡니다 (왼쪽 둘레 여백은 빼고)
+        case .band: visible = MapRect(0, extent.y, extent.width + extent.x, extent.height)
+        }
         let options = OverlayOptions(privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible)
         var present = Set<String>()
         for (index, item) in Overlay.items(for: stage, options: options).enumerated() {
@@ -164,7 +184,14 @@ final class OfficeScene: SKScene {
 
     override func mouseDown(with event: NSEvent) {
         let point = event.location(in: world)
-        onSelect?(character(at: point))
+        let hit = character(at: point)
+        if case .band = framing, hit == nil {
+            // 미니 사무실: 빈 곳을 끌면 패널을 옮깁니다
+            view?.window?.performDrag(with: event)
+            onWindowDragged?()
+            return
+        }
+        onSelect?(hit)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -187,6 +214,13 @@ final class OfficeScene: SKScene {
     /// 돌려주는 값은 화면에 보이는 영역(지도 좌표)으로, 배경(벽·바닥)을 여백까지 이어 그립니다.
     private func fitWorld(officeHeight: Double) -> MapRect {
         let view = CGSize(width: max(size.width, 1), height: max(size.height, 1))
+        if case .band(let top) = framing {
+            // 지도 (-여백, top)을 화면 왼쪽 위에 배율 1로
+            let pad = OfficeLayout.padding
+            world.setScale(1)
+            world.position = CGPoint(x: pad, y: view.height - officeHeight + top)
+            return MapRect(-pad, top, view.width, view.height)
+        }
         let officeWidth = store.stage.layout.width
         let pad = OfficeLayout.padding
         let scale = OfficeLayout.displayScale(viewWidth: view.width - pad * 2, viewHeight: view.height - pad * 2)

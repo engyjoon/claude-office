@@ -14,6 +14,8 @@ import OfficeStage
 //   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
 //       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
 //       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
+//       --mini 600 이면 미니 사무실(폭 600 패널의 한 행 띠, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
+//       --pin <세션>으로 고정할 행을 정할 수 있습니다.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
@@ -32,7 +34,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 600 [--pin 세션]]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
@@ -289,14 +291,29 @@ func snapshot(_ arguments: [String]) throws {
     let size = (option("--size", in: arguments) ?? "").split(separator: "x").compactMap { Double($0) }
     // --size는 사무실 영역(둘레 여백 포함) 크기입니다. 사무실은 여백 안쪽 크기를 따릅니다 (앱과 같음).
     let pad = OfficeLayout.padding * 2
-    var floor = OfficeFloor(
+    // --mini <패널 폭>: 미니 사무실 (한 행 띠, 배율 1)
+    let miniWidth = option("--mini", in: arguments).flatMap(Double.init)
+    let pinSession = option("--pin", in: arguments).map(SessionID.init)
+    var floor = miniWidth.map {
+        OfficeFloor(selection: .nobody, width: MiniOffice.visibleMapWidth(panelWidth: $0), height: OfficeLayout.minHeight, band: true)
+    } ?? OfficeFloor(
         width: size.count == 2 ? size[0] - pad : OfficeLayout.defaultWidth, height: size.count == 2 ? size[1] - pad : OfficeLayout.defaultHeight)
+    var focus = MiniFocus.empty
     let epoch = Date(timeIntervalSince1970: 1_800_000_000)
+    func refocus(_ time: Double) {
+        guard miniWidth != nil else { return }
+        let pinned = pinSession.flatMap { engine.state.lead(of: $0)?.teamID }
+        let next = MiniFocus.next(
+            previous: focus, state: engine.state, journal: engine.journal, pinned: pinned, autoSwitch: true,
+            now: epoch.addingTimeInterval(time))
+        if next.team != focus.team { floor.setSelection(.only(next.team), engine: engine) }
+        focus = next
+    }
     let frame = 1.0 / 30
     var now = 0.0
     var nextTick = 0.25
     var pending = steps[...]
-    let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+    let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent + (miniWidth == nil ? "" : "-mini")
     for target in times {
         while now < target {
             while let step = pending.first, step.time <= now {
@@ -304,6 +321,7 @@ func snapshot(_ arguments: [String]) throws {
                 if let event = step.event(at: epoch.addingTimeInterval(step.time)) {
                     let directives = engine.handle(event)
                     floor.apply(directives, engine: engine)
+                    refocus(now)
                 }
             }
             let dt = min(frame, target - now)
@@ -312,17 +330,24 @@ func snapshot(_ arguments: [String]) throws {
             if now >= nextTick {
                 let directives = engine.tick(at: epoch.addingTimeInterval(now))
                 floor.apply(directives, engine: engine)
+                refocus(now)
                 nextTick += 0.25
             }
             _ = floor.drainEvents()
         }
         let stage = floor.stage
         let file = folder.appendingPathComponent(String(format: "%@-%06.2fs.svg", base, target))
-        try SVGRenderer.render(stage: stage).write(to: file, atomically: true, encoding: .utf8)
+        let crop = miniWidth.map { MiniOffice.extent(panelWidth: $0) }
+        try SVGRenderer.render(stage: stage, crop: crop).write(to: file, atomically: true, encoding: .utf8)
         let summary = stage.sortedActors.map { actor in
             "\(actor.agent.displayName)@\(actor.position)\(actor.isWalking ? "→" : "")\(actor.seated ? "(앉음)" : "") \(actor.pose.rawValue)"
         }.joined(separator: ", ")
         print(String(format: "%7.2fs  %@", target, file.path))
+        if miniWidth != nil {
+            let team = focus.team.flatMap { engine.state.teams[$0] }
+            let main = focus.team.flatMap { engine.state.main(of: $0) }?.displayName ?? "메인"
+            print("          미니: \(team.map { "\(main) · \($0.name)" } ?? "(아무도 없음)") [\(focus.reason.rawValue)]")
+        }
         print("          \(summary.isEmpty ? "(아무도 없음)" : summary)")
         if floor.plan.hiddenCount > 0 { print("          화면에 다 못 보여 준 \(floor.plan.hiddenCount)명") }
     }

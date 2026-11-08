@@ -11,7 +11,7 @@ struct ClaudeOfficeApp: App {
         MenuBarExtra {
             MenuContentView(model: model)
         } label: {
-            MenuBarLabel(roster: model.roster)
+            MenuBarLabel(roster: model.roster) { model.registerOpenWindow($0) }
         }
         .menuBarExtraStyle(.window)
 
@@ -140,12 +140,16 @@ struct OfficeWindowView: View {
 /// 아무도 없으면 점 없이 빈 건물. 승인 대기가 있으면 옆에 그 수를 숫자로.
 struct MenuBarLabel: View {
     let roster: Roster
+    /// 사무실 창 열기 동작을 모델에 넘김 (미니 사무실에서 캐릭터를 눌렀을 때 씀)
+    var registerOpenWindow: (OpenWindowAction) -> Void = { _ in }
     /// 메뉴바가 밝은지 어두운지에 따라 건물 색을 다시 그립니다
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let mood = roster.mood
         Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark))
+            .onAppear { registerOpenWindow(openWindow) }
         if !roster.waiting.isEmpty {
             Text("\(roster.waiting.count)")
         }

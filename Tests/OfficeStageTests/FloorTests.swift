@@ -12,8 +12,8 @@ struct FloorHarness {
     var events: [StageEvent] = []
     let epoch = Date(timeIntervalSince1970: 1_800_000_000)
 
-    init(width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight) {
-        floor = OfficeFloor(width: width, height: height)
+    init(width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight, band: Bool = false) {
+        floor = OfficeFloor(width: width, height: height, band: band)
     }
 
     var stage: Stage { floor.stage }

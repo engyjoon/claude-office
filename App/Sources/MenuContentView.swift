@@ -44,6 +44,7 @@ struct MenuContentView: View {
             footer
         }
         .frame(width: 340)
+        .onAppear { model.registerOpenWindow(openWindow) }
     }
 
     private var header: some View {
@@ -120,6 +121,12 @@ struct MenuContentView: View {
                 openSettings()
             }
             Spacer()
+            Button {
+                model.setMiniEnabled(!model.miniSettings.enabled)
+            } label: {
+                Image(systemName: model.miniSettings.enabled ? "pip.fill" : "pip")
+            }
+            .help(model.miniSettings.enabled ? "미니 사무실 끄기" : "미니 사무실 켜기")
             Button {
                 var settings = model.soundSettings
                 settings.masterEnabled.toggle()
