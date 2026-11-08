@@ -392,7 +392,9 @@ public enum OverlayArt {
                 label,
             ]
         case .shout:
-            let burst = "M\(n(f.x - 5)),\(n(f.y - 3)) l-5,-4 M\(n(f.maxX + 5)),\(n(f.y - 3)) l5,-4 M\(n(f.maxX + 6)),\(n(f.y + 8)) l7,0"
+            // 터지는 선: 위 양쪽 모서리와 좌우 가운데 (왼쪽 가운데는 M5(9b) 화면 확인: "!" 배지를 없애 오른쪽과 짝이 맞게)
+            let burst = "M\(n(f.x - 5)),\(n(f.y - 3)) l-5,-4 M\(n(f.maxX + 5)),\(n(f.y - 3)) l5,-4 "
+                + "M\(n(f.maxX + 6)),\(n(f.y + 8)) l7,0 M\(n(f.x - 6)),\(n(f.y + 8)) l-7,0"
             return [
                 ArtShape(.path(tailRect(f, radius: style.radius, tip: tip)), fill: .swatch(.butter), stroke: .swatch(.ink), lineWidth: 2.4),
                 .line(burst, width: 1.8),
