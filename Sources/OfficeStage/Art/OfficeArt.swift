@@ -4,8 +4,10 @@ import OfficeCore
 /// 사무실 바닥·벽·가구·책상 섬 그림 (미리보기 docs/preview의 officeScene을 옮긴 것)
 public enum OfficeArt {
     /// 전체 사무실 레이어. 깊이 순서대로 직원과 섞어 그리면 됩니다.
-    public static func layers(layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Int: String]] = [:]) -> [ArtLayer] {
-        var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout))]
+    /// - Parameter extent: 화면에 보이는 영역(지도 좌표). 창 비율이 사무실과 달라 남는 곳까지 벽과 바닥을 이어 그립니다.
+    ///   nil이면 사무실 크기(0, 0, width, height)만 그립니다.
+    public static func layers(layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Int: String]] = [:], extent: MapRect? = nil) -> [ArtLayer] {
+        var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, extent: extent))]
         layers += wallFurniture()
         for island in 0..<(layout.rows * 2) {
             let team = teams.first { $0.island == island }
@@ -17,20 +19,27 @@ public enum OfficeArt {
 
     // MARK: - 바닥과 벽
 
-    static func background(layout: OfficeLayout) -> [ArtShape] {
-        let width = OfficeLayout.width
-        let height = layout.height
+    static func background(layout: OfficeLayout, extent: MapRect? = nil) -> [ArtShape] {
+        let area = extent ?? MapRect(0, 0, OfficeLayout.width, layout.height)
+        let left = min(area.x, 0)
+        let right = max(area.maxX, OfficeLayout.width)
+        let top = min(area.y, 0)
+        let bottom = max(area.maxY, layout.height)
+        let width = right - left
         var shapes: [ArtShape] = [
-            .rect(0, 0, width, 160, fill: .swatch(.wall), outline: false),
-            .rect(0, 150, width, 10, fill: .swatch(.baseboard), outline: false),
-            .rect(0, 160, width, height - 160, fill: .swatch(.floor), outline: false),
+            .rect(left, top, width, 160 - top, fill: .swatch(.wall), outline: false),
+            .rect(left, 150, width, 10, fill: .swatch(.baseboard), outline: false),
+            .rect(left, 160, width, bottom - 160, fill: .swatch(.floor), outline: false),
         ]
+        // 바닥 줄눈: 가로줄은 36pt마다, 세로줄은 210pt마다 한 줄씩 엇갈립니다 (사무실 밖으로도 같은 무늬)
         var y = 196.0
         var row = 0
-        while y < height {
-            shapes.append(.rect(0, y, width, 2, fill: .swatch(.floorLine), outline: false))
+        let limit = extent == nil ? bottom : bottom + 36  // 화면을 채울 때는 맨 아래 반쪽 줄까지
+        while y < limit {
+            shapes.append(.rect(left, y, width, 2, fill: .swatch(.floorLine), outline: false))
             var x = row % 2 == 1 ? 60.0 : 150.0
-            while x < width {
+            while x - 210 >= left { x -= 210 }
+            while x < right {
                 shapes.append(.rect(x, y - 34, 2, 34, fill: .swatch(.floorLine), outline: false))
                 x += 210
             }
@@ -104,7 +113,7 @@ public enum OfficeArt {
             .rect(696, 68, 32, 30, r: 4, fill: .swatch(.sky)),
             .circle(730, 114, 3.5, fill: .swatch(.butter)),
             .rect(690, 30, 44, 14, r: 4, fill: .swatch(.plate), width: 1.3),
-            .text("입구", 712, 40.5, size: 8),
+            .text("입구", 712, 37, size: 8, baseline: .central),
         ]
         // 서버랙 두 대
         let leds: [Swatch] = [.mint, .skyBlue, .butter]
@@ -126,6 +135,26 @@ public enum OfficeArt {
 
     /// 좌석별 의자 색
     static let chairColors: [UInt32] = [0x7FC9B3, 0xF0A58B, 0xB6A6E4, 0xE9CB6C]
+    static let plateFontSize = 9.5
+    static let platePadding = 6.0
+
+    /// 글자 폭 어림값 (한글·기호는 정사각형, 영문·숫자는 그 절반 남짓). 렌더러마다 글꼴이 달라 넉넉하게 잡습니다.
+    static func estimatedWidth(_ text: String, size: Double) -> Double {
+        text.unicodeScalars.reduce(0) { sum, scalar in
+            if scalar == " " { return sum + size * 0.3 }
+            return sum + (scalar.isASCII ? size * 0.52 : size * 1.0)
+        }
+    }
+
+    /// 폭에 맞지 않으면 뒤를 잘라 "…"을 붙입니다. 돌려주는 폭은 어림값입니다.
+    static func fitted(_ text: String, size: Double, maxWidth: Double) -> (String, Double) {
+        let full = estimatedWidth(text, size: size)
+        if full <= maxWidth { return (text, full) }
+        var cut = text
+        while !cut.isEmpty, estimatedWidth(cut + "…", size: size) > maxWidth { cut.removeLast() }
+        let result = cut + "…"
+        return (result, estimatedWidth(result, size: size))
+    }
 
     static func island(_ island: Int, team: Team?, plates: [Int: String]) -> [ArtLayer] {
         let center = OfficeLayout.islandCenter(island)
@@ -144,10 +173,13 @@ public enum OfficeArt {
                 .circle(x - 27, y - 39, 2, fill: .swatch(.metalDot), outline: false),
             ]
             if let name = plates[index] {
-                let width = Double(min(max(name.count, 4), 16)) * 5 + 12
+                let (text, textWidth) = fitted(name, size: plateFontSize, maxWidth: 78 - 2 * platePadding)
+                let width = max(textWidth, 28) + 2 * platePadding
+                // 책상 앞판에서 보이는 부분(상판 아래 y-22 ~ y+3)의 세로 가운데에 명패를 답니다
+                let plateCenter = y - 9.5
                 desk += [
-                    .rect(x - width / 2, y - 17, width, 11, r: 3, fill: .swatch(.plate), width: 1.2),
-                    .text(name, x, y - 9.2, size: 7),
+                    .rect(x - width / 2, plateCenter - 7.5, width, 15, r: 4, fill: .swatch(.plate), width: 1.2),
+                    .text(text, x, plateCenter, size: plateFontSize, bold: true, baseline: .central),
                 ]
             }
             if index == 0 {
@@ -161,7 +193,7 @@ public enum OfficeArt {
             layers.append(ArtLayer("sign-\(island)", depth: -.infinity, [
                 .rect(center.x - width / 2, center.y + 35, width, 20, r: 10, fill: .swatch(.plate), width: 1.4),
                 .circle(center.x - width / 2 + 11, center.y + 45, 4, fill: .swatch(Swatch.teamColors[team.colorIndex % 4]), width: 1),
-                .text(label, center.x + 7, center.y + 48.6, size: 10, color: .swatch(.ink)),
+                .text(label, center.x + 7, center.y + 45, size: 10, color: .swatch(.ink), baseline: .central),
             ]))
         }
         return layers

@@ -40,6 +40,20 @@ struct RosterTests {
         #expect(team.rows[1].status.label == "편집 중")
     }
 
+    @Test("클릭한 직원의 행과 팀을 id로 찾는다")
+    func lookup() throws {
+        let s = state([
+            hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "RouterConfig 리뷰", "subagent_type": "code-reviewer"]),
+            hook.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/w/DeviceService.java"], agent: (id: "r1", type: "code-reviewer")),
+        ])
+        let roster = Roster.make(from: s, privacy: .detailed)
+        let member = try #require(roster.teams.first?.rows.last)
+        #expect(roster.row(for: member.id)?.name == "code-reviewer")
+        #expect(roster.team(of: member.id)?.name == "a-sdn-portal")
+        #expect(roster.row(for: AgentID("없는 직원")) == nil)
+        #expect(roster.team(of: AgentID("없는 직원")) == nil)
+    }
+
     @Test("승인 대기는 따로 모으고 mood는 attention")
     func waiting() throws {
         let s = state([hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "npm test"])])

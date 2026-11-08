@@ -82,6 +82,12 @@ public enum TextAnchor: String, Hashable, Sendable {
     case start, middle, end
 }
 
+/// 글자의 세로 기준. `alphabetic`은 y가 글자 바닥선, `central`은 y가 글자 높이의 가운데입니다.
+/// 명패처럼 상자 안에 넣는 글자는 `central`로 두면 글꼴마다 다른 바닥선 위치와 상관없이 가운데에 섭니다.
+public enum TextBaseline: String, Hashable, Sendable {
+    case alphabetic, central
+}
+
 /// 렌더러와 무관한 도형 한 개 (좌표는 y가 아래로 증가)
 public struct ArtShape: Hashable, Sendable {
     public enum Geometry: Hashable, Sendable {
@@ -89,7 +95,7 @@ public struct ArtShape: Hashable, Sendable {
         case circle(center: MapPoint, radius: Double)
         case ellipse(center: MapPoint, rx: Double, ry: Double)
         case rect(MapRect, radius: Double)
-        case text(String, at: MapPoint, size: Double, bold: Bool, anchor: TextAnchor)
+        case text(String, at: MapPoint, size: Double, bold: Bool, anchor: TextAnchor, baseline: TextBaseline)
     }
 
     public var geometry: Geometry
@@ -127,8 +133,8 @@ public struct ArtShape: Hashable, Sendable {
         ArtShape(.ellipse(center: MapPoint(x, y), rx: rx, ry: ry), fill: fill, stroke: outline ? .swatch(.ink) : nil, lineWidth: width, opacity: opacity)
     }
 
-    public static func text(_ string: String, _ x: Double, _ y: Double, size: Double, bold: Bool = false, color: Paint = .swatch(.plateInk), anchor: TextAnchor = .middle) -> ArtShape {
-        ArtShape(.text(string, at: MapPoint(x, y), size: size, bold: bold, anchor: anchor), fill: color)
+    public static func text(_ string: String, _ x: Double, _ y: Double, size: Double, bold: Bool = false, color: Paint = .swatch(.plateInk), anchor: TextAnchor = .middle, baseline: TextBaseline = .alphabetic) -> ArtShape {
+        ArtShape(.text(string, at: MapPoint(x, y), size: size, bold: bold, anchor: anchor, baseline: baseline), fill: color)
     }
 
     /// 도형 전체를 옮기거나 키웁니다 (미리보기의 translate/scale)
@@ -141,7 +147,8 @@ public struct ArtShape: Hashable, Sendable {
         case .ellipse(let c, let rx, let ry): copy.geometry = .ellipse(center: t(c), rx: rx * scale, ry: ry * scale)
         case .rect(let rect, let radius):
             copy.geometry = .rect(MapRect(rect.x * scale + offset.x, rect.y * scale + offset.y, rect.width * scale, rect.height * scale), radius: radius * scale)
-        case .text(let s, let at, let size, let bold, let anchor): copy.geometry = .text(s, at: t(at), size: size * scale, bold: bold, anchor: anchor)
+        case .text(let s, let at, let size, let bold, let anchor, let baseline):
+            copy.geometry = .text(s, at: t(at), size: size * scale, bold: bold, anchor: anchor, baseline: baseline)
         }
         if scale != 1 { copy.lineWidth *= scale }
         return copy

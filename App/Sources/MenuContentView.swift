@@ -197,28 +197,16 @@ struct StatusChip: View {
     }
 }
 
-/// 미리보기의 치비 캐릭터를 단순화한 동그란 얼굴 (M3에서 SpriteKit 캐릭터로 바뀝니다)
+/// 사무실 캐릭터의 얼굴 초상 (팀장은 가슴에 별, 임시 직원은 머리에 새싹)
 struct Avatar: View {
     let appearance: Appearance
     let kind: StaffKind
+    var size: CGFloat = 26
+    var tint: Color = Color(hex: 0xFFF8EC)
 
     var body: some View {
-        ZStack {
-            Circle().fill(Palette.top(appearance.topColor))
-            Circle().fill(Palette.skin(appearance.skinTone)).padding(5)
-            if kind == .lead {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(Color(hex: 0xE0B84A))
-                    .offset(x: 9, y: 9)
-            } else if kind == .temporary {
-                Image(systemName: "leaf.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(Color(hex: 0x5FA77F))
-                    .offset(x: 0, y: -11)
-            }
-        }
-        .frame(width: 26, height: 26)
+        CharacterPortrait(appearance: appearance, isLead: kind == .lead, tint: tint)
+            .frame(width: size, height: size)
     }
 }
 

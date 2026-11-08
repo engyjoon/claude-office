@@ -37,6 +37,8 @@ final class AppModel {
     private(set) var installMessage: String?
     private(set) var isInstalling = false
     private(set) var receivedHooks = 0
+    /// 사무실 창에서 클릭해 고른 직원 (신원 카드에 보여줍니다)
+    private(set) var selectedAgent: AgentID?
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -58,6 +60,7 @@ final class AppModel {
         privacy = saved
         engine = OfficeEngine(privacy: saved)
         officeScene = OfficeScene(store: stageStore)
+        officeScene.onSelect = { [weak self] id in self?.select(id) }
         refreshHookStatus()
         startServer()
         startTicking()
@@ -131,6 +134,13 @@ final class AppModel {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
         }
         roster = Roster.make(from: engine.state, privacy: privacy)
+        // 고른 직원이 퇴근하면 카드를 닫습니다
+        if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
+    }
+
+    func select(_ id: AgentID?) {
+        selectedAgent = id
+        officeScene.selectedAgent = id
     }
 
     /// 연출 지시를 무대에 넘기고, 로그에도 남깁니다.

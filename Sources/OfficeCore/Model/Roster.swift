@@ -113,6 +113,16 @@ public struct Roster: Hashable, Sendable {
 
     public static let empty = Roster(teams: [], waiting: [])
 
+    /// 사무실 창에서 클릭한 직원을 찾을 때 씁니다
+    public func row(for id: AgentID) -> RosterRow? {
+        for team in teams { if let row = team.rows.first(where: { $0.id == id }) { return row } }
+        return nil
+    }
+
+    public func team(of id: AgentID) -> RosterTeam? {
+        teams.first { $0.rows.contains { $0.id == id } }
+    }
+
     public static func make(from state: OfficeState, privacy: PrivacyLevel) -> Roster {
         var teams: [RosterTeam] = []
         for team in state.sortedTeams {

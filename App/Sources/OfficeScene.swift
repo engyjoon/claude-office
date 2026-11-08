@@ -13,19 +13,34 @@ final class StageStore {
 /// 무대(Stage)를 그대로 옮겨 그리기만 합니다. 판단과 타이밍은 모두 OfficeCore·OfficeStage에 있고,
 /// 그림 데이터는 SVG 스냅숏과 같은 OfficeArt·CharacterArt를 씁니다.
 /// 좌표 변환: 그림 데이터는 y가 아래로 증가 → SpriteKit은 y가 위로 증가하므로 뒤집습니다.
+///
+/// 씬은 창 크기를 그대로 따르고(`resizeFill`), 사무실(`world`)을 창에 맞게 줄여 위쪽 가운데에 놓습니다.
+/// 창 비율이 사무실과 달라 남는 곳은 벽과 바닥을 이어 그려 검은 여백이 생기지 않게 합니다.
 final class OfficeScene: SKScene {
     private let store: StageStore
+    /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
+    private let world = SKNode()
     private let furniture = SKNode()
     private var characters: [AgentID: CharacterNode] = [:]
     private var furnitureSignature = ""
+    /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
+    var onSelect: ((AgentID?) -> Void)?
+    var selectedAgent: AgentID? {
+        didSet {
+            guard oldValue != selectedAgent else { return }
+            if let oldValue { characters[oldValue]?.isSelected = false }
+            if let selectedAgent { characters[selectedAgent]?.isSelected = true }
+        }
+    }
 
     init(store: StageStore) {
         self.store = store
         super.init(size: CGSize(width: OfficeLayout.width, height: OfficeLayout().height))
-        scaleMode = .aspectFit
+        scaleMode = .resizeFill
         anchorPoint = .zero
         backgroundColor = Swatch.floor.color.skColor
-        addChild(furniture)
+        addChild(world)
+        world.addChild(furniture)
     }
 
     required init?(coder: NSCoder) {
@@ -37,6 +52,11 @@ final class OfficeScene: SKScene {
         sync()
     }
 
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        sync()
+    }
+
     override func update(_ currentTime: TimeInterval) {
         sync()
     }
@@ -44,10 +64,8 @@ final class OfficeScene: SKScene {
     private func sync() {
         let stage = store.stage
         let height = stage.layout.height
-        if abs(size.height - height) > 0.5 {
-            size = CGSize(width: OfficeLayout.width, height: height)
-        }
-        rebuildFurnitureIfNeeded(stage)
+        let extent = fitWorld(officeHeight: height)
+        rebuildFurnitureIfNeeded(stage, extent: extent)
 
         var present = Set<AgentID>()
         for actor in stage.sortedActors {
@@ -56,10 +74,12 @@ final class OfficeScene: SKScene {
             if let existing = characters[actor.id] {
                 node = existing
             } else {
-                node = CharacterNode(agent: actor.agent)
+                let colorIndex = stage.sortedTeams.first { $0.id == actor.agent.teamID }?.colorIndex ?? 0
+                node = CharacterNode(agent: actor.agent, teamColor: Swatch.teamColors[colorIndex % Swatch.teamColors.count].color.skColor)
+                node.isSelected = actor.id == selectedAgent
                 node.alpha = 0
                 node.run(.fadeIn(withDuration: 0.2))
-                addChild(node)
+                world.addChild(node)
                 characters[actor.id] = node
             }
             node.apply(actor, time: stage.time, sceneHeight: height)
@@ -70,18 +90,46 @@ final class OfficeScene: SKScene {
         }
     }
 
-    private func rebuildFurnitureIfNeeded(_ stage: Stage) {
+    // MARK: - 클릭
+
+    override func mouseDown(with event: NSEvent) {
+        let point = event.location(in: world)
+        onSelect?(character(at: point))
+    }
+
+    /// 겹쳐 있으면 앞(화면 아래쪽)에 선 직원을 고릅니다. 몸보다 조금 넓게 잡아 작은 캐릭터도 누르기 쉽게 합니다.
+    private func character(at point: CGPoint) -> AgentID? {
+        characters
+            .filter { $0.value.hitFrame.contains(point) }
+            .max { $0.value.zPosition < $1.value.zPosition }?
+            .key
+    }
+
+    /// 사무실 전체가 보이도록 줄이고(가로·세로 중 빠듯한 쪽에 맞춤) 위쪽 가운데에 둡니다.
+    /// 돌려주는 값은 화면에 보이는 영역(지도 좌표)으로, 배경을 그 크기까지 이어 그립니다.
+    private func fitWorld(officeHeight: Double) -> MapRect {
+        let view = CGSize(width: max(size.width, 1), height: max(size.height, 1))
+        let scale = min(view.width / OfficeLayout.width, view.height / officeHeight)
+        let offsetX = (view.width - OfficeLayout.width * scale) / 2
+        world.setScale(scale)
+        world.position = CGPoint(x: offsetX, y: view.height - officeHeight * scale)
+        return MapRect(-offsetX / scale, 0, view.width / scale, view.height / scale)
+    }
+
+    private func rebuildFurnitureIfNeeded(_ stage: Stage, extent: MapRect) {
         let teams = stage.sortedTeams
         let plates = stage.nameplates.keys.sorted().map { team in
             team.raw + ":" + (stage.nameplates[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
         }
-        let signature = "\(stage.layout.islandCount)|" + teams.map { "\($0.island):\($0.name)" }.joined(separator: ",") + "|" + plates.joined(separator: ";")
+        // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
+        let fit = [extent.x, extent.width, extent.height].map { String(Int(($0 / 4).rounded())) }.joined(separator: ",")
+        let signature = fit + "|\(stage.layout.islandCount)|" + teams.map { "\($0.island):\($0.name)" }.joined(separator: ",") + "|" + plates.joined(separator: ";")
         guard signature != furnitureSignature else { return }
         furnitureSignature = signature
 
         furniture.removeAllChildren()
         let height = stage.layout.height
-        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates)
+        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent)
 
         // 바닥과 벽은 움직이지 않으므로 한 번 그려서 캐시합니다
         let background = SKEffectNode()
@@ -117,6 +165,7 @@ final class CharacterNode: SKNode {
     private let rightArm: SKNode
     private let handProp = SKNode()
     private let heldProp = SKNode()
+    private let selectionRing: SKShapeNode
     private let appearance: Appearance
     private var shownExpression: FacialExpression?
     private var shownProp: Prop??
@@ -124,16 +173,33 @@ final class CharacterNode: SKNode {
     /// 그림 데이터(y 아래로 증가)를 노드 안의 좌표(y 위로 증가)로
     private static let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
 
-    init(agent: Agent) {
+    var isSelected = false {
+        didSet { selectionRing.isHidden = !isSelected }
+    }
+
+    /// 클릭 판정 영역 (부모 좌표). 발밑 그림자부터 머리 위까지를 조금 넉넉하게 잡습니다.
+    var hitFrame: CGRect {
+        calculateAccumulatedFrame().insetBy(dx: -4, dy: -4)
+    }
+
+    init(agent: Agent, teamColor: NSColor) {
         let appearance = agent.profile.appearance
         self.appearance = appearance
         colors = CharacterArt.colors(for: appearance)
+        // 고른 직원 발밑에 팀 색 고리를 깝니다
+        selectionRing = SKShapeNode(ellipseOf: CGSize(width: 46, height: 15))
+        selectionRing.fillColor = teamColor.withAlphaComponent(0.55)
+        selectionRing.strokeColor = Swatch.ink.color.skColor
+        selectionRing.lineWidth = 1.6
+        selectionRing.isAntialiased = true
+        selectionRing.isHidden = true
         leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors, transform: Self.local)
         rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors, transform: Self.local)
         leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
         rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
         super.init()
 
+        addChild(selectionRing)
         addChild(ArtNodes.node(for: CharacterArt.shadow, colors: colors, transform: Self.local))
         addChild(body)
 
@@ -230,7 +296,7 @@ enum ArtNodes {
     }
 
     static func node(for shape: ArtShape, colors: CharacterArt.Colors?, transform: (MapPoint) -> CGPoint) -> SKNode {
-        if case .text(let string, let at, let size, let bold, let anchor) = shape.geometry {
+        if case .text(let string, let at, let size, let bold, let anchor, let baseline) = shape.geometry {
             let label = SKLabelNode(text: string)
             label.fontName = bold ? "AppleSDGothicNeo-Bold" : "AppleSDGothicNeo-Regular"
             label.fontSize = size
@@ -241,7 +307,13 @@ enum ArtNodes {
             case .middle: label.horizontalAlignmentMode = .center
             case .end: label.horizontalAlignmentMode = .right
             }
-            label.position = transform(at)
+            var position = transform(at)
+            if baseline == .central {
+                // SKLabelNode의 .center는 글꼴의 위아래 여백까지 포함한 줄 높이의 가운데라서 글자가 위로 떠 보입니다.
+                // 실제 글자 모양(한글과 대문자)의 높이 가운데를 기준점에 맞춥니다.
+                position.y -= inkMidline(fontName: label.fontName ?? "", size: size)
+            }
+            label.position = position
             label.alpha = shape.opacity
             return label
         }
@@ -259,6 +331,20 @@ enum ArtNodes {
         node.isAntialiased = true
         node.alpha = shape.opacity
         return node
+    }
+
+    private static var midlineCache: [String: CGFloat] = [:]
+
+    /// 바닥선에서 글자 높이 가운데까지의 거리. 내림 획이 없는 "가H"의 글리프 경계로 잽니다.
+    static func inkMidline(fontName: String, size: CGFloat) -> CGFloat {
+        let key = "\(fontName)@\(size)"
+        if let cached = midlineCache[key] { return cached }
+        let font = NSFont(name: fontName, size: size) ?? NSFont.systemFont(ofSize: size)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "가H", attributes: [.font: font]))
+        let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let midline = bounds.midY
+        midlineCache[key] = midline
+        return midline
     }
 
     static func color(_ paint: Paint, _ colors: CharacterArt.Colors?) -> NSColor {

@@ -69,6 +69,17 @@ public enum SVGRenderer {
             + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g></g>"
     }
 
+    /// 목록·카드용 얼굴 초상 하나를 SVG로 (앱의 CharacterPortrait와 같은 그림)
+    public static func portrait(_ appearance: Appearance, isLead: Bool, size: Double = 96) -> String {
+        let frame = CharacterArt.portraitFrame
+        let colors = CharacterArt.colors(for: appearance)
+        let body = CharacterArt.portrait(appearance, isLead: isLead).map { element($0, colors: colors) }.joined()
+        return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(f(size))\" height=\"\(f(size))\" viewBox=\"\(f(frame.x)) \(f(frame.y)) \(f(frame.width)) \(f(frame.height))\">"
+            + "<clipPath id=\"c\"><circle cx=\"\(f(frame.x + frame.width / 2))\" cy=\"\(f(frame.y + frame.height / 2))\" r=\"\(f(frame.width / 2))\"/></clipPath>"
+            + "<circle cx=\"\(f(frame.x + frame.width / 2))\" cy=\"\(f(frame.y + frame.height / 2))\" r=\"\(f(frame.width / 2))\" fill=\"#FFF8EC\"/>"
+            + "<g clip-path=\"url(#c)\">\(body)</g></svg>"
+    }
+
     static func element(_ shape: ArtShape, colors: CharacterArt.Colors?) -> String {
         var attributes = ""
         if let fill = shape.fill {
@@ -92,9 +103,9 @@ public enum SVGRenderer {
             return "<ellipse cx=\"\(f(c.x))\" cy=\"\(f(c.y))\" rx=\"\(f(rx))\" ry=\"\(f(ry))\"\(attributes)/>"
         case .rect(let rect, let radius):
             return "<rect x=\"\(f(rect.x))\" y=\"\(f(rect.y))\" width=\"\(f(rect.width))\" height=\"\(f(rect.height))\" rx=\"\(f(radius))\"\(attributes)/>"
-        case .text(let string, let at, let size, let bold, let anchor):
+        case .text(let string, let at, let size, let bold, let anchor, let baseline):
             let escaped = string.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
-            return "<text x=\"\(f(at.x))\" y=\"\(f(at.y))\" font-size=\"\(f(size))\" text-anchor=\"\(anchor.rawValue)\"\(bold ? " font-weight=\"bold\"" : "")\(attributes)>\(escaped)</text>"
+            return "<text x=\"\(f(at.x))\" y=\"\(f(at.y))\" font-size=\"\(f(size))\" text-anchor=\"\(anchor.rawValue)\"\(baseline == .central ? " dominant-baseline=\"central\"" : "")\(bold ? " font-weight=\"bold\"" : "")\(attributes)>\(escaped)</text>"
         }
     }
 

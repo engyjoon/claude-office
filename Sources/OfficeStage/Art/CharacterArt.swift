@@ -231,6 +231,28 @@ public enum CharacterArt {
         }
     }
 
+    // MARK: - 초상 (목록·카드용)
+
+    /// 얼굴과 어깨만 담은 초상. 좌표 원점은 머리 중심이고, `portraitFrame` 안에 들어옵니다.
+    /// 사무실 캐릭터와 같은 부위 데이터를 쓰므로 목록에서 본 얼굴을 사무실에서 그대로 찾을 수 있습니다.
+    public static func portrait(_ appearance: Appearance, isLead: Bool, expression: FacialExpression = .happy) -> [ArtShape] {
+        // 몸과 팔은 발 기준 좌표 → 머리 중심 기준으로 옮깁니다
+        let toHead = MapPoint(-headOrigin.x, -headOrigin.y)
+        let arms = [leftShoulder, rightShoulder].flatMap { shoulder in
+            arm.map { $0.transformed(offset: MapPoint(shoulder.x + toHead.x, shoulder.y + toHead.y)) }
+        }
+        return hairBack(style: appearance.hairStyle)
+            + body(isLead: isLead).map { $0.transformed(offset: toHead) }
+            + arms
+            + face
+            + eyes(expression)
+            + blush(expression) + mouth(expression) + hairFront(style: appearance.hairStyle)
+            + brows(expression) + accessory(appearance.accessory)
+    }
+
+    /// 초상을 담는 정사각형 (머리 위 새싹부터 가슴의 별 배지까지)
+    public static let portraitFrame = MapRect(-42, -45, 84, 84)
+
     // MARK: - 도형 도우미
 
     static func star4(_ c: MapPoint, _ r: Double) -> [PathCommand] {
