@@ -213,7 +213,7 @@ public struct OfficeLayout: Hashable, Sendable {
     /// 출입문 왼쪽 x
     public var doorX: Double { pantryX - Self.doorToPantry }
     /// 출입문 왼쪽 → 탕비 코너 왼쪽, 화이트보드 왼쪽 → 출입문 왼쪽 거리 (화이트보드 폭 128 + 넉넉한 사이 72)
-    static let doorToPantry = 124.0
+    static let doorToPantry = 140.0
     static let whiteboardToDoor = 200.0
     /// 화이트보드 왼쪽 x
     public var whiteboardX: Double { doorX - Self.whiteboardToDoor }
