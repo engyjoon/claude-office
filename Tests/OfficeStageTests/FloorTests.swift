@@ -153,25 +153,38 @@ struct FloorTests {
         #expect(h.stage.layout.rows[0].hidden == 3)
     }
 
-    @Test("행은 최대 3개: 넷째 메인은 숨기고, 위 행이 닫히면 올라와 보인다")
+    @Test("행은 최대 3개: 가장 오래 조용한 메인을 숨기고, 숨은 메인이 일을 시작하면 다른 행 대신 보인다 (행 순서·번호 그대로)")
     func overflowRows() throws {
         var h = FloorHarness(width: 1140, height: 1200)
         for (index, session) in ["a", "b", "c", "d"].enumerated() {
             h.hook(hook("SessionStart", session: session), at: Double(index) * 0.2)
         }
+        let (a, b, c, d) = (h.team("a"), h.team("b"), h.team("c"), h.team("d"))
+        // 가장 먼저 와서 가장 오래 조용한 a가 숨음
         h.hook(delegateHook("d", "x1"), at: 1)
         h.run(until: 20)
         #expect(h.stage.layout.rows.count == 3)
-        #expect(h.floor.plan.hiddenTeams == [h.team("d")])
-        #expect(h.floor.plan.hiddenCount == 2)
-        #expect(h.actor("lead-4") == nil)
-        h.hook(hook("SessionEnd", session: "a"), at: 21)
+        #expect(h.floor.plan.hiddenTeams == [a])
+        #expect(h.floor.plan.hiddenCount == 1)
+        #expect(h.stage.layout.rows.map(\.team) == [b, c, d])
+        #expect(h.actor("lead-1") == nil)
+        #expect(h.actor("lead-4")?.position == h.stage.layout.seat(d, .main).final)
+
+        // a에 요청이 옴 → a가 보이고, 이제 가장 오래 조용한 b가 숨음. 행은 메인이 온 순서 그대로
+        h.hook(hook("UserPromptSubmit", #""prompt":"x""#, session: "a"), at: 21)
         h.run(until: 45)
-        #expect(h.stage.layout.rows.map(\.team) == [h.team("b"), h.team("c"), h.team("d")])
-        #expect(h.actor("lead-4")?.position == h.stage.layout.seat(h.team("d"), .main).final)
+        #expect(h.floor.plan.hiddenTeams == [b])
+        #expect(h.stage.layout.rows.map(\.team) == [a, c, d])
+        #expect(h.actor("lead-1")?.position == h.stage.layout.seat(a, .main).final)
+        #expect(h.actor("lead-2") == nil)
+        #expect(h.engine.state.lead(of: SessionID("a"))?.displayName == "메인1")
+
+        // c가 퇴근하면 숨어 있던 b가 다시 보임
+        h.hook(hook("SessionEnd", session: "c"), at: 46)
+        h.run(until: 70)
         #expect(h.floor.plan.hiddenCount == 0)
-        // b가 첫 행으로 올라와 메인 책상에 그대로 앉아 있습니다
-        #expect(h.actor("lead-2")?.position == MapPoint(OfficeLayout.deskX(0), OfficeLayout.firstDeskY))
+        #expect(h.stage.layout.rows.map(\.team) == [a, b, d])
+        #expect(h.actor("lead-2") != nil)  // 문에서 들어와 (쉰 지 60초가 넘어) 휴게 공간으로
     }
 
     @Test("디렉토리를 고르면 그 디렉토리에서 연 메인(들)과 서브만 보이고, 메인마다 한 행. '모두'로 돌아가면 그 자리에 바로 다시 선다")

@@ -57,3 +57,30 @@ struct ResidentStageTests {
         #expect(first.team == fresh.engine.state.lead(of: SessionID("a"))?.teamID && first.reason == .none)
     }
 }
+
+@Suite("화면에 보일 행: 최근 활동 순 (M5(5) 화면 확인)")
+struct RecentRowsTests {
+    @Test("앱을 켠 뒤 새로 연 세션이 일하면, 오래 쉰 데스크톱 세션 대신 보인다")
+    func newSessionReplacesOldResident() throws {
+        var h = FloorHarness()  // 기본 창 = 3행
+        let now = h.epoch
+        let residents = [("a", 60.0), ("b", 86400 * 3), ("c", 86400 * 11), ("d", 86400 * 12)].map {
+            ResidentSession(session: SessionID($0.0), hostSession: "local_\($0.0)", rootCwd: "/w/\($0.0)", lastActivity: now.addingTimeInterval(-$0.1))
+        }
+        let roll = ResidentRoll(residents: residents, openHostSessions: Set(residents.map(\.hostSession)), isReliable: true, readAt: now)
+        h.floor.apply(h.engine.syncResidents(roll, at: now), engine: h.engine)
+        func team(_ s: String) -> TeamID { h.engine.state.lead(of: SessionID(s))!.teamID }
+        #expect(h.floor.plan.rows.map(\.team) == [team("a"), team("b"), team("c")])
+        #expect(h.floor.plan.hiddenTeams == [team("d")])
+
+        // 새 세션 e가 와서 요청 → 메인5, 맨 아래 행으로 보이고 11일째 쉬는 c가 숨음
+        h.hook(hook("SessionStart", session: "e", cwd: "/w/e"), at: 1)
+        h.hook(hook("UserPromptSubmit", #""prompt":"x""#, session: "e", cwd: "/w/e"), at: 2)
+        h.run(until: 3)
+        #expect(h.engine.state.lead(of: SessionID("e"))?.displayName == "메인5")
+        #expect(h.floor.plan.rows.map(\.team) == [team("a"), team("b"), team("e")])
+        #expect(Set(h.floor.plan.hiddenTeams) == [team("c"), team("d")])
+        #expect(h.stage.sortedActors.contains { $0.agent.session == SessionID("e") })
+        #expect(!h.stage.sortedActors.contains { $0.agent.session == SessionID("c") })
+    }
+}

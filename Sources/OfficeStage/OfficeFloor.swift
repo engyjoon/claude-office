@@ -73,12 +73,19 @@ public struct FloorPlan: Hashable, Sendable {
         return plan
     }
 
+    /// 행이 화면에 다 들어가지 않으면 **가장 최근에 활동한 행**들을 보여 주고, 가장 오래 조용한 행부터 숨깁니다 (M5(5) 화면 확인).
+    /// 보여 주는 행의 위아래 순서와 메인 번호는 그대로(메인이 온 순서)입니다.
     public static func make(state: OfficeState, selection: FloorSelection, capacity: OfficeLayout.Capacity) -> FloorPlan {
         var plan = FloorPlan.empty
-        for team in state.sortedTeams where selection.contains(team) {
+        let teams = state.sortedTeams.filter { selection.contains($0) && !state.agents(in: $0.id).isEmpty }
+        let shownTeams = Set(
+            teams.map { ($0, lastActivity(of: $0.id, in: state)) }
+                .sorted { ($0.1, -$0.0.order) > ($1.1, -$1.0.order) }
+                .prefix(capacity.rows)
+                .map(\.0.id))
+        for team in teams {
             let people = state.agents(in: team.id)
-            guard !people.isEmpty else { continue }
-            if plan.rows.count >= capacity.rows {
+            if !shownTeams.contains(team.id) {
                 plan.hiddenTeams.append(team.id)
                 plan.hiddenCount += people.count
                 continue
@@ -90,6 +97,15 @@ public struct FloorPlan: Hashable, Sendable {
             plan.hiddenCount += people.count - shown.count
         }
         return plan
+    }
+
+    /// 행의 마지막 활동: 그 행 사람들의 활동이 바뀐 때와 세션이 요청을 받은 때 중 가장 최근.
+    /// 미리 앉힌 데스크톱 세션은 데스크톱 앱의 마지막 활동 시각입니다 (§5.2).
+    public static func lastActivity(of team: TeamID, in state: OfficeState) -> Date {
+        let people = state.agents(in: team)
+        let activity = people.map(\.activitySince).max() ?? .distantPast
+        let prompt = Set(people.map(\.session)).compactMap { state.parts[$0]?.lastPromptAt }.max() ?? .distantPast
+        return max(activity, prompt)
     }
 }
 

@@ -1,5 +1,5 @@
-# M5(1) 행 배치 (혼잡): 메인 4명 — 메인1은 서브 12명(한 행 11명이라 +2), 메인2 서브 3명, 메인3 서브 1명, 메인4 서브 2명(넷째 행이라 숨김).
-# 40초: 메인1의 가운데 서브가 퇴근 → 오른쪽 끝(숨어 있던) 서브가 출입문으로 들어와 그 책상에 앉고 +1. 60초: 메인3이 퇴근 → 메인4의 행이 올라옴.
+# M5(1) 행 배치 (혼잡): 메인 4명 — 메인1은 서브 12명(한 행 11명이라 +2), 메인2 서브 3명, 메인3 서브 1명, 메인4 서브 2명. 행은 3개까지라 가장 오래 조용한 메인3의 행을 숨김(M5(5): 최근에 활동한 행부터 보여 줌).
+# 40초: 메인1의 가운데 서브가 퇴근 → 오른쪽 끝(숨어 있던) 서브가 출입문으로 들어와 그 책상에 앉고 +1. 60초: 숨어 있던 메인3이 퇴근 → 세 행 그대로.
 # 실행: swift run office-sim snapshot Scenarios/floor.jsonl --at 30,52,80   (앱에서는 make replay처럼 office-sim replay Scenarios/floor.jsonl)
 {"t": 0.0, "term": "vscode", "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 1.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
