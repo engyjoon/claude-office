@@ -78,7 +78,8 @@ struct LayoutTests {
             // 액자 → 시계 → 화이트보드 순서, 액자는 안마 의자 등판과 겹치지 않음, 화이트보드와 출입문 사이는 넉넉히
             let clock = layout.clockCenter
             #expect(garden.maxX + 18 < clock.x - 18 && clock.x + 18 + 18 < layout.whiteboardX && garden.width >= 160)
-            #expect(garden.maxY + 24 < OfficeLayout.massageSeat.y - 108 || garden.maxX < OfficeLayout.massageArea.x)
+            #expect(garden.maxY + 24 < OfficeLayout.massageSeat.y - 108)
+            #expect(layout.whiteboardX - (clock.x + 18) <= 32)
             #expect(layout.doorX - (layout.whiteboardX + 128) >= 60)
             let walls: [(Double, Double)] = [(garden.x, garden.width)]
                 + [(layout.whiteboardX, 128), (layout.doorX, 72), (layout.pantryX, 202)]

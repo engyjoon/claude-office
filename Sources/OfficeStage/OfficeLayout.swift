@@ -32,7 +32,7 @@ public struct Place: Hashable, Sendable {
 ///
 /// ```
 /// ┌───────────────────────────────────────────────────────────────────────────────┐
-/// │ [──── 정원 그림 액자 ────]    시계    [화이트보드]      [출입문]  [냉장고][정수기][프린터] │ ← 뒷벽
+/// │ [──────── 정원 그림 액자 ────────]  시계 [화이트보드]      [출입문]  [냉장고][정수기][프린터] │ ← 뒷벽
 /// │ [3인용 소파][3인용 소파]   (빈 공간)   [안마 의자][안마 의자]          (탕비 코너)        │ ← 공용 공간 (위쪽)
 /// │ ★메인1  서브1  서브2  서브3                                                    │ ← 행 1
 /// │ ★메인2  서브1  서브2  서브3  서브4  서브5  서브6  서브7  서브8  서브9  +3        │ ← 행 2
@@ -219,12 +219,12 @@ public struct OfficeLayout: Hashable, Sendable {
     public var whiteboardX: Double { doorX - Self.whiteboardToDoor }
     /// 뒷벽 그림·화이트보드 윗변 y (휴게 공간 가구 등판과 넉넉히 띄우려고 위로 올림)
     public static let wallArtTop = 22.0
-    /// 정원 그림 액자 (뒷벽 왼쪽, 가로로 긴 액자, 최대 폭 380). 소파 위에 걸려 안마 의자 등판과 겹치지 않습니다.
+    /// 벽시계 가운데 (화이트보드 바로 왼쪽, 사이 30pt)
+    public var clockCenter: MapPoint { MapPoint(whiteboardX - 48, 60) }
+    /// 정원 그림 액자 (뒷벽 왼쪽에서 시계 앞 40pt까지, 가로로 긴 액자). 위로 올려 안마 의자 등판과 띄웁니다.
     public var gardenFrame: MapRect {
-        MapRect(28, Self.wallArtTop, min(380, max(160, whiteboardX - 28 - 100)), 74)
+        MapRect(28, Self.wallArtTop, max(160, clockCenter.x - 18 - 40 - 28), 74)
     }
-    /// 벽시계 가운데 (정원 액자와 화이트보드 사이 가운데)
-    public var clockCenter: MapPoint { MapPoint((gardenFrame.maxX + whiteboardX) / 2, 60) }
     public var doorPoint: MapPoint { MapPoint(doorX + 36, 182) }
 
     public enum Zone: String, Hashable, Sendable, CaseIterable {
