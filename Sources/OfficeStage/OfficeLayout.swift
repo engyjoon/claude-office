@@ -32,7 +32,7 @@ public struct Place: Hashable, Sendable {
 ///
 /// ```
 /// ┌───────────────────────────────────────────────────────────────────────────────┐
-/// │ 시계        [────── 정원 그림 액자 ──────]  [화이트보드]  [출입문]  [냉장고][정수기][프린터] │ ← 뒷벽
+/// │ [──── 정원 그림 액자 ────]    시계    [화이트보드]      [출입문]  [냉장고][정수기][프린터] │ ← 뒷벽
 /// │ [3인용 소파][3인용 소파]   (빈 공간)   [안마 의자][안마 의자]          (탕비 코너)        │ ← 공용 공간 (위쪽)
 /// │ ★메인1  서브1  서브2  서브3                                                    │ ← 행 1
 /// │ ★메인2  서브1  서브2  서브3  서브4  서브5  서브6  서브7  서브8  서브9  +3        │ ← 행 2
@@ -71,7 +71,7 @@ public struct OfficeLayout: Hashable, Sendable {
     public static let bottomMargin = 36.0
     /// 이보다 작은 화면에서는 사무실을 줄여서 보여 줍니다. 폭은 휴게 공간과 뒷벽 가구(정원 액자·화이트보드·출입문·탕비 코너)가 겹치지 않는 최소 크기,
     /// 높이는 3행(`maxRows`)이 최소 간격으로 모두 들어가는 크기입니다 (사무실 창도 이보다 낮아지지 않게 막습니다).
-    public static let minWidth = massageArea.maxX + 18 + 162 + 116 + 212
+    public static let minWidth = massageArea.maxX - 20 + whiteboardToDoor + doorToPantry + 212
     public static let minHeight = firstDeskY + minRowSpacing * Double(maxRows - 1) + bottomMargin
     /// 창을 처음 열었을 때의 사무실 크기 (창 1440×800 − 디렉토리·세션 패널 260 − 제목 막대 − 둘레 여백)
     public static let defaultWidth = 1140.0
@@ -211,18 +211,20 @@ public struct OfficeLayout: Hashable, Sendable {
     /// 탕비 코너 왼쪽 x (오른쪽 벽에 붙임)
     public var pantryX: Double { width - 212 }
     /// 출입문 왼쪽 x
-    public var doorX: Double { pantryX - 116 }
+    public var doorX: Double { pantryX - Self.doorToPantry }
+    /// 출입문 왼쪽 → 탕비 코너 왼쪽, 화이트보드 왼쪽 → 출입문 왼쪽 거리 (화이트보드 폭 128 + 넉넉한 사이 72)
+    static let doorToPantry = 124.0
+    static let whiteboardToDoor = 200.0
     /// 화이트보드 왼쪽 x
-    public var whiteboardX: Double { doorX - 162 }
-    /// 벽시계 가운데 (뒷벽 맨 왼쪽)
-    public static let clockCenter = MapPoint(46, 72)
-    /// 정원 그림 액자 (시계 오른쪽과 화이트보드 사이 가운데, 가로로 긴 액자). 최대 폭 460.
+    public var whiteboardX: Double { doorX - Self.whiteboardToDoor }
+    /// 뒷벽 그림·화이트보드 윗변 y (휴게 공간 가구 등판과 넉넉히 띄우려고 위로 올림)
+    public static let wallArtTop = 22.0
+    /// 정원 그림 액자 (뒷벽 왼쪽, 가로로 긴 액자, 최대 폭 380). 소파 위에 걸려 안마 의자 등판과 겹치지 않습니다.
     public var gardenFrame: MapRect {
-        let from = Self.clockCenter.x + 18 + 28
-        let to = whiteboardX - 28
-        let width = min(460, max(160, to - from))
-        return MapRect((from + to - width) / 2, 36, width, 82)
+        MapRect(28, Self.wallArtTop, min(380, max(160, whiteboardX - 28 - 100)), 74)
     }
+    /// 벽시계 가운데 (정원 액자와 화이트보드 사이 가운데)
+    public var clockCenter: MapPoint { MapPoint((gardenFrame.maxX + whiteboardX) / 2, 60) }
     public var doorPoint: MapPoint { MapPoint(doorX + 36, 182) }
 
     public enum Zone: String, Hashable, Sendable, CaseIterable {

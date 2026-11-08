@@ -87,25 +87,24 @@ public enum OfficeArt {
 
     static func wallFurniture(_ layout: OfficeLayout) -> [ArtLayer] {
         var shapes: [ArtShape] = []
-        // 벽시계 (뒷벽 맨 왼쪽)
-        let clock = OfficeLayout.clockCenter
+        // 정원 그림 액자 (뒷벽 왼쪽, 가로로 긴 액자)
+        shapes += garden(in: layout.gardenFrame)
+        // 벽시계 (액자와 화이트보드 사이)
+        let clock = layout.clockCenter
         shapes += [
             .circle(clock.x, clock.y, 18, fill: .swatch(.white)),
             .line("M\(clock.x),\(clock.y) L\(clock.x),\(clock.y - 11) M\(clock.x),\(clock.y) L\(clock.x + 8),\(clock.y + 4)"),
             .circle(clock.x, clock.y, 2, fill: .swatch(.ink), outline: false),
         ]
-        // 정원 그림 액자 (시계와 화이트보드 사이, 가로로 긴 액자)
-        shapes += garden(in: layout.gardenFrame)
-        // 화이트보드
-        let board = layout.whiteboardX - 512
+        // 화이트보드 (위로 올림: 윗변 y = wallArtTop)
+        let board = MapPoint(layout.whiteboardX - 512, OfficeLayout.wallArtTop - 36)
         shapes += [
-            .rect(512 + board, 36, 128, 80, r: 6, fill: .swatch(.board)),
-            .line("M528,54 h8 v8 h-8 z M542,58 h56 M528,72 h8 v8 h-8 z M542,76 h44 M528,90 h8 v8 h-8 z M542,94 h66", width: 1.5)
-                .transformed(offset: MapPoint(board, 0)),
-            .line("M529,57 l3,3 l5,-6 M529,75 l3,3 l5,-6", width: 2, color: .swatch(.check)).transformed(offset: MapPoint(board, 0)),
-            .rect(532 + board, 116, 88, 6, r: 3, fill: .swatch(.wallTrim)),
-            .rect(600 + board, 111, 12, 5, r: 2, fill: .swatch(.alert), outline: false),
-        ]
+            .rect(512, 36, 128, 80, r: 6, fill: .swatch(.board)),
+            .line("M528,54 h8 v8 h-8 z M542,58 h56 M528,72 h8 v8 h-8 z M542,76 h44 M528,90 h8 v8 h-8 z M542,94 h66", width: 1.5),
+            .line("M529,57 l3,3 l5,-6 M529,75 l3,3 l5,-6", width: 2, color: .swatch(.check)),
+            .rect(532, 116, 88, 6, r: 3, fill: .swatch(.wallTrim)),
+            .rect(600, 111, 12, 5, r: 2, fill: .swatch(.alert), outline: false),
+        ].transformed(offset: board)
         // 출입문
         let door = layout.doorX
         shapes += [
@@ -113,8 +112,6 @@ public enum OfficeArt {
             .rect(door + 8, 56, 56, 104, r: 4, fill: .swatch(.wood)),
             .rect(door + 20, 68, 32, 30, r: 4, fill: .swatch(.sky)),
             .circle(door + 54, 114, 3.5, fill: .swatch(.butter)),
-            .rect(door + 14, 30, 44, 14, r: 4, fill: .swatch(.plate), width: 1.3),
-            .text("입구", door + 36, 37, size: 8, baseline: .central),
         ]
         shapes += pantry().transformed(offset: MapPoint(layout.pantryX - 908, 0))
         return [ArtLayer("wall", depth: -.infinity, shapes)]
@@ -167,8 +164,6 @@ public enum OfficeArt {
     /// 탕비 코너 (오른쪽 벽): 냉장고, 정수기, 프린터
     static func pantry() -> [ArtShape] {
         var shapes: [ArtShape] = [
-            .rect(948, 10, 78, 16, r: 5, fill: .swatch(.plate), width: 1.3),
-            .text("탕비 코너", 987, 18, size: 8.5, baseline: .central),
             // 냉장고
             .rect(908, 32, 72, 128, r: 9, fill: .color(ArtColor(0xF4F7F8))),
             .line("M908,78 L980,78", width: 1.6),

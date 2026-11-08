@@ -223,7 +223,7 @@ struct ArtTests {
             #expect(!OverlayArt.emote(emote).isEmpty)
         }
         // 탕비 코너·출입문을 그리고, 팀장실·리서치 데스크는 없다 (M5(1))
-        #expect(svg.contains("입구") && !svg.contains("팀장실") && !svg.contains("리서치") && svg.contains("탕비 코너"))
+        #expect(!svg.contains("입구") && !svg.contains("팀장실") && !svg.contains("리서치") && !svg.contains("탕비 코너"))  // 라벨 없음 (2026-11-08)
     }
 
     @Test("걸을 때 다리가 번갈아 들리고, 승인 대기 중에는 오른팔이 위로 올라간다")

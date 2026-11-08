@@ -70,12 +70,16 @@ struct LayoutTests {
             }
             // 휴게 공간: 소파 구역(3인용 둘) → 빈 공간 → 안마 구역(의자 둘), 화이트보드 앞을 막지 않습니다
             #expect(OfficeLayout.sofaArea.maxX + 40 < OfficeLayout.massageArea.x)
-            #expect(OfficeLayout.massageArea.maxX < layout.whiteboardX)
+            #expect(layout.slots(.whiteboard).allSatisfy { $0.final.x > OfficeLayout.massageSeats[1].x + 30 + 20 })
             #expect(layout.slots(.lounge).count == 6 && layout.slots(.massageChair).count == 2)
             #expect(layout.doorPoint.y < firstRowTop)
             // 뒷벽 가구는 서로 겹치지 않고 화면 안에 있습니다
             let garden = layout.gardenFrame
-            #expect(garden.x > OfficeLayout.clockCenter.x + 18 && garden.width >= 160)
+            // 액자 → 시계 → 화이트보드 순서, 액자는 안마 의자 등판과 겹치지 않음, 화이트보드와 출입문 사이는 넉넉히
+            let clock = layout.clockCenter
+            #expect(garden.maxX + 18 < clock.x - 18 && clock.x + 18 + 18 < layout.whiteboardX && garden.width >= 160)
+            #expect(garden.maxY + 24 < OfficeLayout.massageSeat.y - 108 || garden.maxX < OfficeLayout.massageArea.x)
+            #expect(layout.doorX - (layout.whiteboardX + 128) >= 60)
             let walls: [(Double, Double)] = [(garden.x, garden.width)]
                 + [(layout.whiteboardX, 128), (layout.doorX, 72), (layout.pantryX, 202)]
             for (index, a) in walls.enumerated() {
