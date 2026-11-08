@@ -1,4 +1,4 @@
-# 위임 시나리오: 출근 → 프롬프트 → 파일 탐색(책장) → code-reviewer 위임 → 팀원이 테스트 실행 승인 대기 → 서버랙 → 보고 → 오류 → 완료 → 휴게실 → 퇴근
+# 위임 시나리오: 출근 → 프롬프트 → 파일 탐색(책장) → code-reviewer 위임 → 팀원이 테스트 실행 승인 대기 → 보고 → 오류 → 완료 → 휴게 공간 → 퇴근
 # Claude Code 2.1.318 훅 스키마 기준으로 만든 합성 시나리오입니다.  실행: swift run office-sim run Scenarios/delegation.jsonl
 {"t": 0, "term": "iTerm.app", "hook": {"session_id": "demo-1", "cwd": "/Users/demo/work/a-sdn-portal", "transcript_path": "/Users/demo/.claude/projects/x/demo-1.jsonl", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 2, "term": "iTerm.app", "hook": {"session_id": "demo-1", "cwd": "/Users/demo/work/a-sdn-portal", "transcript_path": "/Users/demo/.claude/projects/x/demo-1.jsonl", "hook_event_name": "UserPromptSubmit", "prompt": "(생략)"}}
