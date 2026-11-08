@@ -82,11 +82,11 @@ public enum Overlay {
     static let gap = 3.0
     static let pillHeight = 17.0
     static let maxPillCharacters = 28
-    /// 같은 공용 구역(책장·리서치 데스크 …)에서 이만큼 넘게 칩이 뜨면 하나로 묶습니다 ("책장 · 3명 읽는 중")
+    /// 같은 공용 구역(책장·화이트보드 …)에서 이만큼 넘게 칩이 뜨면 하나로 묶습니다 ("책장 · 3명 읽는 중")
     public static let pillGroupThreshold = 3
 
     public static func items(for stage: Stage, options: OverlayOptions = .init()) -> [OverlayItem] {
-        let bounds = options.bounds ?? MapRect(0, 0, OfficeLayout.width, stage.layout.height)
+        let bounds = options.bounds ?? MapRect(0, 0, stage.layout.width, stage.layout.height)
         let area = bounds.insetBy(4)
         let tier = options.tier
         let time = stage.time
@@ -230,7 +230,6 @@ public enum Overlay {
     static func zoneLabel(_ zone: OfficeLayout.Zone) -> String {
         switch zone {
         case .bookshelf: "책장"
-        case .research: "리서치 데스크"
         case .whiteboard: "화이트보드"
         case .pantry: "탕비 코너"
         case .lounge, .massageChair: "휴게 공간"

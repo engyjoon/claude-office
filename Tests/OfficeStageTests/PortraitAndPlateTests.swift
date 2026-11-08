@@ -84,7 +84,7 @@ struct PortraitAndPlateTests {
     @Test("창 비율이 달라 남는 곳까지 벽과 바닥을 이어 그린다")
     func backgroundFillsExtent() throws {
         let layout = OfficeLayout()
-        let extent = MapRect(-120, 0, OfficeLayout.width + 240, layout.height + 200)
+        let extent = MapRect(-120, 0, OfficeLayout().width + 240, layout.height + 200)
         let rects = OfficeArt.background(layout: layout, extent: extent).compactMap { shape -> (MapRect, Paint?)? in
             if case .rect(let rect, _) = shape.geometry { return (rect, shape.fill) }
             return nil

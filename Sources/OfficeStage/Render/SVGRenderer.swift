@@ -7,10 +7,10 @@ public enum SVGRenderer {
     /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
     public static func render(stage: Stage, overlay: OverlayOptions? = .init()) -> String {
         let layout = stage.layout
-        let width = OfficeLayout.width
+        let width = layout.width
         let height = layout.height
         var body = ""
-        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, podSigns: stage.podSigns)
+        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates)
             + OfficeArt.liveLayers(stage: stage)
 
         for layer in layers where layer.depth == -.infinity {
@@ -68,7 +68,7 @@ public enum SVGRenderer {
         inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
         inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
         inner += group(head, CharacterArt.hairBack(style: appearance.hairStyle))
-        inner += group("", CharacterArt.body(isLead: actor.agent.title == .teamLead))
+        inner += group("", CharacterArt.body(isLead: actor.agent.isMain))
         inner += "<g transform=\"\(head)\">"
             + (CharacterArt.face + CharacterArt.blush(e)).map { element($0, colors: colors) }.joined()
             + group(eyes, CharacterArt.eyes(e))

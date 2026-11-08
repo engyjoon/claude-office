@@ -13,7 +13,7 @@ struct OfficeStateTests {
         return state.apply(event)
     }
 
-    @Test("세션 시작: 팀을 열고 팀장이 출근한다")
+    @Test("세션 시작: 행을 열고 메인이 출근한다")
     func sessionStart() throws {
         var state = OfficeState()
         let beats = apply(&state, hook.make("SessionStart"))
@@ -22,13 +22,13 @@ struct OfficeStateTests {
         #expect(team.name == "a-sdn-portal")
         #expect(team.island == 0)
         #expect(lead.role == .lead)
-        #expect(lead.seat == .office)
+        #expect(lead.seat == .main)
         #expect(lead.profile.kind == .lead)
         // 같은 세션의 SessionStart(resume)가 또 와도 새로 출근하지 않습니다
         #expect(apply(&state, hook.make("SessionStart", ["source": "resume"])).isEmpty)
     }
 
-    @Test("앱을 세션 중간에 켜도 첫 이벤트에서 팀장을 만든다")
+    @Test("앱을 세션 중간에 켜도 첫 이벤트에서 메인을 만든다")
     func lateJoin() {
         var state = OfficeState()
         let beats = apply(&state, hook.tool("PreToolUse", "Edit", id: "t1", input: ["file_path": "/x/A.swift"]))
@@ -41,18 +41,17 @@ struct OfficeStateTests {
         }
     }
 
-    @Test("같은 폴더의 두 번째 세션은 같은 방의 파트장이 된다")
-    func coLead() {
+    @Test("같은 폴더에서 직접 연 두 번째 세션도 메인 (각자 행)")
+    func secondMain() {
         var state = OfficeState()
         _ = apply(&state, Hook(session: "s1").make("SessionStart"))
         let beats = apply(&state, Hook(session: "s2").make("SessionStart"))
-        #expect(state.teams.count == 1)
-        guard case .arrived(let second) = beats.first else { Issue.record("\(beats)"); return }
-        #expect(second.displayName == "팀원")
-        // 파트장은 자기 파트 칸(1번)의 ★ 자리
-        #expect(second.seat == Seat(part: 1, desk: 0))
+        #expect(state.teams.count == 2)
+        guard case .arrived(let second) = beats.last else { Issue.record("\(beats)"); return }
+        #expect(second.displayName == "메인2")
+        #expect(second.seat == .main)
         _ = apply(&state, Hook(session: "s3", cwd: "/Users/demo/work/other").make("SessionStart"))
-        #expect(state.sortedTeams.map(\.island) == [0, 1])
+        #expect(state.sortedTeams.map(\.island) == [0, 1, 2])
     }
 
     @Test("위임 → SubagentStart → 팀원 활동 → SubagentStop → PostToolUse(Agent)")
@@ -108,7 +107,7 @@ struct OfficeStateTests {
         guard case .reported = stopped.first else { Issue.record("\(stopped)"); return }
     }
 
-    @Test("위임 정보 없이 서브에이전트 훅이 오면 팀원이 나타난다")
+    @Test("위임 정보 없이 서브에이전트 훅이 오면 서브가 나타난다")
     func memberWithoutDelegation() {
         var state = OfficeState()
         _ = apply(&state, hook.make("SessionStart"))
@@ -119,32 +118,28 @@ struct OfficeStateTests {
         #expect(member.profile.displayName == "researcher")
     }
 
-    @Test("고정 직원은 지정석을 갖고, 퇴근 후 다시 와도 같은 자리에 앉는다")
-    func reservedSeat() {
+    @Test("고정 직원은 퇴근 후 다시 와도 같은 얼굴이고, 책상은 오른쪽 끝에 새로 붙는다")
+    func fixedMemberFace() {
         var state = OfficeState()
         _ = apply(&state, hook.make("SessionStart"))
         let first = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
         _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a2", input: ["subagent_type": "general-purpose"]))
         guard case .delegated(_, let reviewer1) = first.first else { Issue.record("\(first)"); return }
         _ = apply(&state, hook.tool("PostToolUse", "Agent", id: "a1", input: [:]))
-        _ = apply(&state, hook.tool("PostToolUse", "Agent", id: "a2", input: [:]))
-        // 임시 직원이 먼저 와도 code-reviewer의 지정석에는 앉지 않습니다
-        let temp = apply(&state, hook.tool("PreToolUse", "Agent", id: "a3", input: ["subagent_type": "general-purpose"]))
-        let again = apply(&state, hook.tool("PreToolUse", "Agent", id: "a4", input: ["subagent_type": "code-reviewer"]))
-        guard case .delegated(_, let tempMember) = temp.first, case .delegated(_, let reviewer2) = again.last else { Issue.record("위임 없음"); return }
-        #expect(reviewer2.seat == reviewer1.seat)
-        #expect(tempMember.seat != reviewer1.seat)
+        let again = apply(&state, hook.tool("PreToolUse", "Agent", id: "a3", input: ["subagent_type": "code-reviewer"]))
+        guard case .delegated(_, let reviewer2) = again.last else { Issue.record("위임 없음"); return }
         #expect(reviewer2.profile.appearance == reviewer1.profile.appearance)
+        #expect(reviewer2.seat == Seat(desk: 2))
     }
 
-    @Test("파트원은 자기 파트 칸의 1번 책상부터 앉고, 책상이 모자라면 칸 앞에 서는 자리를 받는다")
+    @Test("서브는 1번 책상부터 사람 수만큼 앉는다 (빈 책상 없음)")
     func seatsGrow() {
         var state = OfficeState()
         for index in 0..<5 {
             _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a\(index)", input: ["subagent_type": "general-purpose"]))
         }
         let members = state.agents.values.filter { $0.role == .member }.map(\.seat).sorted()
-        #expect(members == (1...5).map { Seat(part: 0, desk: $0) })
+        #expect(members == (1...5).map { Seat(desk: $0) })
         #expect(Set(state.agents.values.map(\.seat)).count == 6)
     }
 

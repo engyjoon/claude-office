@@ -65,20 +65,22 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
 }
 
 public struct RosterRow: Identifiable, Hashable, Sendable {
-    /// 팀장(메인 세션)인지. 가슴의 별 배지는 팀장만 답니다.
-    public var isTeamLead: Bool { title == .teamLead }
+    /// 메인(사용자가 직접 연 세션)인지. 가슴의 별 배지는 메인만 답니다.
+    public var isMain: Bool { title.isMain }
 
     public let id: AgentID
-    /// 직함 ("팀장", "팀원", "팀원2"). 에이전트 종류는 `agentType`
+    /// 직함 ("메인", "메인1", "서브", "서브2"). 에이전트 종류는 `agentType`
     public let name: String
     public let role: Role
     public let title: JobTitle
-    /// 칸 번호 (0 = 팀장 칸)
-    public let part: Int
+    /// 행 안 책상 (0 = 메인)
+    public let seat: Seat
     /// 데스크톱 앱의 세션 제목 (세션 직원만, 알 때만)
     public let sessionTitle: String?
-    /// 서브에이전트를 부른 세션 직원의 직함 ("팀장", "팀원1"). 그 사람의 칸에 앉습니다.
+    /// 서브에이전트를 부른 세션 직원의 직함 ("메인", "서브1")
     public let calledBy: String?
+    /// 이 사람이 속한 행의 메인 직함 ("메인", "메인2")
+    public let mainName: String
     /// 서브에이전트 종류 ("code-reviewer", "Explore"). 세션 직원은 nil. 신원 카드에만 보여 줍니다.
     public let agentType: String?
     public let kind: StaffKind
@@ -92,11 +94,23 @@ public struct RosterRow: Identifiable, Hashable, Sendable {
     public let term: String?
 }
 
+/// 행 하나 (메인 하나와 그 서브들)
 public struct RosterTeam: Identifiable, Hashable, Sendable {
     public let id: TeamID
+    /// 폴더 이름
     public let name: String
+    /// 폴더 경로
+    public let folder: String
     public let colorIndex: Int
+    /// 메인 직함 ("메인", "메인1")
+    public let mainName: String
+    /// 메인 세션의 데스크톱 제목 (표시 수준 "상세"에서 알 때만)
+    public let mainTitle: String?
+    /// 메인부터 책상 순서
     public let rows: [RosterRow]
+
+    /// 선택기·목록 머리에 쓰는 이름 ("메인1 · claude-office")
+    public var label: String { "\(mainName) · \(name)" }
 }
 
 /// 사무실 상태를 목록으로 정리한 것. 메뉴바 앱이 그대로 그립니다.
@@ -141,21 +155,25 @@ public struct Roster: Hashable, Sendable {
         for team in state.sortedTeams {
             let agents = state.agents(in: team.id)
             guard !agents.isEmpty else { continue }
-            // 팀장과 그 서브에이전트, 그다음 세션 팀원과 그 서브에이전트 … 순서 (칸 순서)
-            var ordered: [Agent] = []
-            for part in state.parts(in: team.id) {
-                let inPart = agents.filter { $0.session == part.session }
-                ordered += inPart.filter { $0.role == .lead } + inPart.filter { $0.role == .member }.sorted { $0.seat < $1.seat }
-            }
-            ordered += agents.filter { agent in !ordered.contains { $0.id == agent.id } }
-            let rows = ordered.map { row(for: $0, teamName: team.name, privacy: privacy, state: state) }
-            teams.append(RosterTeam(id: team.id, name: team.name, colorIndex: team.colorIndex, rows: rows))
+            let main = state.main(of: team.id)
+            let mainName = main?.displayName ?? "메인"
+            let rows = agents.map { row(for: $0, team: team, mainName: mainName, privacy: privacy, state: state) }
+            teams.append(RosterTeam(
+                id: team.id, name: team.name, folder: team.folder, colorIndex: team.colorIndex, mainName: mainName,
+                mainTitle: rows.first { $0.isMain }?.sessionTitle, rows: rows))
         }
         let waiting = teams.flatMap(\.rows).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
         return Roster(teams: teams, waiting: waiting)
     }
 
-    static func row(for agent: Agent, teamName: String, privacy: PrivacyLevel, state: OfficeState) -> RosterRow {
+    /// 선택한 행만 남긴 목록 (직원 현황 패널). nil이면 모두.
+    public func filtered(to teamIDs: Set<TeamID>?) -> Roster {
+        guard let teamIDs else { return self }
+        let kept = teams.filter { teamIDs.contains($0.id) }
+        return Roster(teams: kept, waiting: kept.flatMap(\.rows).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since })
+    }
+
+    static func row(for agent: Agent, team: Team, mainName: String, privacy: PrivacyLevel, state: OfficeState) -> RosterRow {
         let part = state.parts[agent.session]
         let sessionTitle = agent.role == .lead && privacy == .detailed ? part?.title.flatMap { $0.isEmpty ? nil : $0 } : nil
         return RosterRow(
@@ -163,16 +181,17 @@ public struct Roster: Hashable, Sendable {
             name: agent.displayName,
             role: agent.role,
             title: agent.title,
-            part: agent.part,
+            seat: agent.seat,
             sessionTitle: sessionTitle,
             calledBy: agent.role == .member ? state.lead(of: agent.session)?.displayName : nil,
+            mainName: mainName,
             agentType: agent.role == .member ? agent.profile.agentType : nil,
             kind: agent.profile.kind,
             status: RosterStatus.from(agent.activity),
             detail: privacy == .detailed ? detail(for: agent) : nil,
             since: agent.activitySince,
             appearance: agent.profile.appearance,
-            teamName: teamName,
+            teamName: team.name,
             session: agent.session,
             term: agent.term
         )

@@ -284,7 +284,10 @@ func snapshot(_ arguments: [String]) throws {
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let steps = try loadScenario(path)
     var engine = OfficeEngine(seed: option("--seed", in: arguments).flatMap(UInt64.init) ?? 1)
-    var stage = Stage()
+    // 사무실 창 크기 (기본: 창 1400×700에서 직원 현황 패널을 뺀 영역). 배율 1로 그립니다.
+    let size = (option("--size", in: arguments) ?? "").split(separator: "x").compactMap { Double($0) }
+    var floor = OfficeFloor(
+        width: size.count == 2 ? size[0] : OfficeLayout.defaultWidth, height: size.count == 2 ? size[1] : OfficeLayout.defaultHeight)
     let epoch = Date(timeIntervalSince1970: 1_800_000_000)
     let frame = 1.0 / 30
     var now = 0.0
@@ -296,18 +299,21 @@ func snapshot(_ arguments: [String]) throws {
             while let step = pending.first, step.time <= now {
                 pending = pending.dropFirst()
                 if let event = step.event(at: epoch.addingTimeInterval(step.time)) {
-                    stage.enqueue(engine.handle(event))
+                    let directives = engine.handle(event)
+                    floor.apply(directives, engine: engine)
                 }
             }
             let dt = min(frame, target - now)
             now += dt
-            stage.update(dt: dt)
+            floor.update(dt: dt)
             if now >= nextTick {
-                stage.enqueue(engine.tick(at: epoch.addingTimeInterval(now)))
+                let directives = engine.tick(at: epoch.addingTimeInterval(now))
+                floor.apply(directives, engine: engine)
                 nextTick += 0.25
             }
-            _ = stage.drainEvents()
+            _ = floor.drainEvents()
         }
+        let stage = floor.stage
         let file = folder.appendingPathComponent(String(format: "%@-%06.2fs.svg", base, target))
         try SVGRenderer.render(stage: stage).write(to: file, atomically: true, encoding: .utf8)
         let summary = stage.sortedActors.map { actor in
@@ -315,6 +321,7 @@ func snapshot(_ arguments: [String]) throws {
         }.joined(separator: ", ")
         print(String(format: "%7.2fs  %@", target, file.path))
         print("          \(summary.isEmpty ? "(아무도 없음)" : summary)")
+        if floor.plan.hiddenCount > 0 { print("          화면에 다 못 보여 준 \(floor.plan.hiddenCount)명") }
     }
 }
 

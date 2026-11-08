@@ -41,6 +41,10 @@ final class AppModel {
     private(set) var selectedAgent: AgentID?
     /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
     private(set) var soundSettings: SoundSettings
+    /// 사무실 창에서 고른 메인 (직원 현황 위 선택기, M5(1)). 처음엔 모두.
+    private(set) var selection: FloorSelection
+    /// 고른 메인의 사람 중 사무실 화면에 다 못 보여 준 수
+    private(set) var hiddenOnScreen = 0
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -58,6 +62,8 @@ final class AppModel {
     @ObservationIgnored private var tickAccumulator = 0.0
 
     private static let privacyKey = "privacy"
+    private static let selectAllKey = "office.selection.all"
+    private static let selectedTeamsKey = "office.selection.teams"
     private static let maxLogEntries = 600
 
     init() {
@@ -68,8 +74,16 @@ final class AppModel {
         soundSettings = sound
         soundPlayer = SoundPlayer(settings: sound)
         stageStore.privacy = saved
+        // 고른 메인은 기억해 둡니다 (행 id는 앱을 다시 켜면 바뀌므로, 다시 켰을 때는 "모두" 여부만 의미가 있음)
+        let defaults = UserDefaults.standard
+        let all = defaults.object(forKey: Self.selectAllKey) as? Bool ?? true
+        let savedTeams = Set((defaults.stringArray(forKey: Self.selectedTeamsKey) ?? []).map(TeamID.init))
+        let selection = FloorSelection(all: all, teams: savedTeams)
+        self.selection = selection
+        stageStore.floor = OfficeFloor(selection: selection)
         officeScene = OfficeScene(store: stageStore)
         officeScene.onSelect = { [weak self] id in self?.select(id) }
+        officeScene.onViewportChange = { [weak self] size in self?.setViewport(size) }
         refreshHookStatus()
         startServer()
         startTicking()
@@ -126,13 +140,13 @@ final class AppModel {
         let now = Date()
         let dt = min(max(now.timeIntervalSince(lastFrame), 0), 0.1)
         lastFrame = now
-        stageStore.stage.update(dt: dt)
+        stageStore.floor.update(dt: dt)
         tickAccumulator += dt
         if tickAccumulator >= 0.25 {
             tickAccumulator = 0
             record(engine.tick(at: now))
         }
-        playSounds(stageStore.stage.drainEvents())
+        playSounds(stageStore.floor.drainEvents())
     }
 
     /// 무대에서 나온 효과음을 재생기에 넘깁니다. 알림성 소리는 창이 안 보여도, 장식성 소리는 보일 때만 울립니다.
@@ -167,13 +181,58 @@ final class AppModel {
         officeScene.selectedAgent = id
     }
 
-    /// 연출 지시를 무대에 넘기고, 로그에도 남깁니다.
+    /// 연출 지시를 무대에 넘기고(화면에 보일 사람만, `OfficeFloor`), 로그에도 남깁니다.
     private func record(_ directives: [Directive]) {
         guard !directives.isEmpty else { return }
-        stageStore.stage.enqueue(directives)
+        stageStore.floor.apply(directives, engine: engine)
+        updateHidden()
         for directive in directives {
             append(.directive, directive.description)
         }
+    }
+
+    private func updateHidden() {
+        let hidden = stageStore.floor.plan.hiddenCount
+        if hidden != hiddenOnScreen { hiddenOnScreen = hidden }
+    }
+
+    // MARK: - 메인 선택 (M5(1))
+
+    /// 직원 현황 패널에 보여 줄 목록 (고른 메인과 그 서브만)
+    var visibleRoster: Roster {
+        selection.all ? roster : roster.filtered(to: selection.teams)
+    }
+
+    func isSelected(_ team: TeamID) -> Bool {
+        selection.contains(team)
+    }
+
+    func selectAllMains() {
+        setSelection(FloorSelection(all: true, teams: []))
+    }
+
+    /// 메인 하나를 켜고 끕니다. "모두"였으면 지금 있는 메인 중 그 하나만 뺀 선택으로 바뀝니다.
+    func setMain(_ team: TeamID, selected: Bool) {
+        var teams = selection.all ? Set(roster.teams.map(\.id)) : selection.teams
+        if selected { teams.insert(team) } else { teams.remove(team) }
+        let all = Set(roster.teams.map(\.id))
+        setSelection(FloorSelection(all: selection.all && teams == all, teams: teams))
+    }
+
+    private func setSelection(_ selection: FloorSelection) {
+        self.selection = selection
+        let defaults = UserDefaults.standard
+        defaults.set(selection.all, forKey: Self.selectAllKey)
+        defaults.set(selection.teams.map(\.raw).sorted(), forKey: Self.selectedTeamsKey)
+        stageStore.floor.setSelection(selection, engine: engine)
+        updateHidden()
+        if let selectedAgent, visibleRoster.row(for: selectedAgent) == nil { select(nil) }
+    }
+
+    /// 사무실 영역 크기가 바뀜 (배율 1 유지, 들어가는 수를 다시 셈)
+    private func setViewport(_ size: CGSize) {
+        stageStore.floor.setViewport(width: Double(size.width), height: Double(size.height), engine: engine)
+        updateHidden()
     }
 
     // MARK: - 설정

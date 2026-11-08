@@ -4,7 +4,7 @@ import Testing
 
 @testable import OfficeStage
 
-/// 팀장실의 팀장 1명과 팀장 파트 칸의 파트원 5명 (5번째는 옆 빈 칸의 책상을 빌림)
+/// 메인 1명과 서브 5명이 한 행에
 private func crowdedOffice() -> StageHarness {
     var h = StageHarness()
     h.hook(hook("SessionStart"))
@@ -21,7 +21,7 @@ private func say(_ h: inout StageHarness, _ raw: String, _ kind: BubbleKind, _ t
 
 @Suite("말풍선 표시 규칙 (설계서 §7.2)")
 struct BubbleRuleTests {
-    @Test("파트 칸마다 말풍선은 3개까지(팀장실은 따로), 넘치면 기다렸다가 자리가 나면 뜬다")
+    @Test("행(메인 하나와 서브들)마다 말풍선은 3개까지, 넘치면 기다렸다가 자리가 나면 뜬다")
     func perUnitLimit() {
         var h = crowdedOffice()
         let ids = ["lead-1", "member-2", "member-3", "member-4", "member-5", "member-6"]
@@ -30,10 +30,11 @@ struct BubbleRuleTests {
         say(&h, "member-5", .speech, "저도요", duration: 2)
         #expect(h.actor("member-5")?.bubble == nil)
         #expect(h.actor("member-5")?.queuedBubble?.bubble.text == "저도요")
-        // 팀장실은 파트 칸과 따로 셉니다
+        // 메인도 같은 행으로 셉니다
         say(&h, "lead-1", .speech, "다들 고마워요", duration: 2)
-        #expect(h.actor("lead-1")?.bubble?.text == "다들 고마워요")
-        #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 4)
+        #expect(h.actor("lead-1")?.bubble == nil)
+        #expect(h.actor("lead-1")?.queuedBubble != nil)
+        #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 3)
 
         // 앞의 말풍선이 사라지면 기다리던 말풍선이 뜹니다
         h.run(until: h.now + 2.1)
@@ -41,7 +42,7 @@ struct BubbleRuleTests {
         #expect(h.actor("member-5")?.queuedBubble == nil)
     }
 
-    @Test("파트장 칸의 말풍선은 팀장 파트 칸과 따로 센다")
+    @Test("말풍선 수는 행(메인)마다 따로 센다")
     func partPodsCountSeparately() {
         var h = StageHarness()
         h.hook(hook("SessionStart"))
@@ -51,11 +52,11 @@ struct BubbleRuleTests {
             h.hook(hook("PreToolUse", #""tool_name":"Agent","tool_use_id":"b\#(index)","tool_input":{"subagent_type":"general-purpose"}"#, session: "s2"), at: Double(index) + 0.5)
         }
         h.run(until: 40)
-        let mainPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.part == 0 }.map(\.id.raw)
-        let partPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.part == 1 }.map(\.id.raw)
+        let mainPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.teamID == TeamID("/w/a-sdn-portal#1") }.map(\.id.raw)
+        let partPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.teamID == TeamID("/w/a-sdn-portal#2") }.map(\.id.raw)
         #expect(mainPod.count == 3 && partPod.count == 3)
         for id in mainPod + partPod + ["lead-2"] { say(&h, id, .speech, "네!", duration: 3) }
-        // 팀장 파트 칸 3개 + 파트장 칸 3개 (파트장 포함 4명 중 3개)
+        // 메인1 행 3개 + 메인2 행 3개 (메인2 포함 4명 중 3개)
         #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 6)
         #expect(h.actor("lead-2")?.queuedBubble != nil)
     }
@@ -170,7 +171,7 @@ struct OverlayTests {
         #expect(bubbles.count == 3)
         for (index, a) in bubbles.enumerated() {
             let frame = try #require(a.frame)
-            #expect(frame.x >= 0 && frame.maxX <= OfficeLayout.width)
+            #expect(frame.x >= 0 && frame.maxX <= OfficeLayout().width)
             for b in bubbles[(index + 1)...] {
                 #expect(!frame.intersects(b.frame!))
             }

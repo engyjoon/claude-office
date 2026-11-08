@@ -18,7 +18,7 @@ struct ChoreographerTests {
         started(&h)
         let actions = h.actions(of: lead)
         guard case .spawn(_, .door) = actions.first else { Issue.record("\(actions)"); return }
-        #expect(actions.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal"), .office)])
+        #expect(actions.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main)])
         #expect(actions.contains(.sit))
         #expect(actions.contains(.gesture(.wave)))
         #expect(h.all.sounds.contains(.door))
@@ -75,8 +75,8 @@ struct ChoreographerTests {
         #expect(waiting.contains(.pose(.watching)))
         #expect(waiting.contains(.emote(.hourglass)))
         // 서버랙(사라짐)이나 다른 구역으로 가지 않고 자기 자리에 그대로
-        #expect(waiting.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal"), .office)])
-        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), .office))
+        #expect(waiting.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main)])
+        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main))
         let done = h.send(hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 8)
         #expect(done.contains(Directive(lead, .emote(nil))))
         #expect(done.contains(Directive(lead, .express(.happy))))
@@ -137,7 +137,7 @@ struct ChoreographerTests {
         #expect(leadLine.text.contains("RouterConfig") || leadLine.text.contains("code-reviewer") || leadLine.text.contains("부탁") || leadLine.text.contains("맡아"))
         let memberActions = h.actions(of: member)
         #expect(memberActions.walks.first == .beside(lead))
-        #expect(memberActions.walks.last == .seat(TeamID("/Users/demo/work/a-sdn-portal"), Seat(part: 0, desk: 1)))
+        #expect(memberActions.walks.last == .seat(TeamID("/Users/demo/work/a-sdn-portal#1"), Seat(desk: 1)))
         #expect(memberActions.contains(.gesture(.nod)))
 
         h.send(hook.make("SubagentStart", ["agent_id": "x1", "agent_type": "code-reviewer"]), at: 1.2)
@@ -214,7 +214,7 @@ struct ChoreographerTests {
         let directives = h.send(hook.make("SessionEnd"), at: 5)
         #expect(directives.first == Directive(lead, .clearQueue))
         #expect(directives.dropLast().last == Directive(lead, .despawn))
-        #expect(directives.last?.action == .closeTeam(TeamID("/Users/demo/work/a-sdn-portal")))
+        #expect(directives.last?.action == .closeTeam(TeamID("/Users/demo/work/a-sdn-portal#1")))
         #expect(directives.contains(Directive(lead, .walk(to: .door))))
         #expect(!h.engine.choreographer.isPresent(lead))
     }
@@ -248,7 +248,7 @@ struct ChoreographerDetailTests {
         h.advance(to: 7)
         #expect(h.engine.choreographer.spot(of: lead) == .bookshelf)
         h.send(hook.tool("PreToolUse", "Agent", id: "a", input: ["description": "리뷰", "subagent_type": "code-reviewer"]), at: 8)
-        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), .office))
+        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main))
         #expect(h.actions(of: lead).bubbles.last?.text.contains("리뷰") == true)
     }
 

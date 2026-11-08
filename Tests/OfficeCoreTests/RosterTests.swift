@@ -22,7 +22,7 @@ struct RosterTests {
         #expect(Roster.make(from: idle, privacy: .detailed).mood == .idle)
     }
 
-    @Test("팀장이 먼저, 팀원은 자리 순서. 상태와 대상이 보인다")
+    @Test("메인이 먼저, 서브는 책상 순서. 상태와 대상이 보인다")
     func rows() throws {
         let s = state([
             hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "RouterConfig 리뷰", "subagent_type": "code-reviewer"]),
@@ -32,7 +32,8 @@ struct RosterTests {
         #expect(roster.mood == .working)
         let team = try #require(roster.teams.first)
         #expect(team.name == "a-sdn-portal")
-        #expect(team.rows.map(\.name) == ["팀장", "팀원"])
+        #expect(team.rows.map(\.name) == ["메인", "서브"])
+        #expect(team.label == "메인 · a-sdn-portal")
         #expect(team.rows[1].agentType == "code-reviewer")
         #expect(team.rows[1].kind == .fixed)
         #expect(team.rows[0].status == .delegating)
@@ -50,7 +51,7 @@ struct RosterTests {
         ])
         let roster = Roster.make(from: s, privacy: .detailed)
         let member = try #require(roster.teams.first?.rows.last)
-        #expect(roster.row(for: member.id)?.name == "팀원")
+        #expect(roster.row(for: member.id)?.name == "서브")
         #expect(roster.team(of: member.id)?.name == "a-sdn-portal")
         #expect(roster.row(for: AgentID("없는 직원")) == nil)
         #expect(roster.team(of: AgentID("없는 직원")) == nil)

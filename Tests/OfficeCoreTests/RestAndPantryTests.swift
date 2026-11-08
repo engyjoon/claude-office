@@ -7,7 +7,8 @@ import Testing
 @Suite("쉼 단계와 탕비 코너")
 struct RestAndPantryTests {
     static let folder = "/Users/demo/work/claude-office"
-    let team = TeamID(Self.folder)
+    /// 직접 연 세션은 각자 행 (n번째로 열린 행)
+    func team(_ index: Int) -> TeamID { TeamID("\(Self.folder)#\(index)") }
 
     func hook(_ index: Int) -> Hook { Hook(session: "s\(index)", cwd: Self.folder) }
     func lead(_ index: Int) -> AgentID { AgentID("lead-\(index)") }
@@ -29,12 +30,12 @@ struct RestAndPantryTests {
         h.advance(to: 605)
         #expect(h.engine.choreographer.spot(of: lead(1)) == .massageChair)
         #expect(h.actions(of: lead(1)).last == .emote(.zzz) || h.actions(of: lead(1)).contains(.pose(.sleeping)))
-        #expect(h.engine.choreographer.spot(of: lead(2)) == .seat(team, Seat(part: 1, desk: 0)))
+        #expect(h.engine.choreographer.spot(of: lead(2)) == .seat(team(2), .main))
         #expect(h.actions(of: lead(2)).contains(.pose(.sleeping)))
 
         // 안마 의자에서 자다가 새 프롬프트가 오면 깨어 자리로 돌아가고, 의자가 빕니다
         h.send(hook(1).make("UserPromptSubmit"), at: 610)
-        #expect(h.engine.choreographer.spot(of: lead(1)) == .seat(team, .office))
+        #expect(h.engine.choreographer.spot(of: lead(1)) == .seat(team(1), .main))
     }
 
     @Test("쉬러 가는 길에 가끔 탕비 코너 냉장고에서 음료를 꺼내 들고 간다 (동시에 2명까지)")

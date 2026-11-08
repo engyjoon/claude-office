@@ -5,7 +5,9 @@ import SpriteKit
 
 /// 무대 상태를 담아 두는 상자. AppModel이 매 프레임 갱신하고 씬이 읽습니다 (둘 다 메인 스레드).
 final class StageStore {
-    var stage = Stage()
+    /// 화면에 보일 사람만 고르는 층과 그 무대 (M5(1))
+    var floor = OfficeFloor()
+    var stage: Stage { floor.stage }
     /// 말풍선·상태 칩에 보여줄 내용 수준 (설정의 표시 수준)
     var privacy: PrivacyLevel = .detailed
 }
@@ -16,8 +18,9 @@ final class StageStore {
 /// 그림 데이터는 SVG 스냅숏과 같은 OfficeArt·CharacterArt를 씁니다.
 /// 좌표 변환: 그림 데이터는 y가 아래로 증가 → SpriteKit은 y가 위로 증가하므로 뒤집습니다.
 ///
-/// 씬은 창 크기를 그대로 따르고(`resizeFill`), 사무실(`world`)을 창에 맞게 줄여 위쪽 가운데에 놓습니다.
-/// 창 비율이 사무실과 달라 남는 곳은 벽과 바닥을 이어 그려 검은 여백이 생기지 않게 합니다.
+/// 씬은 창 크기를 그대로 따르고(`resizeFill`), 사무실은 줄이지 않습니다 (배율 1, M5(1)).
+/// 사무실 크기가 창 크기를 따라가고, 들어가지 않는 행·서브는 `OfficeFloor`가 숨깁니다.
+/// 창이 최소 크기(`OfficeLayout.minWidth`·`minHeight`)보다 작을 때만 줄입니다.
 final class OfficeScene: SKScene {
     private let store: StageStore
     /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
@@ -35,6 +38,9 @@ final class OfficeScene: SKScene {
     private var furnitureSignature = ""
     /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
     var onSelect: ((AgentID?) -> Void)?
+    /// 사무실 영역 크기가 바뀜 (모델이 들어가는 수를 다시 셉니다)
+    var onViewportChange: ((CGSize) -> Void)?
+    private var reportedSize: CGSize?
     var selectedAgent: AgentID? {
         didSet {
             guard oldValue != selectedAgent else { return }
@@ -45,7 +51,7 @@ final class OfficeScene: SKScene {
 
     init(store: StageStore) {
         self.store = store
-        super.init(size: CGSize(width: OfficeLayout.width, height: OfficeLayout().height))
+        super.init(size: CGSize(width: OfficeLayout.defaultWidth, height: OfficeLayout.defaultHeight))
         scaleMode = .resizeFill
         anchorPoint = .zero
         backgroundColor = Swatch.floor.color.skColor
@@ -82,6 +88,10 @@ final class OfficeScene: SKScene {
     }
 
     private func sync() {
+        if reportedSize != size, size.width > 1, size.height > 1 {
+            reportedSize = size
+            onViewportChange?(size)
+        }
         let stage = store.stage
         let height = stage.layout.height
         let extent = fitWorld(officeHeight: height)
@@ -95,7 +105,7 @@ final class OfficeScene: SKScene {
             if let existing = characters[actor.id] {
                 node = existing
             } else {
-                let colorIndex = stage.sortedTeams.first { $0.id == actor.agent.teamID }?.colorIndex ?? 0
+                let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
                 node = CharacterNode(agent: actor.agent, teamColor: Swatch.teamColors[colorIndex % Swatch.teamColors.count].color.skColor)
                 node.isSelected = actor.id == selectedAgent
                 node.alpha = 0
@@ -115,7 +125,7 @@ final class OfficeScene: SKScene {
     /// 말풍선·상태 칩·아이콘을 무대에서 계산한 그대로 옮깁니다 (배치와 줄임은 OfficeStage의 Overlay가 정함)
     private func syncOverlays(_ stage: Stage, extent: MapRect) {
         let height = stage.layout.height
-        let visible = MapRect(max(extent.x, 0), 0, min(extent.width, OfficeLayout.width), height)
+        let visible = MapRect(max(extent.x, 0), 0, min(extent.width, stage.layout.width), min(extent.height, height))
         let options = OverlayOptions(privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible)
         var present = Set<String>()
         for (index, item) in Overlay.items(for: stage, options: options).enumerated() {
@@ -171,12 +181,13 @@ final class OfficeScene: SKScene {
             .key
     }
 
-    /// 사무실 전체가 보이도록 줄이고(가로·세로 중 빠듯한 쪽에 맞춤) 위쪽 가운데에 둡니다.
+    /// 사무실을 배율 1로 왼쪽 위에 둡니다. 창이 사무실 최소 크기보다 작을 때만 줄입니다.
     /// 돌려주는 값은 화면에 보이는 영역(지도 좌표)으로, 배경을 그 크기까지 이어 그립니다.
     private func fitWorld(officeHeight: Double) -> MapRect {
         let view = CGSize(width: max(size.width, 1), height: max(size.height, 1))
-        let scale = min(view.width / OfficeLayout.width, view.height / officeHeight)
-        let offsetX = (view.width - OfficeLayout.width * scale) / 2
+        let officeWidth = store.stage.layout.width
+        let scale = OfficeLayout.displayScale(viewWidth: view.width, viewHeight: view.height)
+        let offsetX = max(0, (view.width - officeWidth * scale) / 2)
         world.setScale(scale)
         world.position = CGPoint(x: offsetX, y: view.height - officeHeight * scale)
         return MapRect(-offsetX / scale, 0, view.width / scale, view.height / scale)
@@ -184,24 +195,21 @@ final class OfficeScene: SKScene {
 
     private func rebuildFurnitureIfNeeded(_ stage: Stage, extent: MapRect) {
         let teams = stage.sortedTeams
+        let rows = stage.layout.rows.map { "\($0.team.raw)#\($0.desks)+\($0.hidden)@\($0.index)" }
         let plates = stage.nameplates.keys.sorted().map { team in
             team.raw + ":" + (stage.nameplates[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
         }
-        let podSigns = stage.podSigns
-        let signs = podSigns.keys.sorted().map { team in
-            team.raw + ":" + (podSigns[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        }
-        let bands = stage.layout.bands.map { "\($0.team.raw)#\($0.cells)@\(Int($0.top))" }
+
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
         let fit = [extent.x, extent.width, extent.height].map { String(Int(($0 / 4).rounded())) }.joined(separator: ",")
-        let signature = [fit, bands.joined(separator: ","), teams.map { "\($0.id.raw):\($0.name):\($0.colorIndex)" }.joined(separator: ","),
-            plates.joined(separator: ";"), signs.joined(separator: ";")].joined(separator: "|")
+        let signature = [fit, "\(Int(stage.layout.width))x\(Int(stage.layout.height))", rows.joined(separator: ","),
+            teams.map { "\($0.id.raw):\($0.name):\($0.colorIndex)" }.joined(separator: ","), plates.joined(separator: ";")].joined(separator: "|")
         guard signature != furnitureSignature else { return }
         furnitureSignature = signature
 
         furniture.removeAllChildren()
         let height = stage.layout.height
-        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, podSigns: podSigns, extent: extent)
+        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent)
 
         // 바닥과 벽은 움직이지 않으므로 한 번 그려서 캐시합니다
         let background = SKEffectNode()
@@ -321,7 +329,7 @@ final class CharacterNode: SKNode {
         position = CGPoint(x: actor.position.x, y: sceneHeight - actor.position.y)
         zPosition = actor.position.y
 
-        let star = actor.agent.title == .teamLead
+        let star = actor.agent.isMain
         if shownStar != star {
             shownStar = star
             torso.removeAllChildren()

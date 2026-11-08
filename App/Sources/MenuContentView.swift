@@ -23,7 +23,7 @@ struct MenuContentView: View {
                         section(title: "승인 대기 \(model.roster.waiting.count)", rows: model.roster.waiting, highlight: true)
                     }
                     ForEach(model.roster.teams) { team in
-                        section(title: team.name, rows: team.rows, highlight: false, colorIndex: team.colorIndex)
+                        section(title: team.label, rows: team.rows, highlight: false, colorIndex: team.colorIndex)
                     }
                     if model.roster.teams.isEmpty {
                         emptyState
@@ -50,7 +50,7 @@ struct MenuContentView: View {
         HStack(alignment: .firstTextBaseline) {
             Text("사무실 현황").font(.headline)
             Spacer()
-            Text("방 \(model.roster.teams.count) · 직원 \(model.roster.agentCount)")
+            Text("메인 \(model.roster.teams.count) · 직원 \(model.roster.agentCount)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -98,7 +98,7 @@ struct MenuContentView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("아직 출근한 직원이 없어요").font(.subheadline.weight(.semibold))
-            Text("터미널에서 claude를 실행하면 팀장이 출근해요.")
+            Text("터미널에서 claude를 실행하면 메인이 출근해요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -150,7 +150,7 @@ struct RosterRowView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Avatar(appearance: row.appearance, isLead: row.isTeamLead)
+            Avatar(appearance: row.appearance, isLead: row.isMain)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.name).font(.system(size: 13, weight: .semibold))
                 TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -179,8 +179,8 @@ struct RosterRowView: View {
 
     private func subtitle(now: Date) -> String {
         var parts: [String] = []
-        if highlight { parts.append(row.teamName) }
-        if let lead = row.calledBy, row.part > 0 { parts.append("\(lead) 칸") }
+        if highlight { parts.append("\(row.mainName) · \(row.teamName)") }
+        if let caller = row.calledBy { parts.append("\(caller) 호출") }
         if let detail = row.detail { parts.append(detail) }
         if parts.isEmpty, let title = row.sessionTitle { parts.append(title) }
         let minutes = Int(now.timeIntervalSince(row.since) / 60)
@@ -207,7 +207,7 @@ struct StatusChip: View {
     }
 }
 
-/// 사무실 캐릭터의 얼굴 초상 (팀장은 가슴에 별, 기본 에이전트는 머리에 새싹)
+/// 사무실 캐릭터의 얼굴 초상 (메인은 가슴에 별, 기본 에이전트는 머리에 새싹)
 struct Avatar: View {
     let appearance: Appearance
     let isLead: Bool

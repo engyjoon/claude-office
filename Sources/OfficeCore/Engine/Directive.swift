@@ -3,13 +3,11 @@ import Foundation
 /// 사무실 안의 장소 (설계서 §8.1). 실제 좌표는 씬이 맵에서 정합니다.
 public enum Spot: Hashable, Sendable, CustomStringConvertible {
     case door
-    /// 방 안의 자리: 팀장실 책상(`Seat.office`) 또는 파트 칸의 책상·칸 앞에 서는 자리
+    /// 행 안의 자기 책상 (0번 = 메인)
     case seat(TeamID, Seat)
     /// 특정 직원 바로 옆 (위임·보고 대화용)
     case beside(AgentID)
     case bookshelf
-    /// 뒷벽 창가의 스탠딩 리서치 데스크 (웹 검색)
-    case research
     case whiteboard
     /// 휴게 공간 (소파·커피)
     case lounge
@@ -29,7 +27,6 @@ public enum Spot: Hashable, Sendable, CustomStringConvertible {
         case .seat(let team, let seat): "자리(\(team.raw.split(separator: "/").last ?? "")#\(seat))"
         case .beside(let agent): "\(agent) 옆"
         case .bookshelf: "책장"
-        case .research: "리서치 데스크"
         case .whiteboard: "화이트보드"
         case .lounge: "휴게 공간"
         case .massageChair: "안마 의자"
@@ -99,7 +96,7 @@ public enum Prop: String, Hashable, Sendable {
 }
 
 public enum Effect: Hashable, Sendable {
-    /// 새 프롬프트가 종이비행기로 날아와 팀장에게 도착
+    /// 새 프롬프트가 종이비행기로 날아와 세션 직원에게 도착
     case paperPlane(to: AgentID)
 }
 
@@ -107,7 +104,7 @@ public enum Effect: Hashable, Sendable {
 ///
 /// 씬은 직원마다 대기열을 하나씩 두고 지시를 **순서대로** 실행합니다.
 /// - `walk`는 도착할 때까지, `wait`는 그 시간만큼 다음 지시를 막습니다.
-/// - `signal`/`await`로 두 직원의 대기열을 맞춥니다 (보고하러 온 팀원이 도착한 뒤 팀장이 하이파이브).
+/// - `signal`/`await`로 두 직원의 대기열을 맞춥니다 (보고하러 온 서브에이전트가 도착한 뒤 부른 사람이 하이파이브).
 /// - `clearQueue`는 아직 실행하지 않은 지시를 버립니다 (승인 대기처럼 급한 일).
 /// - `agent`가 nil인 지시(팀 열기·닫기, 효과, 전역 효과음)는 즉시 실행합니다.
 public struct Directive: Hashable, Sendable, CustomStringConvertible {

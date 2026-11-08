@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 사무실 창에서 캐릭터를 클릭하면 뜨는 신원 카드 (설계서 §10 "클릭: 인스펙터에서 상세 보기"의 간단한 형태)
 ///
-/// 누구인지(팀장/팀원, 어느 팀, 어느 세션)를 먼저 보여주고, 지금 하는 일은 메뉴 목록과 같은 표현을 씁니다.
+/// 누구인지(메인/서브, 어느 행, 어느 세션)를 먼저 보여주고, 지금 하는 일은 메뉴 목록과 같은 표현을 씁니다.
 /// 폴더 경로와 세부 내용은 표시 수준이 "상세"일 때만 보입니다.
 struct AgentCard: View {
     let row: RosterRow
@@ -14,7 +14,7 @@ struct AgentCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Avatar(appearance: row.appearance, isLead: row.isTeamLead, size: 48, tint: Palette.team(team.colorIndex).opacity(0.45))
+                Avatar(appearance: row.appearance, isLead: row.isMain, size: 48, tint: Palette.team(team.colorIndex).opacity(0.45))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).font(.system(size: 15, weight: .bold))
                     Text(kindLabel).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -33,7 +33,7 @@ struct AgentCard: View {
 
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
                 if let agentType = row.agentType {
-                    // 서브에이전트 팀원이면 어떤 에이전트인지 (화면의 이름에는 쓰지 않고 여기에만 보여 줍니다)
+                    // 서브에이전트면 어떤 에이전트인지 (화면의 이름에는 쓰지 않고 여기에만 보여 줍니다)
                     GridRow {
                         label("에이전트")
                         Text("\(agentType) · \(row.kind == .fixed ? "직접 만든 에이전트" : "기본 에이전트")")
@@ -46,18 +46,18 @@ struct AgentCard: View {
                     }
                 }
                 GridRow {
-                    label("방")
+                    label("행")
                     HStack(spacing: 5) {
                         Circle().fill(Palette.team(team.colorIndex))
                             .overlay(Circle().stroke(Color.primary.opacity(0.4), lineWidth: 0.8))
                             .frame(width: 9, height: 9)
-                        Text(team.name).font(.system(size: 12, weight: .semibold))
+                        Text(team.label).font(.system(size: 12, weight: .semibold))
                     }
                 }
                 if privacy == .detailed {
                     GridRow {
                         label("폴더")
-                        Text(Self.abbreviated(team.id.raw))
+                        Text(Self.abbreviated(team.folder))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -115,8 +115,8 @@ struct AgentCard: View {
 
     private var kindLabel: String {
         switch row.kind {
-        case .lead: row.isTeamLead ? "메인 세션 · 방의 팀장" : "같은 방의 다른 세션 · 팀원"
-        case .fixed, .temporary: "서브에이전트 · 팀원\(row.calledBy.map { " (\($0) 칸)" } ?? "")"
+        case .lead: row.isMain ? "직접 연 세션 · 메인" : "\(row.mainName)에서 띄운 세션 · 서브"
+        case .fixed, .temporary: "서브에이전트 · 서브\(row.calledBy.map { " (\($0) 호출)" } ?? "")"
         }
     }
 

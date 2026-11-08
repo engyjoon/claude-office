@@ -50,12 +50,12 @@ struct StageTests {
         var h = StageHarness()
         h.hook(hook("SessionStart"))
         let lead = try! #require(h.actor("lead-1"))
-        #expect(lead.position == OfficeLayout.doorPoint)
+        #expect(lead.position == OfficeLayout().doorPoint)
         #expect(lead.isWalking)
         #expect(!lead.seated)
         h.run(until: 12)
         let seated = try! #require(h.actor("lead-1"))
-        #expect(seated.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal"), .office).final)
+        #expect(seated.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), .main).final)
         #expect(seated.seated)
         #expect(seated.facing == .front)
         #expect(h.events.contains(.spawned(AgentID("lead-1"))))
@@ -96,7 +96,7 @@ struct StageTests {
         h.run(until: 12)
         lead = h.actor("lead-1")!
         // 연출 엔진이 알고 있는 자리(팀장석)에 도착해 있어야 이후 연출과 어긋나지 않습니다
-        #expect(lead.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal"), .office).final)
+        #expect(lead.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), .main).final)
         #expect(lead.pose == .raisingHand)
     }
 
@@ -109,7 +109,7 @@ struct StageTests {
         h.hook(hook("SubagentStart", #""agent_id":"g1","agent_type":"general-purpose""#), at: 10.1)
         h.run(until: 26)
         let member = try! #require(h.actor("member-2"))
-        #expect(member.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal"), Seat(part: 0, desk: 1)).final)
+        #expect(member.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), Seat(desk: 1)).final)
         #expect(member.seated)
 
         h.hook(hook("SubagentStop", #""agent_id":"g1","agent_type":"general-purpose""#), at: 28)
@@ -146,7 +146,7 @@ struct StageTests {
         // 다시 출근하면 같은 팀장석에 앉을 수 있습니다
         h.hook(hook("SessionStart", session: "s9"))
         h.run(until: 36)
-        #expect(h.actor("lead-2")?.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal"), .office).final)
+        #expect(h.actor("lead-2")?.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), .main).final)
     }
 
     @Test("말풍선은 표시 시간이 지나면 사라지고, 외침 풍선은 닫을 때까지 남는다")
@@ -183,17 +183,18 @@ struct StageTests {
 
 @Suite("그림 데이터와 SVG")
 struct ArtTests {
-    @Test("앉으면 앉은 자세. 팀장실에는 명패가 있고, 서브에이전트 책상에는 에이전트 이름 명패를 달지 않는다")
+    @Test("앉으면 앉은 자세. 책상마다 직함 명패(★ 메인, 서브)를 달고, 퇴근하면 책상과 명패를 치운다")
     func nameplatesAndSitting() {
         var h = StageHarness()
         h.hook(hook("SessionStart"))
         h.hook(tool("PreToolUse", "Agent", "a1", #"{"subagent_type":"code-reviewer"}"#))
         h.run(until: 20)
         #expect(h.actor("lead-1")?.pose == .sitting)
-        let team = TeamID("/w/a-sdn-portal")
-        #expect(h.stage.nameplates[team]?[.office] == "★ 팀장")
-        #expect(h.stage.nameplates[team]?[Seat(part: 0, desk: 1)] == nil)
-        #expect(h.actor("member-2")?.agent.displayName == "팀원")
+        let team = TeamID("/w/a-sdn-portal#1")
+        #expect(h.stage.nameplates[team]?[.main] == "★ 메인")
+        // 책상은 사람마다 하나라 서브 책상에도 직함 명패를 답니다 (에이전트 종류는 쓰지 않음)
+        #expect(h.stage.nameplates[team]?[Seat(desk: 1)] == "서브")
+        #expect(h.actor("member-2")?.agent.displayName == "서브")
         h.hook(tool("PostToolUse", "Agent", "a1"))
         h.run(until: 45)
         #expect(h.actor("member-2") == nil)
@@ -208,7 +209,7 @@ struct ArtTests {
         let svg = SVGRenderer.render(stage: h.stage)
         #expect(svg.hasPrefix("<svg"))
         #expect(svg.contains("a-sdn-portal"))
-        #expect(svg.contains("★ 팀장"))
+        #expect(svg.contains("★ 메인"))
         for expression in [FacialExpression.neutral, .happy, .focus, .think, .surprised, .troubled, .sleepy, .proud, .sad, .eager] {
             #expect(!CharacterArt.eyes(expression).isEmpty)
             #expect(!CharacterArt.mouth(expression).isEmpty)
@@ -221,8 +222,8 @@ struct ArtTests {
         for emote in [Emote.exclamation, .question, .bulb, .sweat, .sparkle, .zzz, .note, .hourglass] {
             #expect(!OverlayArt.emote(emote).isEmpty)
         }
-        // 팀장실·리서치 데스크·탕비 코너·안마 의자를 그린다 (서버랙·지구본은 없음)
-        #expect(svg.contains("팀장실") && svg.contains("리서치") && svg.contains("탕비 코너"))
+        // 탕비 코너·출입문을 그리고, 팀장실·리서치 데스크는 없다 (M5(1))
+        #expect(svg.contains("입구") && !svg.contains("팀장실") && !svg.contains("리서치") && svg.contains("탕비 코너"))
     }
 
     @Test("걸을 때 다리가 번갈아 들리고, 승인 대기 중에는 오른팔이 위로 올라간다")
