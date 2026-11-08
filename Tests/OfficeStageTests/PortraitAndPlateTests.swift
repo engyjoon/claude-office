@@ -54,7 +54,7 @@ struct PortraitAndPlateTests {
         #expect(long.1 <= 66)
     }
 
-    @Test("명패는 책상 앞판 가운데보다 조금 위, 글자는 명패 가운데에 놓인다")
+    @Test("명패는 책상 앞판 가운데보다 조금 위, 글자는 명패 가운데보다 아주 조금 아래에 놓인다")
     func plateCentered() throws {
         let layers = OfficeArt.island(0, team: nil, plates: [0: "★ 팀장"])
         let desk = try #require(layers.first { $0.name == "desk-0-0" })
@@ -67,7 +67,7 @@ struct PortraitAndPlateTests {
             return nil
         }.first)
         #expect(text.1 == .central)
-        #expect(abs(text.0.y - (box.y + box.height / 2)) < 0.01)
+        #expect(abs(text.0.y - (box.y + box.height / 2 + 0.5)) < 0.01)
         // 명패는 책상 앞판에서 보이는 부분(상판 아래 ~ 앞판 바닥)의 가운데보다 1pt 위에 달리고, 상판을 덮지 않는다
         let rects = desk.shapes.compactMap { shape -> (MapRect, Paint?)? in
             if case .rect(let rect, _) = shape.geometry { return (rect, shape.fill) }

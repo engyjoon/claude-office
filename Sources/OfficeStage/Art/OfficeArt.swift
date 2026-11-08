@@ -139,6 +139,8 @@ public enum OfficeArt {
     static let platePadding = 6.0
     /// 명패를 앞판 가운데보다 올리는 양
     static let plateLift = 1.0
+    /// 명패 안 글자를 명패 가운데보다 내리는 양 (한글 글꼴은 central 기준선에서 위로 떠 보입니다)
+    static let plateTextDrop = 0.5
 
     /// 글자 폭 어림값 (한글·기호는 정사각형, 영문·숫자는 그 절반 남짓). 렌더러마다 글꼴이 달라 넉넉하게 잡습니다.
     static func estimatedWidth(_ text: String, size: Double) -> Double {
@@ -182,7 +184,7 @@ public enum OfficeArt {
                 let plateCenter = y - 9.5 - plateLift
                 desk += [
                     .rect(x - width / 2, plateCenter - 7.5, width, 15, r: 4, fill: .swatch(.plate), width: 1.2),
-                    .text(text, x, plateCenter, size: plateFontSize, bold: true, baseline: .central),
+                    .text(text, x, plateCenter + plateTextDrop, size: plateFontSize, bold: true, baseline: .central),
                 ]
             }
             if index == 0 {
