@@ -88,12 +88,12 @@ public struct AgentProfile: Hashable, Sendable {
         "claude-code-guide", "claude", "fork", "web-fetch",
     ]
 
-    /// 세션 직원(팀장·파트장)의 프로필. 외형은 방과 출근 순번으로 정해지고, 승진해도 바뀌지 않습니다.
+    /// 세션 직원(팀장·세션 팀원)의 프로필. 외형은 방과 출근 순번으로 정해지고, 승진해도 바뀌지 않습니다.
     static func lead(roomName: String, number: Int) -> AgentProfile {
         let key = number == 0 ? "lead@\(roomName)" : "part@\(roomName)#\(number)"
         return AgentProfile(
             key: key,
-            displayName: JobTitle.lead(number: number, partLeadCount: 1).label,
+            displayName: number == 0 ? "팀장" : "팀원",
             kind: .lead,
             agentType: nil,
             appearance: .make(key: key, kind: .lead)
@@ -111,24 +111,25 @@ public struct AgentProfile: Hashable, Sendable {
     }
 }
 
-/// 방 안의 직함 (설계서 §1.3 ②). 메인 세션 = 팀장, 같은 방의 다른 세션 = 파트장, 서브에이전트 = 파트원.
+/// 방 안의 직함 (설계서 §1.3 ②, 2026-11-08 결정). 메인 세션 = 팀장, 그 밖의 모든 사람 = 팀원.
+///
+/// 같은 방의 다른 세션과 서브에이전트(기본·직접 만든 에이전트 모두)는 하나의 번호 줄을 씁니다:
+/// 방에 팀원이 한 명이면 "팀원", 두 명 이상이면 출근 순서대로 "팀원1", "팀원2"… (번호는 출근 때 정해 고정, 빈 번호 재사용).
+/// 에이전트 종류(code-reviewer, Explore …)는 화면의 이름에 쓰지 않고 신원 카드에만 보여 줍니다.
 public enum JobTitle: Hashable, Sendable {
     case teamLead
-    /// 파트장 번호. 방에 파트장이 한 명뿐이면 nil ("파트장")
-    case partLead(Int?)
-    case member
+    /// 팀원 번호. 방에 팀원이 한 명뿐이면 nil ("팀원")
+    case teammate(Int?)
 
-    /// 파트 번호(0 = 팀장)와 방의 파트장 수로 직함을 정합니다.
-    static func lead(number: Int, partLeadCount: Int) -> JobTitle {
-        if number == 0 { return .teamLead }
-        return .partLead(partLeadCount > 1 ? number : nil)
+    /// 팀원 번호(0 = 팀장)와 방의 팀원 수로 직함을 정합니다.
+    static func make(number: Int, teammateCount: Int) -> JobTitle {
+        number == 0 ? .teamLead : .teammate(teammateCount > 1 ? number : nil)
     }
 
     public var label: String {
         switch self {
         case .teamLead: "팀장"
-        case .partLead(let number): number.map { "파트장\($0)" } ?? "파트장"
-        case .member: "파트원"
+        case .teammate(let number): number.map { "팀원\($0)" } ?? "팀원"
         }
     }
 }
@@ -149,8 +150,8 @@ public enum Activity: Hashable, Sendable {
 /// 방 안의 자리 (설계서 §8.1, M4.5b).
 ///
 /// - 팀장석은 왼쪽 위 팀장실의 책상 하나(`Seat.office`)입니다.
-/// - 파트 칸은 파트 번호와 같은 번호의 칸(책상 4개)입니다. 0번 칸 = 팀장 직속 파트, n번 칸 = 파트장 n의 파트.
-///   칸의 0번 책상(맨 왼쪽)은 파트장 자리(★)이고, 파트원은 1번 책상부터 앉습니다.
+/// - 파트 칸은 파트 번호와 같은 번호의 칸(책상 4개)입니다. 0번 칸 = 팀장 직속 파트, n번 칸 = 세션 팀원 n의 파트.
+///   칸의 0번 책상(맨 왼쪽)은 세션 팀원 자리(★)이고, 서브에이전트는 1번 책상부터 앉습니다.
 ///   `desk`가 `desksPerPod` 이상이면 책상이 없는 자리(칸 앞에 서는 자리)라, 일할 때는 빈 책상을 빌립니다.
 public struct Seat: Hashable, Sendable, Comparable, CustomStringConvertible {
     /// 파트 칸 하나의 책상 수
@@ -171,7 +172,7 @@ public struct Seat: Hashable, Sendable, Comparable, CustomStringConvertible {
     public var isOffice: Bool { desk < 0 }
     /// 책상이 있는 자리인지 (팀장실 포함)
     public var hasDesk: Bool { desk < Self.desksPerPod }
-    /// 파트장 자리 (칸의 맨 왼쪽 ★)
+    /// 세션 팀원 자리 (칸의 맨 왼쪽 ★)
     public var isPartLeadDesk: Bool { desk == 0 }
 
     public var description: String { isOffice ? "팀장실" : "\(part)-\(desk)" }
@@ -186,9 +187,11 @@ public struct Agent: Identifiable, Hashable, Sendable {
     /// 방 (설계서 §1.3 ②). 이름은 예전 그대로 팀이라고 부릅니다.
     public let teamID: TeamID
     public let session: SessionID
-    /// 이 직원이 속한 파트 번호 (자기 세션의 파트). 0 = 팀장 파트, 1… = 파트장 번호
+    /// 이 직원이 속한 파트 번호 (자기 세션의 파트). 0 = 팀장 파트, 1… = 세션 팀원 번호
     public internal(set) var part: Int
-    /// 직함. 팀장·파트장은 승진하거나 파트장 수가 바뀌면 달라집니다.
+    /// 팀원 번호: 0 = 팀장, 1… = 방 안의 팀원 번호 (출근 때 정해 고정, 빈 번호 재사용)
+    public internal(set) var number: Int
+    /// 직함 ("팀장", "팀원", "팀원2"). 승진하거나 방의 팀원 수가 1명 ↔ 여럿으로 바뀌면 달라집니다.
     public internal(set) var title: JobTitle
     public internal(set) var seat: Seat
     /// 훅의 `agent_id`. 아직 SubagentStart를 못 받았으면 nil.
@@ -207,10 +210,8 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var term: String?
     let serial: Int
 
-    /// 화면에 보이는 이름: 팀장·파트장은 직함, 파트원은 에이전트 종류
-    public var displayName: String {
-        role == .lead ? title.label : profile.displayName
-    }
+    /// 화면에 보이는 이름: 언제나 직함 ("팀장", "팀원2"). 에이전트 종류는 `profile.agentType` (신원 카드에만)
+    public var displayName: String { title.label }
 }
 
 public struct TeamID: Hashable, Sendable, Comparable, CustomStringConvertible {
@@ -253,16 +254,16 @@ public struct Team: Identifiable, Hashable, Sendable {
     }
 }
 
-/// 방 안의 파트 = 세션 하나 (설계서 §5). 팀장의 파트(0번)와 파트장들의 파트(1번~).
-/// 파트원(서브에이전트)은 자기를 부른 세션의 파트에 속합니다.
+/// 방 안의 파트 = 세션 하나 (설계서 §5). 팀장의 파트(0번)와 세션 팀원들의 파트(1번~).
+/// 서브에이전트(서브에이전트)은 자기를 부른 세션의 파트에 속합니다.
 public struct Part: Hashable, Sendable {
     public let session: SessionID
     public let teamID: TeamID
-    /// 0 = 팀장 파트, 1… = 파트장 번호 (출근 때 정해 고정, 빈 번호 재사용)
+    /// 0 = 팀장 파트, 1… = 세션 팀원 번호 (출근 때 정해 고정, 빈 번호 재사용)
     public internal(set) var number: Int
-    /// 방에 들어온 순서. 팀장이 퇴근하면 가장 먼저 온 파트장이 승진합니다.
+    /// 방에 들어온 순서. 팀장이 퇴근하면 가장 먼저 온 세션 팀원이 승진합니다.
     public let order: Int
-    /// 세션 직원(팀장·파트장)
+    /// 세션 직원(팀장·세션 팀원)
     public internal(set) var lead: AgentID
     /// 데스크톱 앱이 알려 준 조상 세션 (가까운 부모부터)
     public internal(set) var ancestors: [SessionID]

@@ -1,5 +1,5 @@
 # 혼잡 시나리오 (검토 세션 재현용): 같은 폴더의 메인 + 하위 세션 2개 + 워크트리 세션 2개(같은 방으로 합침) + 다른 폴더 방들,
-# 세션마다 서브에이전트 3명이 오래 걸리는 swift build를 돌립니다. M4.5b 이후: 파트 칸 5개(3줄), 자기 책상에서 ⏳로 기다림.
+# 세션마다 서브에이전트 3명이 오래 걸리는 swift build를 돌립니다. M4.5b 이후: 칸 5개(3줄), 자기 책상에서 ⏳로 기다림.
 {"t": 0, "term": "vscode", "hook": {"session_id": "main", "cwd": "/Users/demo/work/claude-office", "transcript_path": "/x/main.jsonl", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 1, "term": "vscode", "hook": {"session_id": "main", "cwd": "/Users/demo/work/claude-office", "transcript_path": "/x/main.jsonl", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
 {"t": 2, "term": "vscode", "hook": {"session_id": "main", "cwd": "/Users/demo/work/claude-office", "transcript_path": "/x/main.jsonl", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "main-tu0"}}

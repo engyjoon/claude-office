@@ -11,12 +11,12 @@ public struct ChoreographyConfig: Hashable, Sendable {
     public var shellWatchDelay: Double = 2
     /// 다른 구역에서 일이 끝난 뒤 자리로 돌아가기 전에 머무는 시간
     public var linger: Double = 4
-    /// 쉼 단계 (팀장·파트장의 입력 대기): 60초 → 소파, 3분 → 안마 의자(비었으면), 10분 → 잠듦
+    /// 쉼 단계 (팀장·세션 팀원의 입력 대기): 60초 → 소파, 3분 → 안마 의자(비었으면), 10분 → 잠듦
     /// (안마 의자에 있으면 그 자리에서, 아니면 자기 자리에서)
     public var loungeAfter: Double = 60
     public var massageAfter: Double = 180
     public var napAfter: Double = 600
-    /// 쉬러 가는 길에 탕비 코너 냉장고에서 음료를 꺼내 가는 비율(%), 일을 끝낸 파트원이 물 한 잔 마시고 퇴근하는 비율(%)
+    /// 쉬러 가는 길에 탕비 코너 냉장고에서 음료를 꺼내 가는 비율(%), 일을 끝낸 서브에이전트가 물 한 잔 마시고 퇴근하는 비율(%)
     public var pantryOnBreakPercent = 40
     public var pantryOnLeavePercent = 35
     /// 탕비 코너에 동시에 들르는 최대 인원 (자리 2개)
@@ -214,12 +214,12 @@ public struct Choreographer: Sendable {
             touch(lead)
             resolveWaiting(lead.id, into: &out)
             wake(lead.id, into: &out)
-            // 위임은 팀장 자리에서 합니다 (파트원이 책장이나 리서치 데스크로 찾아가지 않도록)
+            // 위임은 팀장 자리에서 합니다 (서브에이전트가 책장이나 리서치 데스크로 찾아가지 않도록)
             move(lead.id, to: seatSpot(lead), into: &out)
             modify(lead.id) { $0.returnAt = nil }
             out.append(Directive(lead.id, .gesture(.beckon)))
             out.append(Directive(lead.id, .express(.happy)))
-            var variables = ["member": member.profile.displayName]
+            var variables = ["member": member.displayName]
             if privacy == .detailed, let task = member.task {
                 variables["task"] = ToolCatalog.truncate(task, 16)
             }
@@ -841,7 +841,7 @@ public struct Choreographer: Sendable {
         return .seat(team, standing)
     }
 
-    /// 빌려 볼 책상 순서: 자기 칸의 파트원 책상 → 자기 칸의 ★ 자리 → 빈 칸(파트가 없는 칸)의 책상
+    /// 빌려 볼 책상 순서: 자기 칸의 서브에이전트 책상 → 자기 칸의 ★ 자리 → 빈 칸(파트가 없는 칸)의 책상
     private func borrowableDesks(for agent: Agent) -> [Seat] {
         let part = agent.seat.part
         var desks = (Array(1..<Seat.desksPerPod) + [0]).map { Seat(part: part, desk: $0) }

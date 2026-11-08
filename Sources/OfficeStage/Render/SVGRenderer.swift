@@ -68,7 +68,7 @@ public enum SVGRenderer {
         inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
         inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
         inner += group(head, CharacterArt.hairBack(style: appearance.hairStyle))
-        inner += group("", CharacterArt.body(isLead: actor.agent.role == .lead))
+        inner += group("", CharacterArt.body(isLead: actor.agent.title == .teamLead))
         inner += "<g transform=\"\(head)\">"
             + (CharacterArt.face + CharacterArt.blush(e)).map { element($0, colors: colors) }.joined()
             + group(eyes, CharacterArt.eyes(e))

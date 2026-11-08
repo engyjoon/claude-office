@@ -1,5 +1,5 @@
-# M4.5b 방 배치: 팀장실 + 파트 칸(팀장 파트·파트장1·파트장2) + 휴게 열(소파·안마 의자) + 창가 리서치 데스크 + 탕비 코너
-# 긴 셸 명령은 자기 책상에서 ⏳로 기다리고, 웹 검색은 리서치 데스크, 연속 읽기는 책장. 파트장2는 일찍 쉬러 가 3분 뒤 안마 의자로 갑니다.
+# M4.5b 방 배치: 팀장실 + 칸(팀장 칸·팀원1 칸·팀원2 칸) + 휴게 열(소파·안마 의자) + 창가 리서치 데스크 + 탕비 코너
+# 긴 셸 명령은 자기 책상에서 ⏳로 기다리고, 웹 검색은 리서치 데스크, 연속 읽기는 책장. 팀원2는 일찍 쉬러 가 3분 뒤 안마 의자로 갑니다.
 # 실행: swift run office-sim snapshot Scenarios/layout.jsonl --at 28.5,72,200
 {"t": 0, "term": "vscode", "hint": {"title": "메인 작업"}, "hook": {"session_id": "main", "cwd": "/Users/demo/work/claude-office", "transcript_path": "/x/main.jsonl", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 0.5, "hint": {"ancestors": ["main"], "rootCwd": "/Users/demo/work/claude-office", "title": "M4.5b 방 배치"}, "hook": {"session_id": "side1", "cwd": "/Users/demo/work/claude-office", "transcript_path": "/x/side1.jsonl", "hook_event_name": "SessionStart", "source": "startup"}}

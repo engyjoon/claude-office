@@ -53,19 +53,19 @@ struct RoomLayoutStageTests {
         #expect(h.actor("lead-2")?.position == h.stage.layout.seat(TeamID("/w/b"), .office).final)
     }
 
-    @Test("칸 표지는 '팀장 파트', 파트장 직함, '빈 칸'이고 파트장 명패는 자기 칸 ★ 자리에 붙는다")
+    @Test("칸 표지는 '팀장 칸', '팀원1 칸', '빈 칸'이고 세션 팀원 명패는 자기 칸 첫 책상에 붙는다")
     func podSignsAndPlates() {
         var h = StageHarness()
         h.hook(hook("SessionStart", session: "s1"))
         h.hook(hook("SessionStart", session: "s2"), at: 0.2)
         h.hook(hook("SessionStart", session: "s3"), at: 0.4)
         h.run(until: 15)
-        #expect(h.stage.podSigns[team] == [0: "팀장 파트", 1: "파트장1", 2: "파트장2", 3: "빈 칸"])
+        #expect(h.stage.podSigns[team] == [0: "팀장 칸", 1: "팀원1 칸", 2: "팀원2 칸", 3: "빈 칸"])
         #expect(h.stage.nameplates[team]?[.office] == "★ 팀장")
-        #expect(h.stage.nameplates[team]?[Seat(part: 1, desk: 0)] == "파트장1")
-        #expect(h.stage.nameplates[team]?[Seat(part: 2, desk: 0)] == "파트장2")
+        #expect(h.stage.nameplates[team]?[Seat(part: 1, desk: 0)] == "팀원1")
+        #expect(h.stage.nameplates[team]?[Seat(part: 2, desk: 0)] == "팀원2")
         let svg = SVGRenderer.render(stage: h.stage)
-        #expect(svg.contains("팀장 파트") && svg.contains("빈 칸"))
+        #expect(svg.contains("팀장 칸") && svg.contains("빈 칸"))
     }
 
     @Test("공용 구역 자리가 넘치면 한 점에 겹치지 않게 흩어 서고, 칩은 '책장 · N명 읽는 중' 하나로 묶는다")

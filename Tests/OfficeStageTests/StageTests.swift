@@ -183,7 +183,7 @@ struct StageTests {
 
 @Suite("그림 데이터와 SVG")
 struct ArtTests {
-    @Test("앉으면 앉은 자세, 고정 직원의 지정석에는 명패가 남는다")
+    @Test("앉으면 앉은 자세. 팀장실에는 명패가 있고, 서브에이전트 책상에는 에이전트 이름 명패를 달지 않는다")
     func nameplatesAndSitting() {
         var h = StageHarness()
         h.hook(hook("SessionStart"))
@@ -192,11 +192,12 @@ struct ArtTests {
         #expect(h.actor("lead-1")?.pose == .sitting)
         let team = TeamID("/w/a-sdn-portal")
         #expect(h.stage.nameplates[team]?[.office] == "★ 팀장")
-        #expect(h.stage.nameplates[team]?[Seat(part: 0, desk: 1)] == "code-reviewer")
+        #expect(h.stage.nameplates[team]?[Seat(part: 0, desk: 1)] == nil)
+        #expect(h.actor("member-2")?.agent.displayName == "팀원")
         h.hook(tool("PostToolUse", "Agent", "a1"))
         h.run(until: 45)
         #expect(h.actor("member-2") == nil)
-        #expect(h.stage.nameplates[team]?[Seat(part: 0, desk: 1)] == "code-reviewer")
+        #expect(h.stage.nameplates[team]?.count == 1)
     }
 
     @Test("SVG 렌더러는 모든 표정·헤어·액세서리·소품 조합을 그린다")

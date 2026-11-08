@@ -330,7 +330,7 @@ public enum OfficeArt {
 
     // MARK: - 파트 칸
 
-    /// 파트 칸: 책상 4개(0번 = 파트장 ★ 자리)와 칸 표지
+    /// 파트 칸: 책상 4개(0번 = 세션 팀원 ★ 자리)와 칸 표지
     static func pod(_ band: OfficeLayout.Band, cell: Int, team: Team?, plates: [Seat: String], sign label: String?) -> [ArtLayer] {
         let center = OfficeLayout.cellCenter(band, cell: cell)
         var layers: [ArtLayer] = []

@@ -65,17 +65,22 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
 }
 
 public struct RosterRow: Identifiable, Hashable, Sendable {
+    /// 팀장(메인 세션)인지. 가슴의 별 배지는 팀장만 답니다.
+    public var isTeamLead: Bool { title == .teamLead }
+
     public let id: AgentID
-    /// 팀장·파트장은 직함("팀장", "파트장1"), 파트원은 에이전트 종류
+    /// 직함 ("팀장", "팀원", "팀원2"). 에이전트 종류는 `agentType`
     public let name: String
     public let role: Role
     public let title: JobTitle
-    /// 파트 번호 (0 = 팀장 파트)
+    /// 칸 번호 (0 = 팀장 칸)
     public let part: Int
-    /// 데스크톱 앱의 세션 제목 (팀장·파트장만, 알 때만)
+    /// 데스크톱 앱의 세션 제목 (세션 직원만, 알 때만)
     public let sessionTitle: String?
-    /// 파트원이 속한 파트의 세션 직원 직함 ("팀장", "파트장1")
-    public let partLead: String?
+    /// 서브에이전트를 부른 세션 직원의 직함 ("팀장", "팀원1"). 그 사람의 칸에 앉습니다.
+    public let calledBy: String?
+    /// 서브에이전트 종류 ("code-reviewer", "Explore"). 세션 직원은 nil. 신원 카드에만 보여 줍니다.
+    public let agentType: String?
     public let kind: StaffKind
     public let status: RosterStatus
     /// 표시 수준이 "상세"일 때만: 툴 대상, 승인 대기 중인 명령, 팀원이 맡은 일
@@ -136,7 +141,7 @@ public struct Roster: Hashable, Sendable {
         for team in state.sortedTeams {
             let agents = state.agents(in: team.id)
             guard !agents.isEmpty else { continue }
-            // 팀장과 그 파트원, 그다음 파트장1과 그 파트원 … 순서
+            // 팀장과 그 서브에이전트, 그다음 세션 팀원과 그 서브에이전트 … 순서 (칸 순서)
             var ordered: [Agent] = []
             for part in state.parts(in: team.id) {
                 let inPart = agents.filter { $0.session == part.session }
@@ -160,7 +165,8 @@ public struct Roster: Hashable, Sendable {
             title: agent.title,
             part: agent.part,
             sessionTitle: sessionTitle,
-            partLead: agent.role == .member ? state.lead(of: agent.session)?.displayName : nil,
+            calledBy: agent.role == .member ? state.lead(of: agent.session)?.displayName : nil,
+            agentType: agent.role == .member ? agent.profile.agentType : nil,
             kind: agent.profile.kind,
             status: RosterStatus.from(agent.activity),
             detail: privacy == .detailed ? detail(for: agent) : nil,

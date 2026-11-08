@@ -14,10 +14,10 @@ struct RoomStageTests {
         h.hook(hook("SessionStart", session: "s2"), at: 0.5)
         h.run(until: 10)
         let partLead = try #require(h.actor("lead-2"))
-        #expect(partLead.agent.displayName == "파트장")
+        #expect(partLead.agent.displayName == "팀원")
         #expect(partLead.seated)
         let oldSeat = partLead.agent.seat
-        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[oldSeat] == "파트장")
+        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[oldSeat] == "팀원")
         #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[.office] == "★ 팀장")
 
         h.hook(hook("SessionEnd", session: "s1"), at: 12)

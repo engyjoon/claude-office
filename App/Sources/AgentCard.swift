@@ -14,7 +14,7 @@ struct AgentCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Avatar(appearance: row.appearance, kind: row.kind, size: 48, tint: Palette.team(team.colorIndex).opacity(0.45))
+                Avatar(appearance: row.appearance, isLead: row.isTeamLead, size: 48, tint: Palette.team(team.colorIndex).opacity(0.45))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).font(.system(size: 15, weight: .bold))
                     Text(kindLabel).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -32,7 +32,14 @@ struct AgentCard: View {
             Divider()
 
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
-                if let title = row.sessionTitle {
+                if let agentType = row.agentType {
+                    // 서브에이전트 팀원이면 어떤 에이전트인지 (화면의 이름에는 쓰지 않고 여기에만 보여 줍니다)
+                    GridRow {
+                        label("에이전트")
+                        Text("\(agentType) · \(row.kind == .fixed ? "직접 만든 에이전트" : "기본 에이전트")")
+                            .font(.system(size: 12)).lineLimit(2).textSelection(.enabled)
+                    }
+                } else if let title = row.sessionTitle {
                     GridRow {
                         label("세션")
                         Text(title).font(.system(size: 12)).lineLimit(2).textSelection(.enabled)
@@ -108,9 +115,8 @@ struct AgentCard: View {
 
     private var kindLabel: String {
         switch row.kind {
-        case .lead: row.title == .teamLead ? "메인 세션 · 방의 팀장" : "같은 방의 다른 세션 · 파트장"
-        case .fixed: "직접 정의한 서브에이전트 · \(row.partLead.map { "\($0) 파트의 " } ?? "")파트원 (고정 직원)"
-        case .temporary: "기본 서브에이전트 · \(row.partLead.map { "\($0) 파트의 " } ?? "")파트원 (임시 직원)"
+        case .lead: row.isTeamLead ? "메인 세션 · 방의 팀장" : "같은 방의 다른 세션 · 팀원"
+        case .fixed, .temporary: "서브에이전트 · 팀원\(row.calledBy.map { " (\($0) 칸)" } ?? "")"
         }
     }
 

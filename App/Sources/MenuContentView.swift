@@ -150,7 +150,7 @@ struct RosterRowView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Avatar(appearance: row.appearance, kind: row.kind)
+            Avatar(appearance: row.appearance, isLead: row.isTeamLead)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.name).font(.system(size: 13, weight: .semibold))
                 TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -180,7 +180,7 @@ struct RosterRowView: View {
     private func subtitle(now: Date) -> String {
         var parts: [String] = []
         if highlight { parts.append(row.teamName) }
-        if let lead = row.partLead, row.part > 0 { parts.append("\(lead) 파트") }
+        if let lead = row.calledBy, row.part > 0 { parts.append("\(lead) 칸") }
         if let detail = row.detail { parts.append(detail) }
         if parts.isEmpty, let title = row.sessionTitle { parts.append(title) }
         let minutes = Int(now.timeIntervalSince(row.since) / 60)
@@ -207,15 +207,15 @@ struct StatusChip: View {
     }
 }
 
-/// 사무실 캐릭터의 얼굴 초상 (팀장은 가슴에 별, 임시 직원은 머리에 새싹)
+/// 사무실 캐릭터의 얼굴 초상 (팀장은 가슴에 별, 기본 에이전트는 머리에 새싹)
 struct Avatar: View {
     let appearance: Appearance
-    let kind: StaffKind
+    let isLead: Bool
     var size: CGFloat = 26
     var tint: Color = Color(hex: 0xFFF8EC)
 
     var body: some View {
-        CharacterPortrait(appearance: appearance, isLead: kind == .lead, tint: tint)
+        CharacterPortrait(appearance: appearance, isLead: isLead, tint: tint)
             .frame(width: size, height: size)
     }
 }

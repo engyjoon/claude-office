@@ -3,7 +3,7 @@ import Testing
 
 @testable import OfficeCore
 
-/// M4.5a: 방(메인 세션 단위), 팀장·파트장 직함, 승진, 방 닫기 (설계서 §5.1)
+/// M4.5a: 방(메인 세션 단위), 팀장·팀원 직함, 승진, 방 닫기 (설계서 §5.1)
 @Suite("방과 직함")
 struct RoomTests {
     static let folder = "/Users/demo/work/claude-office"
@@ -39,20 +39,20 @@ struct RoomTests {
         let second = apply(&state, session: "s2")
         #expect(state.teams.count == 1)
         guard case .arrived(let partLead) = second.last else { Issue.record("\(second)"); return }
-        #expect(partLead.displayName == "파트장")
-        #expect(partLead.title == .partLead(nil))
+        #expect(partLead.displayName == "팀원")
+        #expect(partLead.title == .teammate(nil))
         #expect(partLead.part == 1)
         #expect(partLead.seat == Seat(part: 1, desk: 0))
         #expect(name(state, "s1") == "팀장")
         #expect(state.lead(of: SessionID("s1"))?.seat == .office)
 
         let third = apply(&state, session: "s3")
-        // 첫 파트장은 "파트장" → "파트장1"로 바뀌고, 새 사람은 "파트장2"
+        // 첫 파트장은 "팀원" → "팀원1"로 바뀌고, 새 사람은 "팀원2"
         #expect(third.count == 2)
         guard case .retitled(let renamed) = third[0], case .arrived(let newcomer) = third[1] else { Issue.record("\(third)"); return }
-        #expect(renamed.displayName == "파트장1")
+        #expect(renamed.displayName == "팀원1")
         #expect(renamed.seat == partLead.seat)
-        #expect(newcomer.displayName == "파트장2")
+        #expect(newcomer.displayName == "팀원2")
         #expect(state.parts(in: TeamID(Self.folder)).map(\.number) == [0, 1, 2])
 
         // 다른 폴더는 다른 방
@@ -75,7 +75,7 @@ struct RoomTests {
         #expect(state.teams.count == 1)
         #expect(state.teams.values.first?.name == "proj")
         guard case .arrived(let agent) = beats.last else { Issue.record("\(beats)"); return }
-        #expect(agent.displayName == "파트장")
+        #expect(agent.displayName == "팀원")
         #expect(agent.teamID == TeamID("/w/proj"))
 
         // 워크트리 세션이 먼저 와도 방 이름은 원래 폴더
@@ -93,7 +93,7 @@ struct RoomTests {
         let child = SessionHint(hostSession: "local_c", ancestors: [SessionID("main")], rootCwd: Self.folder, title: "검토")
         _ = apply(&state, session: "child", cwd: "/somewhere/else", hint: child)
         #expect(state.teams.count == 1)
-        #expect(name(state, "child") == "파트장")
+        #expect(name(state, "child") == "팀원")
         #expect(state.parts[SessionID("child")]?.title == "검토")
         #expect(state.parts[SessionID("main")]?.title == "메인 작업")
 
@@ -101,7 +101,7 @@ struct RoomTests {
         let grand = SessionHint(ancestors: [SessionID("child"), SessionID("main")], rootCwd: Self.folder)
         _ = apply(&state, session: "grand", cwd: "/third", hint: grand)
         #expect(state.teams.count == 1)
-        #expect(names(state) == ["팀장", "파트장1", "파트장2"])
+        #expect(names(state) == ["팀장", "팀원1", "팀원2"])
     }
 
     @Test("부모가 아직 없으면 최상위 세션 폴더의 방")
@@ -123,7 +123,7 @@ struct RoomTests {
 
         let beats = apply(&state, session: "main", hint: SessionHint(rootCwd: Self.folder))
         guard case .retitled(let demoted) = beats.first, case .arrived(let main) = beats.last else { Issue.record("\(beats)"); return }
-        #expect(demoted.displayName == "파트장")
+        #expect(demoted.displayName == "팀원")
         #expect(demoted.seat == Seat(part: 1, desk: 0))
         #expect(main.displayName == "팀장")
         #expect(main.seat == .office)
@@ -136,11 +136,11 @@ struct RoomTests {
         _ = apply(&state, session: "child")  // 힌트 없음 → 폴더 규칙으로 팀장
         _ = apply(&state, session: "main")  // 폴더 규칙으로 파트장
         #expect(name(state, "child") == "팀장")
-        #expect(name(state, "main") == "파트장")
+        #expect(name(state, "main") == "팀원")
 
         let beats = apply(&state, session: "child", "UserPromptSubmit", hint: SessionHint(ancestors: [SessionID("main")], rootCwd: Self.folder))
         #expect(name(state, "main") == "팀장")
-        #expect(name(state, "child") == "파트장")
+        #expect(name(state, "child") == "팀원")
         #expect(state.lead(of: SessionID("main"))?.seat == .office)
         #expect(beats.contains { if case .promoted(let agent) = $0 { agent.session == SessionID("main") } else { false } })
         #expect(beats.contains { if case .retitled(let agent) = $0 { agent.session == SessionID("child") } else { false } })
@@ -155,16 +155,16 @@ struct RoomTests {
     func partNumberReuse() {
         var state = OfficeState()
         for session in ["s1", "s2", "s3"] { _ = apply(&state, session: session) }
-        #expect(names(state) == ["팀장", "파트장1", "파트장2"])
+        #expect(names(state) == ["팀장", "팀원1", "팀원2"])
 
         let left = end(&state, "s2")
-        #expect(name(state, "s3") == "파트장")  // 혼자 남으면 번호 없이
+        #expect(name(state, "s3") == "팀원")  // 혼자 남으면 번호 없이
         #expect(state.parts[SessionID("s3")]?.number == 2)  // 번호 자체는 그대로
-        #expect(left.contains { if case .retitled(let agent) = $0 { agent.displayName == "파트장" } else { false } })
+        #expect(left.contains { if case .retitled(let agent) = $0 { agent.displayName == "팀원" } else { false } })
 
         _ = apply(&state, session: "s4")
-        #expect(name(state, "s4") == "파트장1")  // 빈 1번을 다시 씀
-        #expect(name(state, "s3") == "파트장2")
+        #expect(name(state, "s4") == "팀원1")  // 빈 1번을 다시 씀
+        #expect(name(state, "s3") == "팀원2")
     }
 
     @Test("팀장이 먼저 퇴근하면 가장 먼저 온 파트장이 팀장석으로 승진한다")
@@ -181,7 +181,7 @@ struct RoomTests {
         #expect(promoted.seat == .office)
         #expect(promoted.part == 0)
         #expect(s2Seat == Seat(part: 1, desk: 0))
-        #expect(name(state, "s3") == "파트장")
+        #expect(name(state, "s3") == "팀원")
         #expect(state.teams.count == 1)  // 방은 남은 사람이 있는 동안 유지
     }
 
@@ -214,10 +214,53 @@ struct RoomTests {
         }
         delegate("t1")
         delegate("t2")
-        #expect(state.agents.values.filter { $0.role == .member }.map(\.displayName).sorted() == ["code-reviewer", "code-reviewer (2)"])
+        // 화면 이름은 팀원 번호, 에이전트 종류는 신원 카드용(agentType)
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.displayName).sorted() == ["팀원1", "팀원2"])
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.profile.displayName).sorted() == ["code-reviewer", "code-reviewer (2)"])
         _ = apply(&state, session: "s1", "PostToolUse", JSONObject([("tool_name", .string("Agent")), ("tool_use_id", .string("t1")), ("tool_input", .object(JSONObject()))]))
         delegate("t3")
-        #expect(state.agents.values.filter { $0.role == .member }.map(\.displayName).sorted() == ["code-reviewer", "code-reviewer (2)"])
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.displayName).sorted() == ["팀원1", "팀원2"])
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.profile.displayName).sorted() == ["code-reviewer", "code-reviewer (2)"])
+    }
+
+    @Test("메인 세션만 팀장, 나머지(세션·기본 에이전트·직접 만든 에이전트)는 한 번호 줄의 팀원. 혼자면 '팀원', 빈 번호는 다시 쓴다")
+    func teammateNumbers() throws {
+        var state = OfficeState()
+        func delegate(_ session: String, _ id: String, _ type: String) -> [Beat] {
+            apply(&state, session: session, "PreToolUse", JSONObject([
+                ("tool_name", .string("Agent")), ("tool_use_id", .string(id)),
+                ("tool_input", .object(JSONObject([("description", .string("일")), ("subagent_type", .string(type))]))),
+            ]))
+        }
+        func finish(_ session: String, _ id: String) -> [Beat] {
+            apply(&state, session: session, "PostToolUse", JSONObject([("tool_name", .string("Agent")), ("tool_use_id", .string(id)), ("tool_input", .object(JSONObject()))]))
+        }
+        func label(_ type: String) -> String? { state.agents.values.first { $0.profile.agentType == type }?.displayName }
+
+        _ = apply(&state, session: "s1")
+        _ = delegate("s1", "t1", "code-reviewer")
+        // 혼자인 팀원은 번호 없이, 직접 만든 에이전트도 이름 대신 "팀원"
+        #expect(label("code-reviewer") == "팀원")
+        let second = delegate("s1", "t2", "Explore")
+        #expect(label("code-reviewer") == "팀원1")
+        #expect(label("Explore") == "팀원2")
+        // 먼저 온 사람의 표시가 "팀원" → "팀원1"로 바뀌었다고 알립니다
+        #expect(second.contains { if case .retitled(let agent) = $0 { agent.profile.agentType == "code-reviewer" && agent.displayName == "팀원1" } else { false } })
+
+        // 세션 팀원도 같은 번호 줄을 씁니다
+        _ = apply(&state, session: "s2")
+        #expect(name(state, "s2") == "팀원3")
+        // 팀원1이 퇴근하면 번호가 비고, 다음 사람이 그 번호를 씁니다 (남은 사람의 번호는 그대로)
+        _ = finish("s1", "t1")
+        #expect(label("Explore") == "팀원2")
+        _ = delegate("s2", "t3", "Plan")
+        #expect(label("Plan") == "팀원1")
+        // ★ 배지·팀장 직함은 메인 세션만
+        #expect(state.agents.values.filter { $0.title == .teamLead }.map(\.session) == [SessionID("s1")])
+        // 둘만 남으면 다시 번호 없이
+        _ = finish("s1", "t2")
+        _ = apply(&state, session: "s2", "PostToolUse", JSONObject([("tool_name", .string("Agent")), ("tool_use_id", .string("t3")), ("tool_input", .object(JSONObject()))]))
+        #expect(name(state, "s2") == "팀원")
     }
 
     // MARK: - 방 닫기
@@ -245,9 +288,9 @@ struct RoomTests {
         #expect(Set(state.teams.values.map(\.island)) == [0, 1])
     }
 
-    // MARK: - 파트원
+    // MARK: - 서브에이전트 팀원
 
-    @Test("파트원은 자기를 부른 세션의 파트에 속하고, 승진하면 파트 번호도 따라 바뀐다")
+    @Test("서브에이전트도 팀원 번호를 받고 자기를 부른 세션의 칸에 속하며, 승진하면 칸도 따라 바뀐다")
     func membersFollowPart() throws {
         var state = OfficeState()
         _ = apply(&state, session: "s1")
@@ -258,15 +301,20 @@ struct RoomTests {
         ]))
         let member = try #require(state.agents.values.first { $0.role == .member })
         #expect(member.part == 1)
-        #expect(member.title == .member)
+        #expect(member.title == .teammate(2))
 
         let roster = Roster.make(from: state, privacy: .detailed)
-        #expect(roster.teams.first?.rows.map(\.name) == ["팀장", "파트장", "Explore"])
-        #expect(roster.teams.first?.rows.last?.partLead == "파트장")
+        #expect(roster.teams.first?.rows.map(\.name) == ["팀장", "팀원1", "팀원2"])
+        #expect(roster.teams.first?.rows.last?.calledBy == "팀원1")
+        #expect(roster.teams.first?.rows.last?.agentType == "Explore")
+        #expect(roster.teams.first?.rows[1].agentType == nil)
 
         _ = end(&state, "s1")
         #expect(state.agents[member.id]?.part == 0)
-        #expect(Roster.make(from: state, privacy: .detailed).teams.first?.rows.last?.partLead == "팀장")
+        // 팀원1이 팀장으로 승진해 팀원이 한 명만 남으면 번호 없이 "팀원"
+        let after = Roster.make(from: state, privacy: .detailed).teams.first?.rows
+        #expect(after?.map(\.name) == ["팀장", "팀원"])
+        #expect(after?.last?.calledBy == "팀장")
     }
 
     @Test("목록: 팀장과 그 파트원, 그다음 파트장 순서. 세션 제목은 상세 표시에서만")
@@ -285,7 +333,9 @@ struct RoomTests {
         delegate("s1", "t1", "Explore")
         delegate("s2", "t2", "code-reviewer")
         let rows = Roster.make(from: state, privacy: .detailed).teams[0].rows
-        #expect(rows.map(\.name) == ["팀장", "Explore", "파트장1", "code-reviewer", "파트장2", "Plan"])
+        // 이름은 모두 팀원 번호(출근 순서), 목록은 칸 순서
+        #expect(rows.map(\.name) == ["팀장", "팀원4", "팀원1", "팀원5", "팀원2", "팀원3"])
+        #expect(rows.map(\.agentType) == [nil, "Explore", nil, "code-reviewer", nil, "Plan"])
         #expect(rows[0].sessionTitle == "메인")
         #expect(Roster.make(from: state, privacy: .summary).teams[0].rows[0].sessionTitle == nil)
     }

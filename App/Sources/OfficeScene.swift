@@ -226,6 +226,9 @@ final class OfficeScene: SKScene {
 final class CharacterNode: SKNode {
     private let colors: CharacterArt.Colors
     private let body = SKNode()
+    /// 몸통 (팀장만 가슴에 별 배지. 승진하면 다시 그립니다)
+    private let torso = SKNode()
+    private var shownStar: Bool?
     private let leftLeg: SKNode
     private let rightLeg: SKNode
     private let hairBackPivot = SKNode()
@@ -289,7 +292,7 @@ final class CharacterNode: SKNode {
         hairBackPivot.addChild(hairBack)
         body.addChild(hairBackPivot)
 
-        body.addChild(ArtNodes.node(for: CharacterArt.body(isLead: agent.role == .lead), colors: colors, transform: Self.local))
+        body.addChild(torso)
 
         headContent.position = CGPoint(x: 0, y: 20)
         headPivot.addChild(headContent)
@@ -318,6 +321,12 @@ final class CharacterNode: SKNode {
         position = CGPoint(x: actor.position.x, y: sceneHeight - actor.position.y)
         zPosition = actor.position.y
 
+        let star = actor.agent.title == .teamLead
+        if shownStar != star {
+            shownStar = star
+            torso.removeAllChildren()
+            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors, transform: Self.local))
+        }
         if shownExpression != actor.expression {
             shownExpression = actor.expression
             rebuildFace(actor.expression)

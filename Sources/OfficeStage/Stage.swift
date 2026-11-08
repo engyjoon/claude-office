@@ -362,11 +362,11 @@ public struct Stage: Sendable {
 
     // MARK: - 명패와 방 닫기
 
-    /// 팀장실은 "★ 팀장", 파트장 자리(칸의 ★)는 직함, 고정 직원은 종류 이름
+    /// 팀장실은 "★ 팀장", 세션 팀원의 칸 첫 책상은 직함("팀원1"). 서브에이전트 책상에는 명패를 달지 않습니다
+    /// (에이전트 이름은 화면에 쓰지 않고, 번호는 사람마다 바뀌므로).
     private static func plate(for agent: Agent) -> String? {
-        if agent.role == .lead { return agent.seat.isOffice ? "★ 팀장" : agent.title.label }
-        if agent.profile.kind == .fixed, let key = agent.profile.agentType { return key }
-        return nil
+        guard agent.role == .lead else { return nil }
+        return agent.seat.isOffice ? "★ 팀장" : agent.title.label
     }
 
     private mutating func setPlate(of agent: Agent) {
@@ -374,25 +374,20 @@ public struct Stage: Sendable {
         nameplates[agent.teamID, default: [:]][agent.seat] = plate
     }
 
-    /// 파트장 명패는 자리를 떠나면 뗍니다. 팀장실과 고정 직원의 지정석 명패는 남깁니다.
-    /// 고정 직원이 다른 칸으로 옮기면(승진으로 파트가 바뀜) 예전 자리 명패도 뗍니다.
+    /// 세션 팀원의 명패는 자리를 떠나면 뗍니다. 팀장실 명패는 방이 닫힐 때까지 남깁니다.
     private mutating func removePlate(of agent: Agent) {
-        guard let plate = Self.plate(for: agent), nameplates[agent.teamID]?[agent.seat] == plate else { return }
-        if agent.role == .lead, !agent.seat.isOffice {
-            nameplates[agent.teamID]?[agent.seat] = nil
-        } else if agent.role == .member, let current = actors[agent.id]?.agent, current.seat != agent.seat {
-            nameplates[agent.teamID]?[agent.seat] = nil
-        }
+        guard let plate = Self.plate(for: agent), nameplates[agent.teamID]?[agent.seat] == plate, !agent.seat.isOffice else { return }
+        nameplates[agent.teamID]?[agent.seat] = nil
     }
 
-    /// 파트 칸 표지 (방 → 칸 → 글자): 0번 칸 "팀장 파트", 파트장 칸은 직함, 쓰는 파트가 없는 칸은 "빈 칸"
+    /// 칸 표지 (방 → 칸 → 글자): 0번 칸 "팀장 칸", 세션 팀원의 칸은 "팀원1 칸", 쓰는 세션이 없는 칸은 "빈 칸"
     public var podSigns: [TeamID: [Int: String]] {
         var signs: [TeamID: [Int: String]] = [:]
         for band in layout.bands {
             var row: [Int: String] = [:]
-            for cell in 0..<band.cells { row[cell] = cell == 0 ? "팀장 파트" : "빈 칸" }
+            for cell in 0..<band.cells { row[cell] = cell == 0 ? "팀장 칸" : "빈 칸" }
             for actor in actors.values where actor.agent.teamID == band.team && actor.agent.role == .lead && !actor.agent.seat.isOffice {
-                if actor.agent.part < band.cells { row[actor.agent.part] = actor.agent.title.label }
+                if actor.agent.part < band.cells { row[actor.agent.part] = actor.agent.title.label + " 칸" }
             }
             signs[band.team] = row
         }
@@ -617,7 +612,7 @@ public struct Stage: Sendable {
 
     // MARK: - 말풍선 (설계서 §7.2)
 
-    /// 말풍선 수를 세는 단위: 파트 칸 (팀장실은 따로). 팀장 파트원은 0번 칸, 파트장과 그 파트원은 파트장의 칸입니다.
+    /// 말풍선 수를 세는 단위: 파트 칸 (팀장실은 따로). 팀장 서브에이전트는 0번 칸, 세션 팀원과 그 서브에이전트는 세션 팀원의 칸입니다.
     static func bubbleUnit(_ agent: Agent) -> String {
         agent.teamID.raw + (agent.seat.isOffice ? "#office" : "#\(agent.part)")
     }

@@ -48,7 +48,7 @@ struct OfficeStateTests {
         let beats = apply(&state, Hook(session: "s2").make("SessionStart"))
         #expect(state.teams.count == 1)
         guard case .arrived(let second) = beats.first else { Issue.record("\(beats)"); return }
-        #expect(second.displayName == "파트장")
+        #expect(second.displayName == "팀원")
         // 파트장은 자기 파트 칸(1번)의 ★ 자리
         #expect(second.seat == Seat(part: 1, desk: 0))
         _ = apply(&state, Hook(session: "s3", cwd: "/Users/demo/work/other").make("SessionStart"))
@@ -131,7 +131,7 @@ struct OfficeStateTests {
         // 임시 직원이 먼저 와도 code-reviewer의 지정석에는 앉지 않습니다
         let temp = apply(&state, hook.tool("PreToolUse", "Agent", id: "a3", input: ["subagent_type": "general-purpose"]))
         let again = apply(&state, hook.tool("PreToolUse", "Agent", id: "a4", input: ["subagent_type": "code-reviewer"]))
-        guard case .delegated(_, let tempMember) = temp.first, case .delegated(_, let reviewer2) = again.first else { Issue.record("위임 없음"); return }
+        guard case .delegated(_, let tempMember) = temp.first, case .delegated(_, let reviewer2) = again.last else { Issue.record("위임 없음"); return }
         #expect(reviewer2.seat == reviewer1.seat)
         #expect(tempMember.seat != reviewer1.seat)
         #expect(reviewer2.profile.appearance == reviewer1.profile.appearance)

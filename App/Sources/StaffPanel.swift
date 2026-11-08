@@ -74,7 +74,7 @@ private struct StaffRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            Avatar(appearance: row.appearance, kind: row.kind, size: 32, tint: Palette.team(colorIndex).opacity(0.4))
+            Avatar(appearance: row.appearance, isLead: row.isTeamLead, size: 32, tint: Palette.team(colorIndex).opacity(0.4))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(row.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
@@ -106,14 +106,13 @@ private struct StaffRow: View {
     private func subtitle(now: Date) -> String {
         var parts: [String] = []
         if let title = row.sessionTitle { parts.append(title) }
-        if let lead = row.partLead, row.part > 0 { parts.append("\(lead) 파트") }
+        if let lead = row.calledBy, row.part > 0 { parts.append("\(lead) 칸") }
         if let detail = row.detail { parts.append(detail) }
         if let elapsed = AgentCard.elapsed(since: row.since, now: now) { parts.append(elapsed) }
         if parts.isEmpty {
             switch row.kind {
             case .lead: parts.append(TerminalFocuser.displayName(for: row.term) ?? "Claude Code 세션")
-            case .fixed: parts.append("고정 직원")
-            case .temporary: parts.append("임시 직원")
+            case .fixed, .temporary: parts.append("서브에이전트")
             }
         }
         return parts.joined(separator: " · ")
