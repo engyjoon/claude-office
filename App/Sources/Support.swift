@@ -48,6 +48,18 @@ enum TerminalFocuser {
         "Hyper": ["co.zeit.hyper"],
     ]
 
+    static func displayName(for term: String?) -> String? {
+        switch term {
+        case "iTerm.app": "iTerm2"
+        case "Apple_Terminal": "터미널"
+        case "vscode": "VS Code"
+        case "ghostty": "Ghostty"
+        case "WarpTerminal": "Warp"
+        case .some(let other): other
+        case .none: nil
+        }
+    }
+
     @discardableResult
     static func focus(term: String?) -> Bool {
         guard let term, let candidates = bundleIDs[term] else { return false }

@@ -173,7 +173,11 @@ struct RosterRowView: View {
         if minutes >= 1, row.status == .waitingForInput || row.status == .idle || row.status == .waitingForPermission {
             parts.append("\(row.status.label) \(minutes)분")
         }
-        return parts.isEmpty ? row.status.label : parts.joined(separator: " · ")
+        if parts.isEmpty, let term = TerminalFocuser.displayName(for: row.term) {
+            // 상태는 오른쪽 칩에 있으므로, 세부 정보가 없으면 어느 터미널의 세션인지 보여줍니다
+            parts.append(term)
+        }
+        return parts.isEmpty ? (row.role == .lead ? "Claude Code 세션" : "서브에이전트") : parts.joined(separator: " · ")
     }
 }
 
