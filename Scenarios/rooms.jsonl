@@ -1,5 +1,5 @@
-# M4.5a 방과 직함: 메인 세션(팀장) + 데스크톱 하위 세션 2개(팀원, 하나는 워크트리) + 터미널 세션 1개(같은 폴더 → 팀원)
-# "hint"는 앱이 데스크톱 세션 정보 파일로 붙이는 방 힌트입니다. 마지막에 메인 세션이 끝나 가장 먼저 온 팀원이 팀장으로 승진합니다.
+# 메인·서브 판별 (M4.5a에서 만들고 M5(1) 규칙으로 봄): 메인 세션 + 데스크톱 하위 세션 2개(서브, 하나는 워크트리) + 터미널 세션 1개(직접 연 세션 → 메인2)
+# "hint"는 앱이 데스크톱 세션 정보 파일로 붙이는 힌트입니다. 마지막에 메인 세션이 끝나 가장 먼저 온 서브 세션이 메인으로 승진합니다.
 {"t": 0, "term": "vscode", "hint": {"title": "메인 작업"}, "hook": {"session_id": "main", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 1, "hint": {"ancestors": ["main"], "rootCwd": "/Users/demo/work/claude-office", "title": "M4.5a 세션 판별"}, "hook": {"session_id": "side1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 2, "hint": {"ancestors": ["main"], "rootCwd": "/Users/demo/work/claude-office", "title": "검토"}, "hook": {"session_id": "side2", "cwd": "/Users/demo/work/claude-office/.claude/worktrees/happy-otter", "hook_event_name": "SessionStart", "source": "startup"}}

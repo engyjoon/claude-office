@@ -74,7 +74,7 @@ public enum OfficeArt {
             shapes.append(.rect(from, row.deskY - 84, to - from, 112, r: 26, fill: .swatch(Swatch.teamRugs[color % 4]), outline: false, opacity: 0.5))
         }
         // 휴게 공간 러그와 현관 매트
-        shapes.append(.rect(6, 176, 286, 96, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
+        shapes.append(.rect(6, 176, 286, 78, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
         shapes.append(.rect(layout.doorX + 4, 162, 64, 10, r: 5, fill: .swatch(.rugC)))
         return shapes
     }

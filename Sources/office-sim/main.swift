@@ -11,8 +11,9 @@ import OfficeStage
 //       모든 효과음을 WAV(44.1kHz, 16비트, 모노)로 저장합니다.
 //   office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
 //       맥 앱 없이 훅 서버와 엔진만 돌립니다 (헤드리스). 받은 훅의 연출 지시와 직원 목록을 출력합니다.
-//   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더]
+//   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1140x648]
 //       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
+//       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
@@ -31,7 +32,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1140x648]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
