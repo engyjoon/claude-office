@@ -11,6 +11,9 @@ public struct OfficeEngine: Sendable {
     public private(set) var choreographer: Choreographer
     /// 직원별 최근 활동 (사무실 아래 실시간 현황 줄, 설계서 §10.2)
     public private(set) var journal = ActivityJournal()
+    /// 언제 macOS 알림을 띄우고 지울지 (설계서 §10 알림, M5(3))
+    public private(set) var notices = NotificationPlanner()
+    private var pendingNotices: [NoticeAction] = []
 
     public init(
         privacy: PrivacyLevel = .detailed, config: ChoreographyConfig = .init(), book: DialogueBook = .korean,
@@ -27,7 +30,19 @@ public struct OfficeEngine: Sendable {
     public mutating func handle(_ event: OfficeEvent) -> [Directive] {
         let beats = state.apply(event)
         journal.record(beats, in: state, at: event.at)
+        pendingNotices += notices.plan(beats, state: state, privacy: privacy)
         return choreographer.handle(beats, at: event.at)
+    }
+
+    public var notificationSettings: NotificationSettings {
+        get { notices.settings }
+        set { notices.settings = newValue }
+    }
+
+    /// 지난번 이후 쌓인 알림 동작 (앱이 훅을 처리한 뒤 꺼내 `UNUserNotificationCenter`에 넘깁니다)
+    public mutating func drainNotices() -> [NoticeAction] {
+        defer { pendingNotices.removeAll() }
+        return pendingNotices
     }
 
     /// 파싱할 수 없거나 무시하는 이벤트면 빈 배열을 돌려줍니다.

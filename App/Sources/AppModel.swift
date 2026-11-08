@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import OfficeCore
+import UserNotifications
 import OfficeServer
 import OfficeStage
 
@@ -49,6 +50,12 @@ final class AppModel {
     private(set) var directories: [DesktopFolder] = []
     /// 사무실 아래 실시간 현황 줄 (고른 사람의 흐름, 아니면 고른 디렉토리의 최근 일)
     private(set) var statusLine: StatusLine = .empty
+    /// 알림 설정 (설계서 §10 알림, M5(3)). 승인 대기 켬, 응답 완료 끔이 기본.
+    private(set) var notificationSettings: NotificationSettings
+    /// macOS 알림 권한 상태
+    private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
+    /// 집중 모드 상태를 읽을 수 있는지
+    private(set) var focusAccess: FocusDetector.Access = .notDetermined
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -64,6 +71,7 @@ final class AppModel {
     let stageStore = StageStore()
     let officeScene: OfficeScene
     @ObservationIgnored private let soundPlayer: SoundPlayer
+    @ObservationIgnored private let notifier = Notifier()
     @ObservationIgnored private var lastFrame = Date()
     @ObservationIgnored private var tickAccumulator = 0.0
 
@@ -82,6 +90,9 @@ final class AppModel {
         soundSettings = sound
         soundPlayer = SoundPlayer(settings: sound)
         stageStore.privacy = saved
+        let notify = NotificationSettings(defaults: .standard)
+        notificationSettings = notify
+        engine.notificationSettings = notify
         // 고른 디렉토리는 기억해 둡니다 (앱을 다시 켜도 이어짐)
         let defaults = UserDefaults.standard
         let all = defaults.object(forKey: Self.selectAllKey) as? Bool ?? true
@@ -94,6 +105,9 @@ final class AppModel {
         officeScene = OfficeScene(store: stageStore)
         officeScene.onSelect = { [weak self] id in self?.select(id) }
         officeScene.onViewportChange = { [weak self] size in self?.setViewport(size) }
+        notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
+        notifier.onOpen = { [weak self] target in self?.open(target) }
+        focusAccess = FocusDetector.access
         refreshHookStatus()
         startServer()
         startTicking()
@@ -167,8 +181,9 @@ final class AppModel {
         for event in events {
             guard case .sound(let cue, _) = event, soundSettings.isEnabled(cue.group) else { continue }
             if context == nil {
-                // 집중 모드 감지는 알림(M5)과 함께 붙입니다
-                context = SoundContext(officeVisible: officeScene.isVisibleOnScreen, focusModeActive: false)
+                // 집중 모드면 알림성 소리까지 줄입니다 (설계서 §11.3, 읽을 수 있을 때만)
+                let focused = soundSettings.respectFocusMode && FocusDetector.isFocused
+                context = SoundContext(officeVisible: officeScene.isVisibleOnScreen, focusModeActive: focused)
             }
             soundPlayer.play(cue, context: context!)
         }
@@ -180,6 +195,7 @@ final class AppModel {
             let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, hint: hint, at: delivery.receivedAt)
             append(.hook, Self.summary(of: delivery, hint: hint))
             record(directives)
+            notifier.apply(engine.drainNotices())
         } catch {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
         }
@@ -291,6 +307,71 @@ final class AppModel {
     private func setViewport(_ size: CGSize) {
         stageStore.floor.setViewport(width: Double(size.width), height: Double(size.height), engine: engine)
         updateHidden()
+    }
+
+    // MARK: - 알림 (M5(3))
+
+    func setNotificationSettings(_ settings: NotificationSettings) {
+        notificationSettings = settings
+        engine.notificationSettings = settings
+        settings.save(to: .standard)
+        // 처음 켜는 순간이 "알림이 필요할 때"입니다
+        if (settings.permission || settings.completion), notificationAuthorization == .notDetermined {
+            requestNotificationAuthorization()
+        }
+    }
+
+    /// 알림 권한을 묻고, 이어서 집중 모드 상태 읽기도 묻습니다 (둘 다 아직 묻지 않았을 때만 시스템 창이 뜸)
+    func requestNotificationAuthorization() {
+        notifier.requestAuthorization { [weak self] in
+            guard let self, self.focusAccess == .notDetermined else { return }
+            self.requestFocusAccess()
+        }
+    }
+
+    func refreshNotificationAuthorization() {
+        notifier.refreshAuthorization()
+        focusAccess = FocusDetector.access
+    }
+
+    func requestFocusAccess() {
+        FocusDetector.requestAuthorization { [weak self] access in self?.focusAccess = access }
+    }
+
+    /// 지금 집중 모드인지 (설정 화면 표시용, 읽을 수 없으면 nil)
+    var isFocusModeOn: Bool? {
+        focusAccess == .authorized ? FocusDetector.isFocused : nil
+    }
+
+    /// 알림을 눌렀을 때: 데스크톱 앱 세션이면 Claude 데스크톱 앱을, CLI 세션이면 그 터미널을 앞으로 가져오고,
+    /// 사무실 창이 열려 있으면 그 캐릭터를 고릅니다.
+    private func open(_ target: Notifier.Target) {
+        let part = target.session.flatMap { engine.state.parts[$0] }
+        let agent = target.agent.flatMap { engine.state.agents[$0] }
+        focus(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term)
+        if let id = target.agent, roster.row(for: id) != nil, isOfficeWindowOpen {
+            if visibleRoster.row(for: id) == nil { selectAllFolders() }  // 다른 디렉토리를 보고 있었으면 모두로
+            select(id)
+        }
+        append(.system, "알림 열기: \(target.hostSession != nil ? "Claude 데스크톱 앱" : TerminalFocuser.displayName(for: target.term) ?? "알 수 없는 터미널")")
+    }
+
+    /// 메뉴의 승인 대기 줄 "열기" 버튼 (알림을 누른 것과 같은 곳으로)
+    func focusSession(of row: RosterRow) {
+        focus(hostSession: row.hostSession, term: row.term)
+    }
+
+    private func focus(hostSession: String?, term: String?) {
+        if hostSession != nil {
+            // 특정 세션까지 여는 공개된 방법이 없어 앱만 앞으로 가져옵니다
+            DesktopAppFocuser.focus()
+        } else {
+            TerminalFocuser.focus(term: term)
+        }
+    }
+
+    private var isOfficeWindowOpen: Bool {
+        NSApp.windows.contains { $0.title == OfficeWindowView.title && $0.isVisible && !$0.isMiniaturized }
     }
 
     // MARK: - 설정

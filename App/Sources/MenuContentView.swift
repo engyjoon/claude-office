@@ -90,7 +90,7 @@ struct MenuContentView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(rows) { row in
-                RosterRowView(row: row, highlight: highlight)
+                RosterRowView(row: row, highlight: highlight) { model.focusSession(of: row) }
             }
         }
     }
@@ -147,6 +147,8 @@ private struct ContentHeightKey: PreferenceKey {
 struct RosterRowView: View {
     let row: RosterRow
     let highlight: Bool
+    /// 그 세션으로 이동 (데스크톱 앱 세션이면 Claude 앱, CLI면 터미널)
+    var focus: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 9) {
@@ -162,9 +164,11 @@ struct RosterRowView: View {
                 }
             }
             Spacer(minLength: 4)
-            if highlight, row.term != nil {
-                Button("터미널로") { TerminalFocuser.focus(term: row.term) }
+            if highlight, row.canFocus {
+                // 승인 대기 줄: 알림을 누른 것과 같은 곳으로
+                Button(row.hostSession != nil ? "앱으로" : "터미널로") { focusSession() }
                     .controlSize(.small)
+                    .help(row.hostSession != nil ? "Claude 데스크톱 앱을 앞으로 가져와요 (세션은 사이드바에서 골라 주세요)" : "")
             } else {
                 StatusChip(status: row.status)
             }
@@ -173,8 +177,13 @@ struct RosterRowView: View {
         .padding(.vertical, 4)
         .background(highlight ? Palette.attention.opacity(0.35) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { TerminalFocuser.focus(term: row.term) }
-        .help(row.term.map { "더블클릭하면 \($0)을(를) 앞으로 가져와요" } ?? "")
+        .onTapGesture(count: 2) { focusSession() }
+        .help(row.hostSession != nil ? "더블클릭하면 Claude 데스크톱 앱을 앞으로 가져와요"
+            : row.term.map { "더블클릭하면 \($0)을(를) 앞으로 가져와요" } ?? "")
+    }
+
+    private func focusSession() {
+        if let focus { focus() } else { TerminalFocuser.focus(term: row.term) }
     }
 
     private func subtitle(now: Date) -> String {

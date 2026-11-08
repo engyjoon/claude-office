@@ -258,4 +258,6 @@ public struct Part: Hashable, Sendable {
     public internal(set) var ancestors: [SessionID]
     /// 데스크톱 앱의 세션 제목
     public internal(set) var title: String?
+    /// Claude 데스크톱 앱 세션 id (`local_…`). 터미널 CLI 세션은 nil. 알림을 누르면 데스크톱 앱으로 갈지 정합니다 (M5(3)).
+    public internal(set) var hostSession: String?
 }

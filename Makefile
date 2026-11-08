@@ -13,7 +13,7 @@ ifeq ($(origin DEVELOPER_DIR),undefined)
   endif
 endif
 
-.PHONY: build test demo sounds snapshot serve replay bootstrap app run install uninstall clean
+.PHONY: build test demo sounds snapshot serve replay notify-demo bootstrap app run install uninstall clean
 
 ## ---- 코어 (macOS·Linux) ----
 
@@ -46,6 +46,10 @@ serve:
 ## 실행 중인 앱(또는 serve)으로 관찰 시나리오를 2배속 전송
 replay:
 	$(SWIFT) run -q office-sim replay Scenarios/m0-observed.jsonl --speed 2
+
+## 실행 중인 앱으로 승인 대기 알림 시나리오를 1배속 전송 (40초 대기 → 풀림 → 완료 → 퇴근, 약 1분)
+notify-demo:
+	$(SWIFT) run -q office-sim replay Scenarios/notify.jsonl
 
 ## ---- macOS 앱 (Xcode 필요) ----
 

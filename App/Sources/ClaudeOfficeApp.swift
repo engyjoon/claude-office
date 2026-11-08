@@ -136,21 +136,74 @@ struct OfficeWindowView: View {
     }
 }
 
-/// 메뉴바 아이콘: 아무도 없으면 빈 건물, 일하면 채운 건물, 승인 대기가 있으면 손 든 아이콘과 숫자
+/// 메뉴바 아이콘 (설계서 §10, M5(3)): 작은 건물 + 상태 점(초록: 작업 중, 노랑: 승인 대기, 회색: 쉬는 중).
+/// 아무도 없으면 점 없이 빈 건물. 승인 대기가 있으면 옆에 그 수를 숫자로.
 struct MenuBarLabel: View {
     let roster: Roster
+    /// 메뉴바가 밝은지 어두운지에 따라 건물 색을 다시 그립니다
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        switch roster.mood {
-        case .attention:
-            HStack(spacing: 2) {
-                Image(systemName: "hand.raised.fill")
-                Text("\(roster.waiting.count)")
+        let mood = roster.mood
+        Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark))
+        if !roster.waiting.isEmpty {
+            Text("\(roster.waiting.count)")
+        }
+    }
+}
+
+/// 상태 점이 있는 메뉴바 아이콘. 점 색이 보이도록 템플릿이 아닌 그림으로 만들고,
+/// 건물은 그릴 때의 모양(밝은·어두운 메뉴바)에 맞춰 검정·흰색으로 칠합니다.
+enum MenuBarIcon {
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(mood: Roster.Mood, dark: Bool) -> NSImage {
+        let key = "\(mood.rawValue).\(dark)"
+        if let cached = cache[key] { return cached }
+        let size = NSSize(width: 22, height: 16)
+        let image = NSImage(size: size, flipped: false) { rect in
+            // 실제로 그리는 곳의 모양을 먼저 보고, 모르면 SwiftUI가 알려 준 모양을 씁니다
+            let appearance = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua])
+            let isDark = appearance.map { $0 == .darkAqua } ?? dark
+            let ink = isDark ? NSColor.white : NSColor.black
+            let symbolName = mood == .idle || mood == .empty ? "building.2" : "building.2.fill"
+            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+                .applying(.init(paletteColors: [ink.withAlphaComponent(mood == .empty ? 0.55 : 0.9)]))
+            if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
+                let symbolSize = symbol.size
+                symbol.draw(in: NSRect(x: 0, y: (rect.height - symbolSize.height) / 2, width: symbolSize.width, height: symbolSize.height))
             }
-        case .working:
-            Image(systemName: "building.2.fill")
-        case .idle, .empty:
-            Image(systemName: "building.2")
+            guard let dot = dotColor(mood) else { return true }
+            let diameter: CGFloat = 7
+            let dotRect = NSRect(x: rect.width - diameter - 0.5, y: 0.5, width: diameter, height: diameter)
+            // 건물과 겹치는 부분이 묻히지 않게 메뉴바 색 테두리를 두릅니다
+            (isDark ? NSColor.black : NSColor.white).withAlphaComponent(0.85).setFill()
+            NSBezierPath(ovalIn: dotRect.insetBy(dx: -1.2, dy: -1.2)).fill()
+            dot.setFill()
+            NSBezierPath(ovalIn: dotRect).fill()
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = accessibility(mood)
+        cache[key] = image
+        return image
+    }
+
+    static func dotColor(_ mood: Roster.Mood) -> NSColor? {
+        switch mood {
+        case .working: NSColor.systemGreen
+        case .attention: NSColor.systemYellow
+        case .idle: NSColor.systemGray
+        case .empty: nil
+        }
+    }
+
+    static func accessibility(_ mood: Roster.Mood) -> String {
+        switch mood {
+        case .working: "Claude Office · 작업 중"
+        case .attention: "Claude Office · 승인 대기"
+        case .idle: "Claude Office · 쉬는 중"
+        case .empty: "Claude Office"
         }
     }
 }

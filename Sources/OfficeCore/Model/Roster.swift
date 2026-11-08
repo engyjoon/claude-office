@@ -92,6 +92,11 @@ public struct RosterRow: Identifiable, Hashable, Sendable {
     public let teamName: String
     public let session: SessionID
     public let term: String?
+    /// Claude 데스크톱 앱 세션 id (`local_…`). 터미널 CLI 세션은 nil (M5(3): 알림·메뉴에서 데스크톱 앱으로 이동)
+    public let hostSession: String?
+
+    /// 앞으로 가져올 곳이 있는지 (데스크톱 앱 세션이거나 터미널을 앎)
+    public var canFocus: Bool { hostSession != nil || term != nil }
 }
 
 /// 행 하나 (메인 하나와 그 서브들)
@@ -193,7 +198,8 @@ public struct Roster: Hashable, Sendable {
             appearance: agent.profile.appearance,
             teamName: team.name,
             session: agent.session,
-            term: agent.term
+            term: agent.term,
+            hostSession: part?.hostSession
         )
     }
 

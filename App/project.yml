@@ -36,6 +36,8 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Claude Office"
+        # 집중 모드 중에는 알림 효과음을 줄이기 위해 집중 모드 상태만 읽습니다 (M5(3))
+        NSFocusStatusUsageDescription: "집중 모드 중에는 승인 요청·완료 효과음을 줄이기 위해 집중 모드가 켜져 있는지만 확인해요."
     settings:
       base:
         PRODUCT_NAME: Claude Office

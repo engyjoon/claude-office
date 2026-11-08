@@ -130,9 +130,16 @@ public struct OfficeState: Sendable {
                 case .success: agent.consecutiveErrors = 0
                 case .interrupted: break
                 }
-                if let last = agent.runningTools.last {
+                if case .waitingForPermission(let waited) = agent.activity,
+                    !Self.permissionResolved(waited, by: call, stillRunning: agent.runningTools)
+                {
+                    // 다른 도구가 끝났을 뿐 승인 대기는 그대로 (병렬 도구)
+                } else if let last = agent.runningTools.last {
                     agent.setActivity(.working(last), at: now)
                 } else if case .working = agent.activity {
+                    agent.setActivity(.thinking, at: now)
+                } else if case .waitingForPermission = agent.activity {
+                    // 승인받은 도구가 끝남: 승인 대기를 풉니다 (승인 자체를 알리는 훅은 없음, M5(3))
                     agent.setActivity(.thinking, at: now)
                 }
             }
@@ -250,7 +257,8 @@ public struct OfficeState: Sendable {
             delegatedBy: nil, task: nil, toolUseID: nil, background: false, term: event.term, at: event.at)
         partOrder += 1
         parts[event.session] = Part(
-            session: event.session, teamID: teamID, order: partOrder, lead: id, ancestors: ancestors, title: event.hint?.title)
+            session: event.session, teamID: teamID, order: partOrder, lead: id, ancestors: ancestors, title: event.hint?.title,
+            hostSession: event.hint?.hostSession)
         relabel(force: demoted.map { [$0] } ?? [], beats: &beats)
         beats.append(.arrived(agents[id]!))
         // 이 세션이 띄운 세션이 다른 행의 메인으로 와 있었으면 그 행을 합칩니다
@@ -289,6 +297,7 @@ public struct OfficeState: Sendable {
     private mutating func absorb(_ hint: SessionHint, for session: SessionID, beats: inout [Beat]) {
         guard var part = parts[session] else { return }
         if let title = hint.title { part.title = title }
+        if let host = hint.hostSession { part.hostSession = host }
         let ancestorsChanged = !hint.ancestors.isEmpty && hint.ancestors != part.ancestors
         if ancestorsChanged { part.ancestors = hint.ancestors }
         parts[session] = part
@@ -515,6 +524,14 @@ public struct OfficeState: Sendable {
         if finishedToolIDs.count > 512 {
             finishedToolIDSet.remove(finishedToolIDs.removeFirst())
         }
+    }
+
+    /// 끝난 도구가 기다리던 승인을 풀었는지: 기다리던 도구와 같거나(이름·대상), 무엇을 기다렸는지 모르거나, 남은 도구가 없으면
+    static func permissionResolved(_ waited: ToolCall?, by finished: ToolCall, stillRunning: [ToolCall]) -> Bool {
+        guard let waited else { return true }
+        if let a = waited.id, let b = finished.id { return a == b }
+        if waited.name == finished.name && (waited.subject == nil || waited.subject == finished.subject) { return true }
+        return stillRunning.isEmpty
     }
 
     static func subagentKey(_ session: SessionID, _ agentID: String) -> String {

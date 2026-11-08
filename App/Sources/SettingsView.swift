@@ -1,8 +1,10 @@
+import AppKit
 import OfficeCore
 import OfficeServer
 import SwiftUI
+import UserNotifications
 
-/// 설정 창 (설계서 §10). 연동, 표시, 효과음(M4). 알림·직원 꾸미기는 이후 단계에서 추가합니다.
+/// 설정 창 (설계서 §10). 연동, 표시, 알림(M5(3)), 효과음(M4). 직원 꾸미기는 이후 단계에서 추가합니다.
 struct SettingsView: View {
     let model: AppModel
 
@@ -12,6 +14,8 @@ struct SettingsView: View {
                 .tabItem { Label("연동", systemImage: "link") }
             DisplaySettings(model: model)
                 .tabItem { Label("표시", systemImage: "eye") }
+            NotificationSettingsView(model: model)
+                .tabItem { Label("알림", systemImage: "bell") }
             SoundSettingsView(model: model)
                 .tabItem { Label("효과음", systemImage: "speaker.wave.2") }
         }
@@ -94,6 +98,99 @@ struct DisplaySettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// 알림 설정 (설계서 §10 알림, M5(3)): 승인 대기·응답 완료 켜기·끄기, 권한 상태, 집중 모드
+struct NotificationSettingsView: View {
+    let model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: binding(\.permission)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("승인 대기 알림")
+                        Text("누군가 권한 승인을 기다리기 시작하면 바로 알려요. 대기가 풀리면 알림 센터에서 지워요.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(isOn: binding(\.completion)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("응답 완료 알림")
+                        Text("세션이 응답을 마치면(Stop) 알려요. 세션마다 마지막 하나만 남아요.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text("알림을 누르면 그 세션으로 가요: 터미널 세션은 그 터미널을, Claude 데스크톱 앱 세션은 데스크톱 앱을 앞으로 가져와요 (세션까지 열어 주는 공개된 방법이 없어 세션은 사이드바에서 골라 주세요). 사무실 창이 열려 있으면 그 캐릭터도 골라요. 표시 수준이 요약·비공개면 알림에도 파일명·명령을 쓰지 않아요.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("알림 권한") {
+                LabeledContent("상태") { Text(authorizationText) }
+                HStack {
+                    if model.notificationAuthorization == .notDetermined {
+                        Button("알림 허용 요청") { model.requestNotificationAuthorization() }
+                    }
+                    Button("시스템 설정 열기") { Notifier.openSystemSettings() }
+                }
+            }
+
+            Section {
+                Toggle("집중 모드 중에는 알림 효과음 끄기", isOn: Binding(
+                    get: { model.soundSettings.respectFocusMode },
+                    set: { value in
+                        var settings = model.soundSettings
+                        settings.respectFocusMode = value
+                        model.setSoundSettings(settings)
+                    }))
+                LabeledContent("집중 모드") { Text(focusText) }
+                if model.focusAccess == .notDetermined {
+                    Button("집중 모드 상태 읽기 허용 요청") { model.requestFocusAccess() }
+                }
+            } header: {
+                Text("집중 모드")
+            } footer: {
+                Text("알림이 화면에 뜰지는 macOS 집중 모드 규칙을 따라요. 이 앱은 집중 모드일 때 노크·완료 같은 효과음만 줄여요.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { model.refreshNotificationAuthorization() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshNotificationAuthorization()  // 시스템 설정에서 돌아왔을 때
+        }
+    }
+
+    private var authorizationText: String {
+        switch model.notificationAuthorization {
+        case .notDetermined: "아직 묻지 않음 (처음 알림이 필요할 때 물어요)"
+        case .denied: "허용 안 됨 · 시스템 설정에서 켤 수 있어요"
+        case .authorized: "허용됨"
+        case .provisional: "조용히 허용됨"
+        default: "알 수 없음"
+        }
+    }
+
+    private var focusText: String {
+        switch model.focusAccess {
+        case .authorized: model.isFocusModeOn == true ? "지금 켜져 있음" : "지금 꺼져 있음"
+        case .notDetermined: "상태를 읽어도 되는지 아직 묻지 않음"
+        case .denied: "상태 읽기 허용 안 됨 · 효과음은 평소대로"
+        case .unavailable: "이 앱에서 읽을 수 없음 · 효과음은 평소대로"
+        }
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<NotificationSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { model.notificationSettings[keyPath: keyPath] },
+            set: { value in
+                var settings = model.notificationSettings
+                settings[keyPath: keyPath] = value
+                model.setNotificationSettings(settings)
+            }
+        )
     }
 }
 

@@ -80,6 +80,7 @@ public struct SoundPolicy: Sendable {
 extension SoundSettings {
     public static let enabledKey = "sound.enabled"
     public static let volumeKey = "sound.volume"
+    public static let respectFocusKey = "sound.respectFocus"
 
     public static func key(for group: SoundGroup) -> String { "sound.\(group.rawValue).enabled" }
 
@@ -92,6 +93,9 @@ extension SoundSettings {
         if defaults.object(forKey: Self.volumeKey) != nil {
             volume = min(max(defaults.double(forKey: Self.volumeKey), 0), 1)
         }
+        if defaults.object(forKey: Self.respectFocusKey) != nil {
+            respectFocusMode = defaults.bool(forKey: Self.respectFocusKey)
+        }
         for group in SoundGroup.allCases where defaults.object(forKey: Self.key(for: group)) != nil {
             set(group, enabled: defaults.bool(forKey: Self.key(for: group)))
         }
@@ -100,6 +104,7 @@ extension SoundSettings {
     public func save(to defaults: UserDefaults) {
         defaults.set(masterEnabled, forKey: Self.enabledKey)
         defaults.set(volume, forKey: Self.volumeKey)
+        defaults.set(respectFocusMode, forKey: Self.respectFocusKey)
         for group in SoundGroup.allCases {
             defaults.set(enabledGroups.contains(group), forKey: Self.key(for: group))
         }
