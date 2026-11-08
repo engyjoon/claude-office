@@ -239,3 +239,46 @@ struct ArtTests {
         #expect(raising.rightArm < -140)
     }
 }
+
+@Suite("무대: 동작 줄이기 (M5(8))")
+struct ReducedMotionTests {
+    @Test("출근: 걷지 않고 바로 자리에 앉고, 인사 제스처를 생략한다")
+    func arrivalTeleports() {
+        var h = StageHarness()
+        h.stage.setReducedMotion(true)
+        h.hook(hook("SessionStart"))
+        let lead = try! #require(h.actor("lead-1"))
+        #expect(!lead.isWalking)
+        #expect(lead.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), .main).final)
+        #expect(lead.seated)
+        #expect(lead.gesture == nil)
+        h.run(until: 3)
+        #expect(h.actor("lead-1")?.gesture == nil)
+        #expect(h.actor("lead-1")?.walkedDistance == 0)
+    }
+
+    @Test("걷는 중에 켜면 도착할 자리로 옮기고 다음 지시를 이어 간다")
+    func switchMidWalk() {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.run(until: 0.3)
+        #expect(h.actor("lead-1")?.isWalking == true)
+        h.stage.setReducedMotion(true)
+        let lead = try! #require(h.actor("lead-1"))
+        #expect(!lead.isWalking)
+        #expect(lead.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal#1"), .main).final)
+        #expect(lead.seated)
+    }
+
+    @Test("퇴근: 문까지 걷지 않고 바로 나간다")
+    func departureTeleports() {
+        var h = StageHarness()
+        h.stage.setReducedMotion(true)
+        h.hook(hook("SessionStart"))
+        h.run(until: 2)
+        h.hook(hook("SessionEnd", #""reason":"other""#))
+        h.run(until: 8)
+        #expect(h.actor("lead-1") == nil)
+        #expect(h.events.contains(.despawned(AgentID("lead-1"))))
+    }
+}

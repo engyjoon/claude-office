@@ -39,6 +39,15 @@ final class AppModel {
     private(set) var installMessage: String?
     private(set) var isInstalling = false
     private(set) var receivedHooks = 0
+    /// 마지막으로 훅을 받은 때 (설정 → 연동 "마지막 이벤트", M5(8))
+    private(set) var lastHookAt: Date?
+    /// 훅 스크립트 파일 상태 (있는지, 실행 가능한지, 앱과 같은 버전인지)
+    private(set) var hookScript: HookScriptState = .missing
+    /// 테스트 이벤트를 보내는 중 (설정 → 연동)
+    private(set) var isSendingTest = false
+    /// 동작 줄이기 설정과 macOS 손쉬운 사용 값 (설계서 §10, M5(8))
+    private(set) var motionSettings: MotionSettings
+    private(set) var systemReduceMotion = false
     /// 사무실 창에서 클릭해 고른 직원 (신원 카드에 보여줍니다)
     private(set) var selectedAgent: AgentID?
     /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
@@ -73,6 +82,7 @@ final class AppModel {
     @ObservationIgnored private var directoryTimer: Timer?
     @ObservationIgnored private var loadingDirectories = false
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+    @ObservationIgnored private var motionObserver: NSObjectProtocol?
     let installer = HookInstaller()
     let endpointURL = EndpointFile.defaultURL()
     /// 데스크톱 앱 세션 정보 (방·직함 힌트, 설계서 §4.4)
@@ -91,7 +101,6 @@ final class AppModel {
     @ObservationIgnored private var lastFrame = Date()
     @ObservationIgnored private var tickAccumulator = 0.0
 
-    private static let privacyKey = "privacy"
     private static let selectAllKey = "office.selection.all"
     private static let selectedFoldersKey = "office.selection.folders"
     /// 디렉토리 목록을 새로 읽는 간격
@@ -99,7 +108,10 @@ final class AppModel {
     private static let maxLogEntries = 600
 
     init() {
-        let saved = UserDefaults.standard.string(forKey: Self.privacyKey).flatMap(PrivacyLevel.init(rawValue:)) ?? .detailed
+        // 바뀐 설정 키의 값을 먼저 옮겨 둡니다 (M5(8))
+        SettingsMigration.migrate(UserDefaults.standard)
+        let saved = PrivacyLevel(store: UserDefaults.standard)
+        motionSettings = MotionSettings(store: UserDefaults.standard)
         privacy = saved
         engine = OfficeEngine(privacy: saved)
         let sound = SoundSettings(defaults: .standard)
@@ -137,6 +149,16 @@ final class AppModel {
         notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
         notifier.onOpen = { [weak self] target in self?.open(target) }
         focusAccess = FocusDetector.access
+        systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        applyMotion()
+        motionObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                self?.applyMotion()
+            }
+        }
         refreshHookStatus()
         startServer()
         startTicking()
@@ -233,11 +255,12 @@ final class AppModel {
 
     private func receive(_ delivery: HookDelivery, hint: SessionHint?) {
         receivedHooks += 1
+        lastHookAt = delivery.receivedAt
         do {
             let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, hint: hint, at: delivery.receivedAt)
             append(.hook, Self.summary(of: delivery, hint: hint))
             record(directives)
-            notifier.apply(engine.drainNotices())
+            notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
         } catch {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
         }
@@ -321,7 +344,7 @@ final class AppModel {
         if arrived > 0 { append(.system, "데스크톱 앱에 열려 있는 세션 \(arrived)개를 쉬는 중으로 앉혔어요") }
         if left > 0 { append(.system, "데스크톱 앱에서 닫은 세션 \(left)명이 퇴근했어요") }
         record(directives)
-        notifier.apply(engine.drainNotices())
+        notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
         roster = Roster.make(from: engine.state, privacy: privacy)
         refreshMiniFocus(now: now)
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
@@ -592,13 +615,44 @@ final class AppModel {
         stageStore.privacy = level
         miniStore.privacy = level
         engine.privacy = level
-        UserDefaults.standard.set(level.rawValue, forKey: Self.privacyKey)
+        UserDefaults.standard.set(level.rawValue, forKey: PrivacyLevel.settingsKey)
         roster = Roster.make(from: engine.state, privacy: level)
         refreshStatusLine()
     }
 
+    func setMotionSettings(_ settings: MotionSettings) {
+        motionSettings = settings
+        settings.save(to: UserDefaults.standard)
+        applyMotion()
+    }
+
+    /// 지금 동작을 줄이는지 (설정과 macOS 손쉬운 사용 값으로 정함)
+    var reducesMotion: Bool { motionSettings.reducesMotion(systemReduceMotion: systemReduceMotion) }
+
+    /// 두 무대(사무실 창·미니)에 동작 줄이기를 알립니다: 걷기 대신 순간이동, 제스처 생략
+    private func applyMotion() {
+        let on = reducesMotion
+        stageStore.floor.setReducedMotion(on)
+        miniStore.floor.setReducedMotion(on)
+    }
+
     func refreshHookStatus() {
         hookStatus = installer.status()
+        hookScript = installer.scriptState()
+    }
+
+    /// 설정 → 연동의 훅 상태 (M5(8)). `now`가 바뀌면 "12초 전"도 바뀝니다.
+    func hookHealth(now: Date = Date()) -> HookHealth {
+        let port: UInt16?, error: String?
+        switch serverState {
+        case .running(let p): (port, error) = (p, nil)
+        case .stopped: (port, error) = (nil, nil)
+        case .failed(let message): (port, error) = (nil, message)
+        }
+        return HookHealth.evaluate(
+            .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
+                  eventCount: receivedHooks),
+            now: now)
     }
 
     func installHooks() {
@@ -641,43 +695,55 @@ final class AppModel {
         refreshHookStatus()
     }
 
-    /// 설치된 훅 스크립트를 실제로 실행해서, 스크립트 → 엔드포인트 → 서버 경로를 확인합니다.
-    func sendTestHook() {
+    /// "테스트 이벤트 보내기" (M5(8)): 설치된 훅 스크립트를 실제로 실행해 가짜 세션이 잠깐 출근했다 퇴근하게 합니다.
+    /// 스크립트 → 엔드포인트 파일 → 서버 → 사무실 경로를 모두 지나며, 이 세션의 알림은 띄우지 않습니다.
+    func sendTestEvents() {
+        guard !isSendingTest else { return }
+        isSendingTest = true
         let script = installer.scriptURL
         let before = receivedHooks
-        let session = "claude-office-test-\(Int(Date().timeIntervalSince1970))"
-        let payloads = [
-            #"{"session_id":"\#(session)","cwd":"/Claude Office 연결 확인","hook_event_name":"SessionStart","source":"startup"}"#,
-            #"{"session_id":"\#(session)","cwd":"/Claude Office 연결 확인","hook_event_name":"SessionEnd","reason":"test"}"#,
-        ]
-        installMessage = "테스트 훅을 보내는 중이에요…"
+        let steps = HookTestScenario.steps(session: HookTestScenario.sessionID(at: Date()))
+        installMessage = "테스트 세션이 출근하는 중이에요… 사무실 창이나 미니 사무실에서 \"\((HookTestScenario.folder as NSString).lastPathComponent)\" 행을 보세요."
         Task.detached(priority: .userInitiated) {
-            for (index, payload) in payloads.enumerated() {
-                if index > 0 { try? await Task.sleep(nanoseconds: 2_500_000_000) }
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = [script.path]
-                let input = Pipe()
-                process.standardInput = input
-                process.standardOutput = Pipe()
-                process.standardError = Pipe()
-                do {
-                    try process.run()
-                    input.fileHandleForWriting.write(Data(payload.utf8))
-                    try input.fileHandleForWriting.close()
-                    process.waitUntilExit()
-                } catch {
-                    await MainActor.run { self.installMessage = "훅 스크립트를 실행하지 못했어요: \(error)" }
+            for step in steps {
+                if step.delay > 0 { try? await Task.sleep(nanoseconds: UInt64(step.delay * 1_000_000_000)) }
+                if let error = Self.runHookScript(script, payload: step.payload) {
+                    await MainActor.run {
+                        self.isSendingTest = false
+                        self.installMessage = "훅 스크립트를 실행하지 못했어요: \(error). \"다시 설치\"를 눌러 보세요."
+                        self.refreshHookStatus()
+                    }
                     return
                 }
             }
             try? await Task.sleep(nanoseconds: 800_000_000)
             await MainActor.run {
+                self.isSendingTest = false
                 let arrived = self.receivedHooks - before
-                self.installMessage = arrived >= 2
-                    ? "연결 확인 완료! 훅 스크립트에서 보낸 테스트 이벤트 \(arrived)개가 도착했어요."
-                    : "테스트 이벤트가 도착하지 않았어요 (\(arrived)/2). 훅을 다시 설치해 보세요."
+                self.installMessage = arrived >= steps.count
+                    ? "연결 확인 완료! 테스트 이벤트 \(arrived)개가 모두 도착했어요."
+                    : "테스트 이벤트가 \(steps.count)개 중 \(arrived)개만 도착했어요. 훅을 다시 설치하거나 서버를 다시 시작해 보세요."
             }
+        }
+    }
+
+    /// 훅 스크립트를 한 번 실행합니다 (Claude Code가 하듯 stdin으로 페이로드). 실행하지 못하면 까닭을 돌려줍니다.
+    nonisolated private static func runHookScript(_ script: URL, payload: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path]
+        let input = Pipe()
+        process.standardInput = input
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            input.fileHandleForWriting.write(Data(payload.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+            return process.terminationStatus == 0 ? nil : "종료 코드 \(process.terminationStatus)"
+        } catch {
+            return "\(error)"
         }
     }
 

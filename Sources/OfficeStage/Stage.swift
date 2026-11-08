@@ -125,6 +125,8 @@ public struct StageConfig: Hashable, Sendable {
     /// 공용 구역(소파·안마 의자·탕비 코너·화이트보드)에 가는 대신 자기 책상에서 합니다. 미니 사무실은 휴게 공간을 보여 주지 않으므로 켭니다 (M5(4) v2).
     /// 안마는 졸기로, 화이트보드에 쓰기는 타이핑으로 바꿉니다.
     public var commonAreasAtDesk = false
+    /// 동작 줄이기 (설계서 §10, M5(8)): 걷는 대신 도착할 자리로 바로 옮기고(순간이동), 제스처를 생략합니다.
+    public var reducedMotion = false
 
     public init() {}
 }
@@ -310,6 +312,7 @@ public struct Stage: Sendable {
                 actors[id]!.pose = pose
             }
         case .gesture(let gesture):
+            if config.reducedMotion { break }
             actors[id]!.gesture = gesture
             actors[id]!.gestureStartedAt = time
             actors[id]!.gestureUntil = time + config.gestureDuration
@@ -606,12 +609,42 @@ public struct Stage: Sendable {
         reserve(target, for: id)
         actors[id]!.place = target
         actors[id]!.seated = false
+        if config.reducedMotion {
+            teleport(id, to: target.final)
+            if target.seat != nil { updateLayout() }
+            return
+        }
         actors[id]!.path = path
         actors[id]!.walkedDistance = 0
         if !path.isEmpty {
             blocks[id] = .walking
         }
         if target.seat != nil { updateLayout() }
+    }
+
+    /// 걷지 않고 바로 그 자리로 옮깁니다 (동작 줄이기)
+    private mutating func teleport(_ id: AgentID, to point: MapPoint) {
+        actors[id]!.position = point
+        actors[id]!.path = []
+        actors[id]!.walkedDistance = 0
+        actors[id]!.facing = .front
+    }
+
+    /// 동작 줄이기를 켜고 끕니다. 켜는 순간 걷던 사람은 도착할 자리로 옮기고 하던 제스처를 멈춥니다.
+    public mutating func setReducedMotion(_ on: Bool) {
+        guard config.reducedMotion != on else { return }
+        config.reducedMotion = on
+        guard on else { return }
+        for id in actors.keys.sorted() {
+            actors[id]!.gesture = nil
+            actors[id]!.gestureUntil = nil
+            guard let last = actors[id]!.path.last else { continue }
+            teleport(id, to: last)
+            if blocks[id] == .walking {
+                blocks[id] = nil
+                run(id)
+            }
+        }
     }
 
     private mutating func advanceWalk(_ id: AgentID, dt: Double) {

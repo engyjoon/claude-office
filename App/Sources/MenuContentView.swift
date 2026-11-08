@@ -117,8 +117,9 @@ struct MenuContentView: View {
                 openWindow(id: WindowID.eventLog)
             }
             Button("설정…") {
-                NSApp.activate()
                 openSettings()
+                // 메뉴바 앱은 설정 창이 다른 앱 뒤에 열리기 쉬워 활성화한 뒤 앞으로 올립니다 (M5(8))
+                SettingsWindow.bringToFront()
             }
             Spacer()
             Button {

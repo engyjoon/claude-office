@@ -138,6 +138,11 @@ public struct OfficeFloor: Sendable {
         stage.setViewport(width: width, height: height)
     }
 
+    /// 동작 줄이기 (M5(8))
+    public mutating func setReducedMotion(_ on: Bool) {
+        stage.setReducedMotion(on)
+    }
+
     public var capacity: OfficeLayout.Capacity {
         isBand
             ? OfficeLayout.Capacity(columns: 1 + subSlots, rows: 1)

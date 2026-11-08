@@ -741,14 +741,14 @@ CharacterNode (SKNode)
 | **미니 사무실** (M5(4)) | `NSPanel` (`.borderless` + `.nonactivatingPanel`, `.floating`, `.canJoinAllSpaces`, `.fullScreenAuxiliary`) | 메인 1명 + 쉬지 않는 서브 2명을 사무실 그대로(배율 1) 보여 주는 띠 + 위 20pt 머리줄(상태·다른 메인 칩). 390×200 고정, 화면 오른쪽 아래, 사무실 창이 닫혀 있을 때만. 누르면 사무실 창, 캐릭터를 더블클릭하면 그 세션의 앱·터미널(M5(7)), 끌면 이동, 투명도 조절 (§10.1) |
 | **사무실 창** (지금) | `Window` + `SpriteView` + SwiftUI 패널 | 왼쪽 사무실(배율 1, 들어가는 만큼만)과 그 바로 아래 한 줄 **실시간 현황 줄**(§10.2), 오른쪽 패널: 위 **디렉토리** 드롭다운(Claude 데스크톱 앱에 열린 디렉토리 하나 또는 "모두"), 아래 **세션**("화면에 다 못 보여 준 N명", 고른 디렉토리의 메인별 목록). 캐릭터·목록을 누르면 오른쪽 위에 **인스펙터**(신원 카드를 넓힘: 지금 하는 일, 서브 목록·소속, 최근 일 타임라인, [앱으로]/[터미널로], §10.3), 더블클릭하면 그 세션의 앱·터미널 (M3, M5(1), M5(7)) |
 | **메인 창** (처음 설계) | `NavigationSplitView` | 왼쪽 팀 목록 / 가운데 큰 사무실 / 오른쪽 인스펙터(선택한 직원의 현재 작업, 최근 이벤트 타임라인, 서브 목록, "터미널로 이동" 버튼). 지금은 사무실 창의 인스펙터 카드가 이 역할(§10.3) |
-| **설정** | `Settings` scene | 일반(로그인 시 실행: `SMAppService`), 연동(훅 설치·제거·상태 확인, 포트, 테스트 이벤트 보내기), 표시(말풍선 상세도, 미니 사무실 켜기·자동 전환·투명도·기본 위치로, 동작 줄이기), 알림, **효과음**(§11), 직원 꾸미기 |
+| **설정** (M5(8)) | `Settings` scene, `Form` + `.formStyle(.grouped)` | **일반**(로그인 시 실행: `SMAppService.mainApp`, 상태·시스템 설정 열기, 버전, 사무실 창·미니 바로가기), **연동**(훅 상태: settings.json 등록·스크립트·서버 포트·마지막 이벤트·받은 이벤트 수, 훅 설치·다시 설치·제거(확인), 테스트 이벤트 보내기, 서버 다시 시작), **표시**(표시 수준, 동작 줄이기, 사무실 창 오른쪽 패널), **미니 사무실**(보기·자동 전환·투명도·기본 위치로), **알림**, **효과음**(§11). 직원 꾸미기는 M6 이후 (§10.4) |
 
 **상호작용**
 
 - 캐릭터에 마우스 올리기: 이름표와 현재 작업 전체 문구, 도움말 "메인1 · 더블클릭하면 앱으로 이동"(CLI면 "터미널로", 미니는 "누르면 사무실 창"도)
 - 클릭: 인스펙터에서 상세 보기 (사무실 창의 캐릭터, 세션 패널의 줄. 미니는 사무실 창을 열고 그 사람을 고름)
 - 더블클릭 (M5(7)): 그 사람이 속한 세션을 앞으로 가져오기. 데스크톱 앱 세션(미리 출근해 쉬는 세션 포함)은 Claude 데스크톱 앱에서 그 세션 화면까지(M5(7b), 아래 알림 항목), CLI 세션은 `X-Office-Term` 값으로 고른 터미널 앱. 서브에이전트는 자기가 속한 세션 기준. 사무실 창·미니·세션 패널 줄 모두 같음(§10.3). VS Code `cwd` 열기, 특정 탭까지 찾아가기(iTerm2부터)는 v2.
-- macOS **"동작 줄이기"** 설정을 따릅니다. 켜져 있으면 걷기 대신 순간이동하고, 제스처를 생략합니다.
+- macOS **"동작 줄이기"** 설정을 따릅니다. 켜져 있으면 걷기 대신 순간이동하고, 제스처를 생략합니다. 설정 → 표시에서 "시스템 설정 따르기"(기본 켬)를 끄거나 "항상 동작 줄이기"로 앱에서만 켤 수 있습니다 (M5(8), §10.4).
 
 **알림 (UNUserNotification, M5(3) 2026-11-08)**
 
@@ -882,6 +882,22 @@ M3의 신원 카드(사무실 창 오른쪽 위, Esc·✕·빈 곳 클릭으로 
 
 **구현:** 타임라인 가공은 OfficeCore의 순수 함수 `AgentTimeline.make(agent:state:journal:privacy:limit:)`가 합니다. 현황 줄의 고른 사람 흐름과 같은 묶기(`StatusLine.agentGroups`, 이어진 끝난 같은 도구)·같은 말(`StatusLine.Words.agentSegment`)을 쓰고, 줄마다 시각(묶음이면 마지막 기록이 시작한 때)과 진행 중이면 `since`를 붙입니다. 상대 시간 `AgentTimeline.ago`("방금"(5초 미만)·"12초 전"·"3분 전"·"2시간 전"·"3일 전"). 앱은 현황 줄과 같은 때(훅·선택·디렉토리·표시 수준·미리 출근) `AppModel.inspectorTimeline`을 다시 만들고, 카드의 `TimelineView`가 1초마다 상대 시간을 다시 그립니다. 이동은 `AppModel.focusAgent(_:)`(roster 줄의 `hostSession`·`term` → `focusSession`), 미니는 `focusFromMini`. 버튼·도움말 문구는 `RosterRow.focusLabel`(데스크톱 세션 "앱으로", 아는 터미널 "터미널로"). 테스트 `Tests/OfficeCoreTests/AgentTimelineTests.swift`.
 
+
+### 10.4 설정 정리 (M5(8), 2026-11-08)
+
+탭은 **일반 · 연동 · 표시 · 미니 사무실 · 알림 · 효과음** 여섯 개입니다(아이콘 + 한국어 이름). 모든 탭이 `Form` + `.formStyle(.grouped)`이고, 항목마다 제목 아래 짧은 설명(`Footnote`, `DetailToggle`), 구역 아래 설명을 답니다. 색은 시스템 색(`.secondary`, 상태 점의 green·orange·red)만 써서 밝은·어두운 모드를 따릅니다. 마지막에 본 탭은 SwiftUI가 기억합니다.
+
+- **일반:** "로그인 시 실행" 토글은 `SMAppService.mainApp.register()`/`unregister()`. 상태는 켜짐 / 꺼짐 / 승인 필요(노랑) / 등록되지 않음이고, 승인이 필요하거나 실패하면 "시스템 설정 열기"(`SMAppService.openSystemSettingsLoginItems()`). 앱이 활성화될 때마다 상태를 다시 읽습니다(시스템 설정에서 승인하고 돌아왔을 때). 로컬(ad-hoc) 서명 앱이라 macOS가 승인을 따로 요구하거나 다시 설치한 뒤 꺼질 수 있다는 한계를 설명에 적고, `/Applications` 밖에서 실행 중이면 경고합니다. "앱 정보"에는 버전(`CFBundleShortVersionString (CFBundleVersion)`), 사무실 창 열기, 미니 사무실 켜기/끄기만 둡니다.
+- **연동:** 맨 위 "훅 상태"는 한 줄 판정 + 다섯 항목(settings.json 등록, 훅 스크립트, 서버, 마지막 이벤트 "12초 전", 받은 이벤트 수(앱을 켠 뒤))이고 1초마다 다시 판정합니다. 판정은 OfficeServer의 순수 함수 `HookHealth.evaluate`(settings.json 못 읽음·서버 멈춤 = 오류, 설치 안 됨 = 안내, 스크립트 없음·실행 권한 없음·앱과 다른 버전 = "다시 설치" 권함, 이벤트 없음 = "세션을 다시 시작해야 와요"). 스크립트 상태는 `HookInstaller.scriptState()`(없음 / 실행 권한 없음 / 다른 내용 / 정상). 조작은 훅 설치·다시 설치, **제거…(확인 대화상자)**, **테스트 이벤트 보내기**, 서버 다시 시작. 포트는 앱을 켤 때 빈 포트를 골라 엔드포인트 파일에 적으므로(§4.2) 직접 고르는 칸은 두지 않고 보여 주기만 합니다.
+- **테스트 이벤트:** 예전 "연결 확인"(출근 → 퇴근 두 이벤트)을 넓혀, 설치된 훅 스크립트를 실제로 실행해 `HookTestScenario.steps`의 짧은 시나리오를 보냅니다: SessionStart → UserPromptSubmit → Read → Stop → SessionEnd (약 11초, "Claude Office 테스트" 디렉토리). 스크립트 → 엔드포인트 → 서버 → 사무실 경로를 모두 지나고, 세션 id가 `claude-office-test-`로 시작하는 알림은 `HookTestScenario.withoutTestNotices`로 걸러 띄우지 않습니다(응답 완료 알림을 켜 둬도). 다 도착하면 "연결 확인 완료!", 덜 오면 몇 개가 왔는지와 할 일을 알려 줍니다.
+- **표시:** 표시 수준(상세 / 요약 / 비공개, 항목마다 예시가 있는 설명), 동작 줄이기, 사무실 창 오른쪽 패널 보이기(사무실 창 도구 막대와 같은 `office.showStaffPanel`).
+- **미니 사무실은 따로 탭:** 표시 탭 안 구역으로 묶으면 한 탭이 표시 수준·동작 줄이기·패널·미니 네 묶음이 되어 기본 창 높이에서 스크롤이 생기고, 미니는 따로 떠 있는 창이라 설정 단위도 다릅니다. 탭을 나누면 표시 탭은 "무엇을 어떻게 보여 줄지"만, 미니 탭은 "작은 창 하나"만 다룹니다.
+- **동작 줄이기:** `MotionSettings`(OfficeCore, `display.reduceMotion.followSystem` 기본 켬, `display.reduceMotion.always` 기본 끔). 판단은 `reducesMotion(systemReduceMotion:) = always || (followSystem && 시스템)`. 시스템 값은 `NSWorkspace.accessibilityDisplayShouldReduceMotion`, 바뀌면 `accessibilityDisplayOptionsDidChangeNotification`으로 바로 다시 적용합니다. 무대는 `StageConfig.reducedMotion`: `walk`가 길을 만들지 않고 도착할 자리로 바로 옮기며(앉기·다음 지시는 그대로 이어짐, 발소리 없음), `gesture`를 버립니다(하이파이브 반짝임도). 걷는 중에 켜면 그 자리로 옮기고 제스처를 멈춥니다(`Stage.setReducedMotion`). 사무실 창·미니 두 무대에 같이 적용합니다. 종이비행기·말풍선·표정은 그대로입니다.
+- **설정 키 이전:** `SettingsMigration`(OfficeCore)이 앱을 켤 때 `settings.version`보다 새 단계만 돕니다. 1단계: `privacy` → `display.privacy`(새 키에 값이 있으면 새 값을 지킴), 쓰지 않는 `office.widenedTo1400` 삭제. 나머지 키(`mini.*`, `notify.*`, `sound.*`, `office.*`, `inspector.*`)는 그대로입니다.
+- **설정 창 앞으로:** 메뉴바 앱(LSUIElement)은 `openSettings()` 뒤 활성화가 늦게 끝나 설정 창이 다른 앱 창 뒤에 깔리기 쉽습니다. 메뉴의 "설정…"과 설정 창의 `onAppear`에서 `SettingsWindow.bringToFront()`가 앱을 활성화하고, 0·0.1·0.3·0.6초에 설정 창(`com_apple_SwiftUI_Settings_window`)을 `makeKeyAndOrderFront` + `orderFrontRegardless`로 올립니다.
+- **직원 꾸미기:** 이번 범위가 아닙니다. M6 이후 설정 탭 하나로 붙입니다(이름·외형 고정·색 바꾸기).
+- **테스트:** `Tests/OfficeCoreTests/SettingsTests.swift`(이전·동작 줄이기·테스트 시나리오), `Tests/OfficeServerTests/HookHealthTests.swift`, `Tests/OfficeStageTests/StageTests.swift`의 "무대: 동작 줄이기".
+
 ---
 
 ## 11. 효과음
@@ -959,13 +975,14 @@ claude-office/
 ├─ Sources/
 │  ├─ OfficeCore/
 │  │  ├─ Support/      JSONValue(키 순서 보존 파서), StableHash, SeededRandom
-│  │  ├─ Hooks/        HookParser, HookSettingsEditor(settings.json 병합), ClaudeVersion, AgentDefinition
+│  │  ├─ Hooks/        HookParser, HookSettingsEditor(settings.json 병합), ClaudeVersion, AgentDefinition, HookTestScenario(테스트 이벤트)
 │  │  ├─ Model/        OfficeEvent, ToolCall/ToolCatalog, Agent/Team/AgentProfile/Appearance, AppearanceAllocator(겹치지 않는 외형), OfficeState(리듀서)
 │  │  ├─ Engine/       Choreographer, Directive, OfficeEngine(진입점)
 │  │  ├─ Dialogue/     DialogueBook, PrivacyLevel, Redactor(민감 정보 가리기)
 │  │  ├─ Sound/        SoundCue/SoundGroup, SoundRecipe/SoundLibrary/SoundRenderer(합성), SoundPolicy
+│  │  ├─ Settings/     SettingsStore, SettingsMigration(설정 키 이전), MotionSettings(동작 줄이기)
 │  │  └─ Resources/    dialogue.ko.json
-│  ├─ OfficeServer/    # 로컬 훅 서버(BSD 소켓, macOS·Linux), 훅 스크립트(리소스), HookInstaller, EndpointFile
+│  ├─ OfficeServer/    # 로컬 훅 서버(BSD 소켓, macOS·Linux), 훅 스크립트(리소스), HookInstaller, EndpointFile, HookHealth(훅 상태 판정)
 │  ├─ OfficeStage/     # 배치·길찾기, 무대(연출 지시 실행·말풍선 규칙), OfficeFloor(보일 사람 고르기), MiniOffice(미니 사무실 영역·보여 줄 행), Overlay(말풍선·칩 배치), Art(그림 데이터), SVG 렌더러
 │  └─ office-sim/      # run(연출 타임라인), sounds(WAV), serve(헤드리스 서버+엔진), replay(앱으로 시나리오 전송)
 ├─ Scenarios/          # office-sim용 시나리오 (JSON Lines)
@@ -981,6 +998,7 @@ claude-office/
 │  │                   # M4: OverlayNode(말풍선·칩·아이콘), SoundPlayer, 설정 효과음 탭
 │  │                   # M5(3): Notifier(알림·DesktopAppFocuser·FocusDetector), 설정 알림 탭, 메뉴바 상태 점
 │  │                   # M5~: MiniOfficePanel
+│  │                   # M5(8): LoginItem(로그인 시 실행·SettingsWindow), 설정 일반·연동·표시·미니 탭
 │  └─ Resources/       Assets.xcassets(SVG 벡터), Fonts/GowunDodum
 ├─ scripts/
 │  ├─ capture-hook.sh              # M0: 실제 페이로드를 이벤트마다 파일로 저장
@@ -1041,8 +1059,9 @@ claude-office/
 | **M5(5)** 데스크톱 세션 미리 출근 | 앱을 켤 때·5초마다 데스크톱 앱에 열린 세션을 쉬는 중으로 조용히 앉힘, 훅이 오면 같은 캐릭터, 보관하면 퇴근 (§5.2) | 단위 테스트(`ResidentTests`, `DesktopResidentTests`, `ResidentStageTests`). 맥 화면 확인은 사용자 몫 |
 | **M5(6)** 겹치지 않는 외형 | 사무실 안 사람끼리 머리 모양·머리색·상의색·소품 중 2군데 이상 다른 얼굴 (§9.4) | 단위 테스트(`AppearanceAllocatorTests`), 스냅숏. 맥 화면 확인은 사용자 몫 |
 | **M5(7)** 인스펙터와 더블클릭 이동 | 신원 카드를 인스펙터로 넓힘(소속·서브 목록, 최근 일 타임라인, [앱으로]/[터미널로]), 사무실 창·미니·세션 패널에서 캐릭터 더블클릭 → 그 세션의 앱·터미널, 마우스 올리면 도움말 (§10.3) | 단위 테스트(`AgentTimelineTests`). 맥 화면 확인은 사용자 몫 |
-| **M5** 편의 (남은 것) | 설정 정리(로그인 시 실행, 훅 상태, 표시 수준) | 하루 동안 실사용 |
-| **M6** 다듬기 | 야간 모드, 성능 목표 달성, 접근성, `make install` 배포 | §8.3 목표 충족 |
+| **M5(8)** 설정 정리 | 일반 탭(로그인 시 실행, 앱 정보), 연동 탭 훅 상태·테스트 이벤트(가짜 세션, 알림 없음)·제거 확인, 표시 탭(표시 수준·동작 줄이기·오른쪽 패널), 미니 사무실 탭, 동작 줄이기(순간이동·제스처 생략), 설정 키 이전, 설정 창 앞으로 (§10.4) | 단위 테스트(`SettingsTests`, `HookHealthTests`, 동작 줄이기 무대 테스트). 맥 화면 확인은 사용자 몫 |
+| **M5** ✅ 편의 | M5(1)~M5(8) | 하루 동안 실사용 |
+| **M6** 다듬기 | 야간 모드, 성능 목표 달성, 접근성, `make install` 배포, 직원 꾸미기(설정 탭) | §8.3 목표 충족 |
 
 ---
 
@@ -1110,3 +1129,4 @@ claude-office/
 | 2026-11-08 | 겹치지 않는 외형 (M5(6)) | 해시 외형은 1순위 후보, 지금 사무실(모든 디렉토리·쉬는 사람 포함)의 모든 사람과 머리 모양·머리색·상의색·소품 중 2군데 이상 다르게(피부색은 안 셈). 겹치면 키로 섞은 순서에서 첫 조합, 바닥나면 1군데 다름 → 가장 덜 겹침. 이미 있는 사람은 그대로, 다시 오면 1순위. 같은 종류의 직접 만든 에이전트가 동시에 와도 얼굴이 다름. 목소리도 행 안에서 되도록 다르게 (§9.4) |
 | 2026-11-08 | 현황 줄 디렉토리 이름 (M5(7a)) | 드롭다운이 "모두"일 때 사무실 줄은 디렉토리가 바뀌는 항목마다, 고른 사람 줄은 맨 앞에 폴더 이름(16자 넘으면 줄임). 디렉토리를 하나 골랐으면 중복이라 생략. 표시 수준과 상관없이 보임(패널·드롭다운과 같은 기준) (§10.2) |
 | 2026-11-08 | 인스펙터·더블클릭 (M5(7)) | 따로 인스펙터 창을 두지 않고 사무실 창 오른쪽 위 신원 카드를 넓힘(기본은 간결, 타임라인은 최근 3줄 → "모두 보기"로 15줄, 넘치면 카드 스크롤). 타임라인은 현황 줄과 같은 묶기·표시 수준. 더블클릭은 사무실 창·세션 패널에서는 첫 클릭 고르기 + 두 번째 클릭 이동, **미니는 캐릭터 클릭을 더블클릭 간격(최대 0.4초)만큼 미뤄** 한 번이면 사무실 창 열기, 두 번이면 미니를 그대로 두고 앱·터미널로. 데스크톱 세션은 처음엔 앱 활성화까지만이었다가 화면 확인 뒤 `claude://code/continue?session=` 딥링크로 세션 화면까지 엶(M5(7b)). 화면 확인 뒤 카드 배경을 반투명 재질 → 창 배경색으로, 소제목 글자를 더 진하게 (§10.3) |
+| 2026-11-08 | 설정 정리 (M5(8)) | 탭: 일반(로그인 시 실행 `SMAppService.mainApp`, ad-hoc 서명 한계는 설명으로) · 연동(훅 상태 판정 `HookHealth`, 테스트 이벤트는 실제 훅 스크립트로 가짜 세션 출근 → 퇴근, 알림은 거름, 제거는 확인 대화상자) · 표시 · **미니 사무실(표시 탭에서 분리: 한 탭이 길어지고 따로 뜬 창의 설정이라)** · 알림 · 효과음. 동작 줄이기는 시스템 따르기(기본) + 앱에서 항상 켜기, 켜면 순간이동·제스처 생략. 키 `privacy` → `display.privacy` 이전(`settings.version`). 포트는 고르지 않고 보여 주기만(엔드포인트 파일이 알려 줌). 직원 꾸미기는 M6 이후 (§10.4) |
