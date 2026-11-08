@@ -50,7 +50,7 @@ struct MenuContentView: View {
         HStack(alignment: .firstTextBaseline) {
             Text("사무실 현황").font(.headline)
             Spacer()
-            Text("팀 \(model.roster.teams.count) · 직원 \(model.roster.agentCount)")
+            Text("방 \(model.roster.teams.count) · 직원 \(model.roster.agentCount)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -180,7 +180,9 @@ struct RosterRowView: View {
     private func subtitle(now: Date) -> String {
         var parts: [String] = []
         if highlight { parts.append(row.teamName) }
+        if let lead = row.partLead, row.part > 0 { parts.append("\(lead) 파트") }
         if let detail = row.detail { parts.append(detail) }
+        if parts.isEmpty, let title = row.sessionTitle { parts.append(title) }
         let minutes = Int(now.timeIntervalSince(row.since) / 60)
         if minutes >= 1, row.status == .waitingForInput || row.status == .idle || row.status == .waitingForPermission {
             parts.append("\(row.status.label) \(minutes)분")

@@ -84,6 +84,7 @@ public struct StageEffect: Hashable, Sendable, Identifiable {
 /// 렌더러에 알릴 일회성 사건
 public enum StageEvent: Hashable, Sendable {
     case teamOpened(Team)
+    case teamClosed(TeamID)
     case spawned(AgentID)
     case despawned(AgentID)
     case sound(SoundCue, AgentID?)
@@ -133,6 +134,10 @@ public struct Stage: Sendable {
     private var signals: Set<String> = []
     private var reservations: [String: AgentID] = [:]
     private var events: [StageEvent] = []
+    /// 닫으라는 지시를 받았지만 아직 직원이 문을 나가는 중인 방
+    private var closingTeams: Set<TeamID> = []
+    /// 방이 닫혀 맨 아래 줄이 비었을 수 있음 → 아래 구역에 아무도 없을 때 사무실을 줄입니다
+    private var compactionPending = false
 
     private enum Block: Hashable, Sendable {
         case walking
@@ -210,6 +215,7 @@ public struct Stage: Sendable {
         settleSignals()
         promoteQueuedBubbles()
         effects.removeAll { time >= $0.startedAt + $0.duration }
+        if compactionPending { compactLayoutIfPossible() }
     }
 
     // MARK: - 실행
@@ -232,16 +238,23 @@ public struct Stage: Sendable {
         }
         guard actors[id] != nil else { return }  // 등장 전이거나 퇴장한 직원의 지시는 버립니다
         switch action {
-        case .spawn, .openTeam, .clearQueue:
+        case .spawn, .openTeam, .closeTeam, .clearQueue:
             break
+        case .refresh(let agent):
+            let previous = actors[id]!.agent
+            actors[id]!.agent = agent
+            removePlate(of: previous)
+            setPlate(of: agent)
         case .despawn:
             release(id)
-            let team = actors[id]!.agent.teamID
+            let agent = actors[id]!.agent
             actors[id] = nil
-            promoteQueuedBubbles(in: team)
+            removePlate(of: agent)
+            promoteQueuedBubbles(in: agent.teamID)
             blocks[id] = nil
             queues[id] = nil
             events.append(.despawned(id))
+            finishClosingTeams()
         case .walk(let spot):
             walk(id, to: spot)
         case .sit:
@@ -300,12 +313,21 @@ public struct Stage: Sendable {
     private mutating func performGlobal(_ action: Directive.Action) {
         switch action {
         case .openTeam(let team):
+            closingTeams.remove(team.id)
+            // 같은 섬을 쓰던 방이 아직 닫히는 중이면 지금 비웁니다 (남은 직원은 그대로 문으로 나갑니다)
+            for other in closingTeams where teams[other]?.island == team.island {
+                closeNow(other)
+            }
             teams[team.id] = team
             if team.island >= layout.islandCount {
                 layout.ensureIsland(team.island)
                 pathfinder = Pathfinder(layout: layout)
             }
             events.append(.teamOpened(team))
+        case .closeTeam(let id):
+            guard teams[id] != nil else { break }
+            closingTeams.insert(id)
+            finishClosingTeams()
         case .effect(let effect):
             addEffect(effect)
             events.append(.effect(effect))
@@ -322,12 +344,65 @@ public struct Stage: Sendable {
         actors[agent.id] = StageActor(id: agent.id, agent: agent, position: place.final, place: place)
         reserve(place, for: agent.id)
         blocks[agent.id] = nil
-        if agent.role == .lead, agent.seat == 0 {
-            nameplates[agent.teamID, default: [:]][0] = "★ 팀장"
-        } else if agent.profile.kind == .fixed, let key = agent.profile.agentType {
-            nameplates[agent.teamID, default: [:]][agent.seat] = key
-        }
+        setPlate(of: agent)
         events.append(.spawned(agent.id))
+    }
+
+    // MARK: - 명패와 방 닫기
+
+    /// 팀장석은 "★ 팀장", 파트장은 직함, 고정 직원은 종류 이름
+    private static func plate(for agent: Agent) -> String? {
+        if agent.role == .lead { return agent.seat == 0 ? "★ 팀장" : agent.title.label }
+        if agent.profile.kind == .fixed, let key = agent.profile.agentType { return key }
+        return nil
+    }
+
+    private mutating func setPlate(of agent: Agent) {
+        guard let plate = Self.plate(for: agent) else { return }
+        nameplates[agent.teamID, default: [:]][agent.seat] = plate
+    }
+
+    /// 파트장 명패는 자리를 떠나면 뗍니다. 팀장석과 고정 직원의 지정석 명패는 남깁니다.
+    private mutating func removePlate(of agent: Agent) {
+        guard agent.role == .lead, agent.seat != 0, let plate = Self.plate(for: agent),
+            nameplates[agent.teamID]?[agent.seat] == plate
+        else { return }
+        nameplates[agent.teamID]?[agent.seat] = nil
+    }
+
+    /// 닫히는 방 중 남은 직원이 모두 나간 방을 비웁니다.
+    private mutating func finishClosingTeams() {
+        for id in closingTeams.sorted() where !actors.values.contains(where: { $0.agent.teamID == id }) {
+            closeNow(id)
+        }
+    }
+
+    private mutating func closeNow(_ id: TeamID) {
+        closingTeams.remove(id)
+        guard teams.removeValue(forKey: id) != nil else { return }
+        nameplates[id] = nil
+        events.append(.teamClosed(id))
+        compactionPending = true
+        compactLayoutIfPossible()
+    }
+
+    /// 맨 아래 줄의 섬이 모두 비었으면 사무실을 줄입니다. 아래쪽(리서치 코너·휴게실)이 함께 올라오므로
+    /// 그 근처에 서 있거나 지나가는 직원이 없을 때만 합니다.
+    private mutating func compactLayoutIfPossible() {
+        let needed = (teams.values.map(\.island).max() ?? 0) + 1
+        let target = OfficeLayout(islandCount: needed)
+        guard target.rows < layout.rows else {
+            compactionPending = false
+            return
+        }
+        let limit = target.lastDeskY + 120
+        let busy = actors.values.contains { actor in
+            actor.position.y > limit || (actor.place?.final.y ?? 0) > limit || actor.path.contains { $0.y > limit }
+        }
+        guard !busy else { return }
+        layout = target
+        pathfinder = Pathfinder(layout: layout)
+        compactionPending = false
     }
 
     private mutating func walk(_ id: AgentID, to spot: Spot) {

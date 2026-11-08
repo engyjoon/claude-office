@@ -7,6 +7,8 @@
 # - 백그라운드로 보내지 않습니다. Claude Code는 훅이 끝나면 프로세스 그룹을 정리하므로
 #   백그라운드 curl은 보내기 전에 종료될 수 있습니다 (M2 첫 실행에서 확인).
 # - 앱이 실행될 때마다 endpoint 파일에 "포트 토큰"을 기록합니다.
+# - Claude 데스크톱 앱 세션이면 그 세션 id(CLAUDE_CODE_HOST_SESSION_ID)를 함께 보냅니다.
+#   앱은 이 id로 데스크톱 앱의 세션 정보(부모 세션, 제목)를 읽어 방과 직함을 정합니다 (설계서 §4.4).
 ENDPOINT_FILE="${CLAUDE_OFFICE_ENDPOINT:-$HOME/Library/Application Support/ClaudeOffice/endpoint}"
 if [ ! -r "$ENDPOINT_FILE" ]; then
   cat >/dev/null
@@ -17,5 +19,6 @@ curl -s --connect-timeout 0.3 -m 1 -X POST \
   -H "Content-Type: application/json" \
   -H "X-Office-Token: $TOKEN" \
   -H "X-Office-Term: ${TERM_PROGRAM:-unknown}" \
+  -H "X-Office-Host-Session: ${CLAUDE_CODE_HOST_SESSION_ID:-}" \
   --data-binary @- "http://127.0.0.1:$PORT/v1/hook" >/dev/null 2>&1
 exit 0

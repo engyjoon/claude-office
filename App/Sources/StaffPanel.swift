@@ -105,6 +105,8 @@ private struct StaffRow: View {
 
     private func subtitle(now: Date) -> String {
         var parts: [String] = []
+        if let title = row.sessionTitle { parts.append(title) }
+        if let lead = row.partLead, row.part > 0 { parts.append("\(lead) 파트") }
         if let detail = row.detail { parts.append(detail) }
         if let elapsed = AgentCard.elapsed(since: row.since, now: now) { parts.append(elapsed) }
         if parts.isEmpty {

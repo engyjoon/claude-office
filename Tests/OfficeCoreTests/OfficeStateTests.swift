@@ -41,14 +41,14 @@ struct OfficeStateTests {
         }
     }
 
-    @Test("같은 폴더의 두 번째 세션은 같은 팀의 공동 팀장이 된다")
+    @Test("같은 폴더의 두 번째 세션은 같은 방의 파트장이 된다")
     func coLead() {
         var state = OfficeState()
         _ = apply(&state, Hook(session: "s1").make("SessionStart"))
         let beats = apply(&state, Hook(session: "s2").make("SessionStart"))
         #expect(state.teams.count == 1)
         guard case .arrived(let second) = beats.first else { Issue.record("\(beats)"); return }
-        #expect(second.profile.displayName == "팀장 2")
+        #expect(second.displayName == "파트장")
         #expect(second.seat != 0)
         _ = apply(&state, Hook(session: "s3", cwd: "/Users/demo/work/other").make("SessionStart"))
         #expect(state.sortedTeams.map(\.island) == [0, 1])
@@ -172,17 +172,21 @@ struct OfficeStateTests {
         #expect(state.lead(of: SessionID("s1"))?.consecutiveErrors == 0)
     }
 
-    @Test("세션 종료: 팀원 먼저, 팀장 마지막으로 퇴근한다")
+    @Test("세션 종료: 팀원 먼저, 팀장 마지막으로 퇴근하고, 빈 방은 닫힌다")
     func sessionEnd() {
         var state = OfficeState()
         _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "code-reviewer"]))
         let beats = apply(&state, hook.make("SessionEnd", ["reason": "exit"]))
-        #expect(beats.count == 2)
-        guard case .left(let first) = beats[0], case .left(let last) = beats[1] else { Issue.record("\(beats)"); return }
+        #expect(beats.count == 3)
+        guard case .left(let first) = beats[0], case .left(let last) = beats[1], case .teamClosed(let team) = beats[2] else {
+            Issue.record("\(beats)")
+            return
+        }
         #expect(first.role == .member)
         #expect(last.role == .lead)
+        #expect(team.name == "a-sdn-portal")
         #expect(state.agents.isEmpty)
-        #expect(state.teams.count == 1)  // 책상 섬과 명패는 남습니다
+        #expect(state.teams.isEmpty)  // 사람이 모두 떠난 방은 섬과 함께 정리합니다 (M4.5a)
     }
 }
 

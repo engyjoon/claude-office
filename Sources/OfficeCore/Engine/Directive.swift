@@ -94,11 +94,15 @@ public enum Effect: Hashable, Sendable {
 /// - `walk`는 도착할 때까지, `wait`는 그 시간만큼 다음 지시를 막습니다.
 /// - `signal`/`await`로 두 직원의 대기열을 맞춥니다 (보고하러 온 팀원이 도착한 뒤 팀장이 하이파이브).
 /// - `clearQueue`는 아직 실행하지 않은 지시를 버립니다 (승인 대기처럼 급한 일).
-/// - `agent`가 nil인 지시(팀 열기, 효과, 전역 효과음)는 즉시 실행합니다.
+/// - `agent`가 nil인 지시(팀 열기·닫기, 효과, 전역 효과음)는 즉시 실행합니다.
 public struct Directive: Hashable, Sendable, CustomStringConvertible {
     public enum Action: Hashable, Sendable {
         case openTeam(Team)
+        /// 사람이 모두 떠난 방을 닫습니다. 씬은 남은 직원이 문을 나간 뒤 섬을 비웁니다.
+        case closeTeam(TeamID)
         case spawn(Agent, at: Spot)
+        /// 직원 정보(직함·좌석)를 새로 고칩니다. 명패도 바뀝니다.
+        case refresh(Agent)
         case despawn
         case clearQueue
         case walk(to: Spot)
@@ -132,7 +136,9 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         let what: String
         switch action {
         case .openTeam(let team): what = "팀 열기 \(team.name) (섬 \(team.island))"
-        case .spawn(let agent, let spot): what = "등장 \(agent.profile.displayName) @\(spot)"
+        case .closeTeam(let team): what = "팀 닫기 \(team.raw.split(separator: "/").last ?? "")"
+        case .spawn(let agent, let spot): what = "등장 \(agent.displayName) @\(spot)"
+        case .refresh(let agent): what = "정보 갱신 \(agent.displayName) (자리 \(agent.seat))"
         case .despawn: what = "퇴장"
         case .clearQueue: what = "대기열 비우기"
         case .walk(let spot): what = "걷기 → \(spot)"

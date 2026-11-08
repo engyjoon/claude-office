@@ -48,6 +48,8 @@ final class AppModel {
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     let installer = HookInstaller()
     let endpointURL = EndpointFile.defaultURL()
+    /// 데스크톱 앱 세션 정보 (방·직함 힌트, 설계서 §4.4)
+    let desktopSessions = DesktopSessionDirectory()
     /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
     let stageStore = StageStore()
     let officeScene: OfficeScene
@@ -83,9 +85,12 @@ final class AppModel {
     func startServer() {
         server?.stop()
         let token = HookRequestPolicy.makeToken()
+        let directory = desktopSessions
         let server = HookServer(token: token) { [weak self] delivery in
+            // 정보 파일은 전달 큐(백그라운드)에서 읽고, 메인 액터에는 결과만 넘깁니다
+            let hint = delivery.hostSession.flatMap { directory.hint(forHostSession: $0) }
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.receive(delivery) }
+                MainActor.assumeIsolated { self?.receive(delivery, hint: hint) }
             }
         }
         do {
@@ -143,11 +148,11 @@ final class AppModel {
         }
     }
 
-    private func receive(_ delivery: HookDelivery) {
+    private func receive(_ delivery: HookDelivery, hint: SessionHint?) {
         receivedHooks += 1
         do {
-            let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, at: delivery.receivedAt)
-            append(.hook, Self.summary(of: delivery))
+            let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, hint: hint, at: delivery.receivedAt)
+            append(.hook, Self.summary(of: delivery, hint: hint))
             record(directives)
         } catch {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
@@ -288,13 +293,18 @@ final class AppModel {
         }
     }
 
-    private static func summary(of delivery: HookDelivery) -> String {
+    private static func summary(of delivery: HookDelivery, hint: SessionHint?) -> String {
         guard let payload = try? JSONValue.parse(delivery.body) else { return "훅" }
         var parts = [payload["hook_event_name"]?.stringValue ?? "?"]
         if let tool = payload["tool_name"]?.stringValue { parts.append(tool) }
         if let type = payload["agent_type"]?.stringValue, !type.isEmpty { parts.append("[\(type)]") }
         if let cwd = payload["cwd"]?.stringValue { parts.append("· \((cwd as NSString).lastPathComponent)") }
         if let term = delivery.term { parts.append("· \(term)") }
+        if let hint {
+            parts.append(hint.ancestors.isEmpty ? "· 데스크톱 메인" : "· 데스크톱 하위(\(hint.ancestors.count)단계)")
+        } else if delivery.hostSession != nil {
+            parts.append("· 데스크톱 정보 없음")
+        }
         return parts.joined(separator: " ")
     }
 }

@@ -88,11 +88,12 @@ public struct AgentProfile: Hashable, Sendable {
         "claude-code-guide", "claude", "fork", "web-fetch",
     ]
 
-    static func lead(teamName: String, index: Int) -> AgentProfile {
-        let key = index == 0 ? "lead@\(teamName)" : "lead@\(teamName)#\(index + 1)"
+    /// 세션 직원(팀장·파트장)의 프로필. 외형은 방과 출근 순번으로 정해지고, 승진해도 바뀌지 않습니다.
+    static func lead(roomName: String, number: Int) -> AgentProfile {
+        let key = number == 0 ? "lead@\(roomName)" : "part@\(roomName)#\(number)"
         return AgentProfile(
             key: key,
-            displayName: index == 0 ? "팀장" : "팀장 \(index + 1)",
+            displayName: JobTitle.lead(number: number, partLeadCount: 1).label,
             kind: .lead,
             agentType: nil,
             appearance: .make(key: key, kind: .lead)
@@ -107,6 +108,28 @@ public struct AgentProfile: Hashable, Sendable {
         }
         let name = duplicateIndex == 0 ? type : "\(type) (\(duplicateIndex + 1))"
         return AgentProfile(key: type, displayName: name, kind: .fixed, agentType: type, appearance: .make(key: type, kind: .fixed))
+    }
+}
+
+/// 방 안의 직함 (설계서 §1.3 ②). 메인 세션 = 팀장, 같은 방의 다른 세션 = 파트장, 서브에이전트 = 파트원.
+public enum JobTitle: Hashable, Sendable {
+    case teamLead
+    /// 파트장 번호. 방에 파트장이 한 명뿐이면 nil ("파트장")
+    case partLead(Int?)
+    case member
+
+    /// 파트 번호(0 = 팀장)와 방의 파트장 수로 직함을 정합니다.
+    static func lead(number: Int, partLeadCount: Int) -> JobTitle {
+        if number == 0 { return .teamLead }
+        return .partLead(partLeadCount > 1 ? number : nil)
+    }
+
+    public var label: String {
+        switch self {
+        case .teamLead: "팀장"
+        case .partLead(let number): number.map { "파트장\($0)" } ?? "파트장"
+        case .member: "파트원"
+        }
     }
 }
 
@@ -127,8 +150,13 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public let id: AgentID
     public let role: Role
     public let profile: AgentProfile
+    /// 방 (설계서 §1.3 ②). 이름은 예전 그대로 팀이라고 부릅니다.
     public let teamID: TeamID
     public let session: SessionID
+    /// 이 직원이 속한 파트 번호 (자기 세션의 파트). 0 = 팀장 파트, 1… = 파트장 번호
+    public internal(set) var part: Int
+    /// 직함. 팀장·파트장은 승진하거나 파트장 수가 바뀌면 달라집니다.
+    public internal(set) var title: JobTitle
     public internal(set) var seat: Int
     /// 훅의 `agent_id`. 아직 SubagentStart를 못 받았으면 nil.
     public internal(set) var subagentID: String?
@@ -145,6 +173,11 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var consecutiveErrors: Int
     public internal(set) var term: String?
     let serial: Int
+
+    /// 화면에 보이는 이름: 팀장·파트장은 직함, 파트원은 에이전트 종류
+    public var displayName: String {
+        role == .lead ? title.label : profile.displayName
+    }
 }
 
 public struct TeamID: Hashable, Sendable, Comparable, CustomStringConvertible {
@@ -154,18 +187,54 @@ public struct TeamID: Hashable, Sendable, Comparable, CustomStringConvertible {
     public static func < (lhs: TeamID, rhs: TeamID) -> Bool { lhs.raw < rhs.raw }
 }
 
-/// 프로젝트(cwd) 하나 = 팀 하나 = 사무실의 책상 섬 하나 (설계서 §1.3 ②)
+/// 방 하나 = 사무실의 책상 섬 하나 (설계서 §1.3 ②, §5).
+///
+/// 방은 메인 세션(팀장) 단위입니다. 데스크톱 앱 정보로 부모를 알면 부모의 방에, 모르면 같은 폴더의 방에 들어갑니다.
+/// 워크트리(`…/.claude/worktrees/<이름>`)는 원래 폴더로 합칩니다. 코드에서는 예전 이름 그대로 `Team`이라고 부릅니다.
 public struct Team: Identifiable, Hashable, Sendable {
     public static let colorCount = 4
     public static let minimumSeats = 3
 
     public let id: TeamID
     public let name: String
-    /// 사무실 안 책상 섬의 순서 (0부터)
+    /// 사무실 안 책상 섬의 순서 (0부터). 방이 닫히면 다음 방이 그 섬을 다시 씁니다.
     public let island: Int
     public let colorIndex: Int
     /// 좌석 수. 0번은 팀장석. 사람이 늘면 늘어납니다.
     public internal(set) var seatCount: Int
     /// 고정 직원의 지정석 (프로필 키 → 좌석 번호). 퇴근해도 명패가 남습니다.
     public internal(set) var reservedSeats: [String: Int]
+
+    /// 워크트리 표시. `…/proj/.claude/worktrees/<이름>/…`는 `…/proj/…`로 합칩니다.
+    public static let worktreeMarker = "/.claude/worktrees/"
+
+    /// 방을 정하는 폴더: 끝의 `/`를 떼고, 워크트리는 원래 폴더로 합칩니다.
+    public static func folder(for cwd: String?) -> String {
+        var path = (cwd?.isEmpty == false ? cwd! : "(알 수 없는 프로젝트)")
+        if let range = path.range(of: worktreeMarker), range.lowerBound > path.startIndex {
+            let rest = path[range.upperBound...]
+            // 워크트리 이름 다음의 하위 경로는 원래 폴더 아래에 그대로 붙입니다
+            let tail = rest.firstIndex(of: "/").map { String(rest[$0...]) } ?? ""
+            path = String(path[..<range.lowerBound]) + tail
+        }
+        while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+        return path
+    }
+}
+
+/// 방 안의 파트 = 세션 하나 (설계서 §5). 팀장의 파트(0번)와 파트장들의 파트(1번~).
+/// 파트원(서브에이전트)은 자기를 부른 세션의 파트에 속합니다.
+public struct Part: Hashable, Sendable {
+    public let session: SessionID
+    public let teamID: TeamID
+    /// 0 = 팀장 파트, 1… = 파트장 번호 (출근 때 정해 고정, 빈 번호 재사용)
+    public internal(set) var number: Int
+    /// 방에 들어온 순서. 팀장이 퇴근하면 가장 먼저 온 파트장이 승진합니다.
+    public let order: Int
+    /// 세션 직원(팀장·파트장)
+    public internal(set) var lead: AgentID
+    /// 데스크톱 앱이 알려 준 조상 세션 (가까운 부모부터)
+    public internal(set) var ancestors: [SessionID]
+    /// 데스크톱 앱의 세션 제목
+    public internal(set) var title: String?
 }

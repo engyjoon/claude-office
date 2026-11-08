@@ -45,8 +45,17 @@ struct HookRequestPolicyTests {
 
     @Test("정상 요청은 받고 TERM_PROGRAM을 넘긴다")
     func accept() {
-        #expect(policy.evaluate(make()) == .accept(body: Data("{}".utf8), term: "iTerm.app"))
-        #expect(policy.evaluate(make(headers: ["x-office-term": "unknown"])) == .accept(body: Data("{}".utf8), term: nil))
+        #expect(policy.evaluate(make()) == .accept(body: Data("{}".utf8), term: "iTerm.app", hostSession: nil))
+        #expect(policy.evaluate(make(headers: ["x-office-term": "unknown"])) == .accept(body: Data("{}".utf8), term: nil, hostSession: nil))
+    }
+
+    @Test("데스크톱 세션 id 헤더는 형식이 맞을 때만 넘긴다 (파일 경로에 쓰므로)")
+    func hostSessionHeader() {
+        let id = "local_46e4d935-07fb-4ab0-a5e7-b1fbf04c1416"
+        #expect(policy.evaluate(make(headers: ["x-office-host-session": id])) == .accept(body: Data("{}".utf8), term: "iTerm.app", hostSession: id))
+        for bad in ["local_../../etc/passwd", "local_", "abc", "local_a/b", "local_가나", String(repeating: "local_a", count: 20)] {
+            #expect(policy.evaluate(make(headers: ["x-office-host-session": bad])) == .accept(body: Data("{}".utf8), term: "iTerm.app", hostSession: nil))
+        }
     }
 
     @Test(
@@ -190,6 +199,7 @@ struct HookServerTests {
         var environment = ProcessInfo.processInfo.environment
         environment["CLAUDE_OFFICE_ENDPOINT"] = endpoint.path
         environment["TERM_PROGRAM"] = "iTerm.app"
+        environment["CLAUDE_CODE_HOST_SESSION_ID"] = "local_1234abcd-0000"
         let payload = #"{"session_id":"s1","cwd":"/w/a-sdn-portal","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_use_id":"t1"}"#
         let started = Date()
         let result = try run("/bin/sh", [script.path], stdin: payload, environment: environment)
@@ -199,6 +209,13 @@ struct HookServerTests {
 
         let delivered = try #require(await inbox.wait(for: 1).first)
         #expect(delivered.term == "iTerm.app")
+        #expect(delivered.hostSession == "local_1234abcd-0000")
+
+        // 데스크톱 앱 밖(터미널)에서는 헤더가 비어 있습니다
+        environment["CLAUDE_CODE_HOST_SESSION_ID"] = nil
+        _ = try run("/bin/sh", [script.path], stdin: payload, environment: environment)
+        let second = await inbox.wait(for: 2)
+        #expect(second.count == 2 && second[1].hostSession == nil)
         var engine = OfficeEngine(seed: 1)
         let directives = try engine.handle(hookPayload: delivered.body, term: delivered.term, at: delivered.receivedAt)
         #expect(directives.contains { if case .status(let pill) = $0.action { pill?.text == "Bash · npm test" } else { false } })
@@ -293,7 +310,13 @@ struct InstallerTests {
         let settings = try JSONValue.parse(Data(contentsOf: installer.settingsURL))
         #expect(settings["hooks"]?["Stop"]?.arrayValue?.count == 2)
 
-        // 스크립트가 바뀌면 상태가 알려줍니다
+        // 스크립트가 바뀌면 상태가 알려줍니다 (M4.5a: 데스크톱 세션 헤더가 없는 예전 스크립트도)
+        #expect(HookInstaller.bundledScript.contains("X-Office-Host-Session: ${CLAUDE_CODE_HOST_SESSION_ID:-}"))
+        let previous = HookInstaller.bundledScript.replacingOccurrences(
+            of: "  -H \"X-Office-Host-Session: ${CLAUDE_CODE_HOST_SESSION_ID:-}\" \\\n", with: "")
+        #expect(previous != HookInstaller.bundledScript)
+        try previous.write(to: installer.scriptURL, atomically: true, encoding: .utf8)
+        guard case .scriptMissingOrOutdated = installer.status() else { Issue.record("예전 스크립트를 감지하지 못함"); return }
         try "#!/bin/sh\n".write(to: installer.scriptURL, atomically: true, encoding: .utf8)
         guard case .scriptMissingOrOutdated = installer.status() else { Issue.record("오래된 스크립트를 감지하지 못함"); return }
 

@@ -28,8 +28,10 @@ public struct OfficeEngine: Sendable {
     }
 
     /// 파싱할 수 없거나 무시하는 이벤트면 빈 배열을 돌려줍니다.
-    public mutating func handle(hookPayload data: Data, term: String? = nil, at now: Date) throws -> [Directive] {
-        guard let event = try HookParser.parse(data, term: term, receivedAt: now) else { return [] }
+    /// `hint`는 앱이 데스크톱 세션 정보로 만든 방 힌트입니다 (없으면 폴더 규칙).
+    public mutating func handle(hookPayload data: Data, term: String? = nil, hint: SessionHint? = nil, at now: Date) throws -> [Directive] {
+        guard var event = try HookParser.parse(data, term: term, receivedAt: now) else { return [] }
+        event.hint = hint
         return handle(event)
     }
 

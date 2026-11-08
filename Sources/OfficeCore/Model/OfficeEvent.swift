@@ -28,6 +28,28 @@ public enum ToolOutcome: Hashable, Sendable {
     }
 }
 
+/// 세션이 어느 방에 속하는지 알려 주는 힌트 (설계서 §4.4).
+///
+/// 훅 페이로드에는 부모 세션 정보가 없어서, 앱이 Claude 데스크톱 앱의 세션 정보 파일을 읽어 만듭니다.
+/// 코어는 파일을 모르고 이 값만 받습니다. 없으면 "같은 폴더에 먼저 온 세션이 팀장" 규칙을 씁니다.
+public struct SessionHint: Hashable, Sendable {
+    /// 데스크톱 앱 세션 id (`local_…`)
+    public var hostSession: String?
+    /// 이 세션을 띄운 세션들의 훅 `session_id`. 가까운 부모부터 최상위(메인 세션)까지.
+    public var ancestors: [SessionID]
+    /// 최상위 세션의 폴더. 이 폴더로 방을 정합니다.
+    public var rootCwd: String?
+    /// 데스크톱 앱이 붙인 세션 제목
+    public var title: String?
+
+    public init(hostSession: String? = nil, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil) {
+        self.hostSession = hostSession
+        self.ancestors = ancestors
+        self.rootCwd = rootCwd
+        self.title = title
+    }
+}
+
 /// 훅 페이로드를 정규화한 이벤트. `HookParser`의 출력이자 `OfficeState`의 입력입니다.
 public struct OfficeEvent: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
@@ -57,8 +79,14 @@ public struct OfficeEvent: Hashable, Sendable {
     public var term: String?
     public var at: Date
     public var kind: Kind
+    /// 앱이 붙인 방 힌트 (데스크톱 세션 정보). 없으면 nil.
+    public var hint: SessionHint?
 
-    public init(session: SessionID, cwd: String?, subagent: SubagentRef? = nil, term: String? = nil, at: Date, kind: Kind) {
+    public init(
+        session: SessionID, cwd: String?, subagent: SubagentRef? = nil, term: String? = nil, at: Date, kind: Kind,
+        hint: SessionHint? = nil
+    ) {
+        self.hint = hint
         self.session = session
         self.cwd = cwd
         self.subagent = subagent

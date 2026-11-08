@@ -76,11 +76,14 @@ public struct HookDelivery: Hashable, Sendable {
     public let body: Data
     /// 훅 스크립트가 보낸 TERM_PROGRAM
     public let term: String?
+    /// 훅 스크립트가 보낸 데스크톱 앱 세션 id (`CLAUDE_CODE_HOST_SESSION_ID`, `local_…`). 형식이 맞을 때만.
+    public let hostSession: String?
     public let receivedAt: Date
 
-    public init(body: Data, term: String?, receivedAt: Date) {
+    public init(body: Data, term: String?, hostSession: String? = nil, receivedAt: Date) {
         self.body = body
         self.term = term
+        self.hostSession = hostSession
         self.receivedAt = receivedAt
     }
 }
@@ -88,7 +91,7 @@ public struct HookDelivery: Hashable, Sendable {
 /// 로컬 훅 서버의 요청 검증 규칙 (설계서 §12.1)
 public struct HookRequestPolicy: Sendable {
     public enum Decision: Hashable, Sendable {
-        case accept(body: Data, term: String?)
+        case accept(body: Data, term: String?, hostSession: String?)
         case reject(status: Int, reason: String)
     }
 
@@ -113,7 +116,14 @@ public struct HookRequestPolicy: Sendable {
         }
         guard !request.body.isEmpty else { return .reject(status: 400, reason: "본문이 비어 있습니다") }
         let term = request.headers["x-office-term"].flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
-        return .accept(body: request.body, term: term)
+        let host = request.headers["x-office-host-session"].flatMap { Self.isHostSessionID($0) ? $0 : nil }
+        return .accept(body: request.body, term: term, hostSession: host)
+    }
+
+    /// 데스크톱 앱 세션 id 형식 (`local_` + 영숫자·하이픈). 파일 경로에 쓰므로 그 밖의 값은 버립니다.
+    public static func isHostSessionID(_ value: String) -> Bool {
+        guard value.hasPrefix("local_"), value.count > 6, value.count <= 80 else { return false }
+        return value.dropFirst(6).allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }
     }
 
     static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {

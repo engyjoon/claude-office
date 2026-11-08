@@ -66,8 +66,16 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
 
 public struct RosterRow: Identifiable, Hashable, Sendable {
     public let id: AgentID
+    /// 팀장·파트장은 직함("팀장", "파트장1"), 파트원은 에이전트 종류
     public let name: String
     public let role: Role
+    public let title: JobTitle
+    /// 파트 번호 (0 = 팀장 파트)
+    public let part: Int
+    /// 데스크톱 앱의 세션 제목 (팀장·파트장만, 알 때만)
+    public let sessionTitle: String?
+    /// 파트원이 속한 파트의 세션 직원 직함 ("팀장", "파트장1")
+    public let partLead: String?
     public let kind: StaffKind
     public let status: RosterStatus
     /// 표시 수준이 "상세"일 때만: 툴 대상, 승인 대기 중인 명령, 팀원이 맡은 일
@@ -128,19 +136,31 @@ public struct Roster: Hashable, Sendable {
         for team in state.sortedTeams {
             let agents = state.agents(in: team.id)
             guard !agents.isEmpty else { continue }
-            let ordered = agents.filter { $0.role == .lead } + agents.filter { $0.role == .member }.sorted { $0.seat < $1.seat }
-            let rows = ordered.map { row(for: $0, teamName: team.name, privacy: privacy) }
+            // 팀장과 그 파트원, 그다음 파트장1과 그 파트원 … 순서
+            var ordered: [Agent] = []
+            for part in state.parts(in: team.id) {
+                let inPart = agents.filter { $0.session == part.session }
+                ordered += inPart.filter { $0.role == .lead } + inPart.filter { $0.role == .member }.sorted { $0.seat < $1.seat }
+            }
+            ordered += agents.filter { agent in !ordered.contains { $0.id == agent.id } }
+            let rows = ordered.map { row(for: $0, teamName: team.name, privacy: privacy, state: state) }
             teams.append(RosterTeam(id: team.id, name: team.name, colorIndex: team.colorIndex, rows: rows))
         }
         let waiting = teams.flatMap(\.rows).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
         return Roster(teams: teams, waiting: waiting)
     }
 
-    static func row(for agent: Agent, teamName: String, privacy: PrivacyLevel) -> RosterRow {
-        RosterRow(
+    static func row(for agent: Agent, teamName: String, privacy: PrivacyLevel, state: OfficeState) -> RosterRow {
+        let part = state.parts[agent.session]
+        let sessionTitle = agent.role == .lead && privacy == .detailed ? part?.title.flatMap { $0.isEmpty ? nil : $0 } : nil
+        return RosterRow(
             id: agent.id,
-            name: agent.profile.displayName,
+            name: agent.displayName,
             role: agent.role,
+            title: agent.title,
+            part: agent.part,
+            sessionTitle: sessionTitle,
+            partLead: agent.role == .member ? state.lead(of: agent.session)?.displayName : nil,
             kind: agent.profile.kind,
             status: RosterStatus.from(agent.activity),
             detail: privacy == .detailed ? detail(for: agent) : nil,

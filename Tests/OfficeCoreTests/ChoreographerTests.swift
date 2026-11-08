@@ -193,7 +193,8 @@ struct ChoreographerTests {
         started(&h)
         let directives = h.send(hook.make("SessionEnd"), at: 5)
         #expect(directives.first == Directive(lead, .clearQueue))
-        #expect(directives.last == Directive(lead, .despawn))
+        #expect(directives.dropLast().last == Directive(lead, .despawn))
+        #expect(directives.last?.action == .closeTeam(TeamID("/Users/demo/work/a-sdn-portal")))
         #expect(directives.contains(Directive(lead, .walk(to: .door))))
         #expect(!h.engine.choreographer.isPresent(lead))
     }

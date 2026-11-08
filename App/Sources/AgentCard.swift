@@ -32,8 +32,14 @@ struct AgentCard: View {
             Divider()
 
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
+                if let title = row.sessionTitle {
+                    GridRow {
+                        label("세션")
+                        Text(title).font(.system(size: 12)).lineLimit(2).textSelection(.enabled)
+                    }
+                }
                 GridRow {
-                    label("팀")
+                    label("방")
                     HStack(spacing: 5) {
                         Circle().fill(Palette.team(team.colorIndex))
                             .overlay(Circle().stroke(Color.primary.opacity(0.4), lineWidth: 0.8))
@@ -102,9 +108,9 @@ struct AgentCard: View {
 
     private var kindLabel: String {
         switch row.kind {
-        case .lead: "Claude Code 세션 · 팀장"
-        case .fixed: "직접 정의한 서브에이전트 · 고정 직원"
-        case .temporary: "기본 서브에이전트 · 임시 직원"
+        case .lead: row.title == .teamLead ? "메인 세션 · 방의 팀장" : "같은 방의 다른 세션 · 파트장"
+        case .fixed: "직접 정의한 서브에이전트 · \(row.partLead.map { "\($0) 파트의 " } ?? "")파트원 (고정 직원)"
+        case .temporary: "기본 서브에이전트 · \(row.partLead.map { "\($0) 파트의 " } ?? "")파트원 (임시 직원)"
         }
     }
 

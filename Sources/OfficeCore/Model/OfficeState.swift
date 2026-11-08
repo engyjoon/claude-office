@@ -4,7 +4,13 @@ import Foundation
 /// 각 비트에는 그 순간의 `Agent` 스냅숏이 들어 있어서, 퇴근한 직원도 마지막 연출을 할 수 있습니다.
 public enum Beat: Hashable, Sendable {
     case teamOpened(Team)
+    /// 사람이 모두 떠난 방. 섬은 다음 방이 다시 씁니다.
+    case teamClosed(Team)
     case arrived(Agent)
+    /// 파트장이 팀장이 됨 (팀장이 퇴근했거나, 늦게 온 메인 세션에게서 넘겨받음). 좌석도 팀장석으로 바뀝니다.
+    case promoted(Agent)
+    /// 직함·좌석이 바뀜 ("파트장" → "파트장1", 팀장 → 파트장)
+    case retitled(Agent)
     case promptArrived(Agent)
     case working(Agent, ToolCall)
     case toolEnded(Agent, ToolCall, ToolOutcome)
@@ -20,12 +26,20 @@ public enum Beat: Hashable, Sendable {
     case left(Agent)
 }
 
-/// 사무실의 의미 상태 (누가 어느 팀에서 무엇을 하는지). 순수 값 타입이며 시간은 이벤트에서만 받습니다.
+/// 사무실의 의미 상태 (누가 어느 방·파트에서 무엇을 하는지). 순수 값 타입이며 시간은 이벤트에서만 받습니다.
+///
+/// 방 규칙 (설계서 §5.1):
+/// - 방 = 메인 세션 단위. 방의 첫 세션(또는 데스크톱 앱이 알려 준 최상위 세션)이 팀장, 나머지 세션은 파트장.
+/// - 힌트에 부모가 있으면 부모의 방, 없으면 최상위 세션 폴더(없으면 자기 폴더)의 방. 워크트리는 원래 폴더로 합칩니다.
+/// - 팀장이 퇴근하면 가장 먼저 온 파트장이 팀장으로 승진합니다. 사람이 모두 떠난 방은 닫힙니다.
 public struct OfficeState: Sendable {
+    /// 방 (예전 이름 그대로 팀)
     public private(set) var teams: [TeamID: Team] = [:]
     public private(set) var agents: [AgentID: Agent] = [:]
+    /// 세션 → 파트
+    public private(set) var parts: [SessionID: Part] = [:]
 
-    private var leadBySession: [SessionID: AgentID] = [:]
+    private var partOrder = 0
     private var memberBySubagent: [String: AgentID] = [:]
     private var memberByDelegation: [String: AgentID] = [:]
     private var serial = 0
@@ -37,8 +51,14 @@ public struct OfficeState: Sendable {
 
     // MARK: - 조회
 
+    /// 세션 직원 (팀장 또는 파트장)
     public func lead(of session: SessionID) -> Agent? {
-        leadBySession[session].flatMap { agents[$0] }
+        parts[session].flatMap { agents[$0.lead] }
+    }
+
+    /// 방의 파트들. 팀장 파트(0번)가 먼저, 그다음 파트장 번호 순서.
+    public func parts(in team: TeamID) -> [Part] {
+        parts.values.filter { $0.teamID == team }.sorted { ($0.number, $0.order) < ($1.number, $1.order) }
     }
 
     public func agents(in team: TeamID) -> [Agent] {
@@ -181,27 +201,68 @@ public struct OfficeState: Sendable {
         return beats
     }
 
-    // MARK: - 팀장과 팀
+    // MARK: - 방과 세션 직원
 
     private mutating func ensureLead(for event: OfficeEvent, beats: inout [Beat]) -> AgentID {
-        if let id = leadBySession[event.session], agents[id] != nil { return id }
-        let teamID = ensureTeam(cwd: event.cwd, beats: &beats)
-        let leadIndex = agents.values.filter { $0.teamID == teamID && $0.role == .lead }.count
-        let profile = AgentProfile.lead(teamName: teams[teamID]!.name, index: leadIndex)
+        if let part = parts[event.session], agents[part.lead] != nil {
+            if let hint = event.hint { absorb(hint, for: event.session, beats: &beats) }
+            return part.lead
+        }
+        let teamID = room(for: event, beats: &beats)
+        let ancestors = event.hint?.ancestors ?? []
+
+        // 방의 지금 팀장이 이 세션이 띄운 세션이면 (메인 세션이 늦게 나타남) 팀장 자리를 넘겨받습니다
+        var number = 0
+        var demoted: AgentID?
+        if let current = leadPart(in: teamID) {
+            if current.ancestors.contains(event.session) {
+                demote(current.session)
+                demoted = current.lead
+            } else {
+                number = freePartNumber(in: teamID)
+            }
+        }
+
+        let roomName = teams[teamID]!.name
+        var profile = AgentProfile.lead(roomName: roomName, number: number)
+        if agents.values.contains(where: { $0.profile.key == profile.key }) {
+            // 같은 얼굴이 둘 생기지 않도록 출근 순번으로 바꿉니다 (승진한 사람은 얼굴이 그대로라서)
+            let key = "part@\(roomName)#o\(partOrder + 1)"
+            profile = AgentProfile(key: key, displayName: profile.displayName, kind: .lead, agentType: nil, appearance: .make(key: key, kind: .lead))
+        }
+        let partLeads = parts.values.filter { $0.teamID == teamID && $0.number > 0 }.count + (number > 0 ? 1 : 0)
         let id = makeAgent(
-            role: .lead, profile: profile, teamID: teamID, session: event.session,
+            role: .lead, profile: profile, teamID: teamID, session: event.session, part: number,
+            title: .lead(number: number, partLeadCount: partLeads),
             delegatedBy: nil, task: nil, toolUseID: nil, background: false, term: event.term, at: event.at)
-        leadBySession[event.session] = id
+        partOrder += 1
+        parts[event.session] = Part(
+            session: event.session, teamID: teamID, number: number, order: partOrder, lead: id,
+            ancestors: ancestors, title: event.hint?.title)
+        relabel(teamID, force: demoted.map { [$0] } ?? [], beats: &beats)
         beats.append(.arrived(agents[id]!))
         return id
     }
 
+    /// 새 세션이 들어갈 방: 힌트의 조상이 있는 방 → 최상위 세션 폴더의 방 → 자기 폴더의 방
+    private mutating func room(for event: OfficeEvent, beats: inout [Beat]) -> TeamID {
+        if let hint = event.hint {
+            for ancestor in hint.ancestors {
+                if let part = parts[ancestor], teams[part.teamID] != nil { return part.teamID }
+            }
+            if let root = hint.rootCwd, !root.isEmpty { return ensureTeam(cwd: root, beats: &beats) }
+        }
+        return ensureTeam(cwd: event.cwd, beats: &beats)
+    }
+
     private mutating func ensureTeam(cwd: String?, beats: inout [Beat]) -> TeamID {
-        let path = (cwd?.isEmpty == false ? cwd! : "(알 수 없는 프로젝트)")
-        let normalized = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+        let normalized = Team.folder(for: cwd)
         let id = TeamID(normalized)
         if teams[id] == nil {
-            let island = teams.count
+            // 닫힌 방의 섬을 다시 씁니다
+            let used = Set(teams.values.map(\.island))
+            var island = 0
+            while used.contains(island) { island += 1 }
             let name = normalized.split(separator: "/").last.map(String.init) ?? normalized
             let team = Team(
                 id: id, name: name, island: island, colorIndex: island % Team.colorCount,
@@ -212,15 +273,103 @@ public struct OfficeState: Sendable {
         return id
     }
 
+    private func leadPart(in team: TeamID) -> Part? {
+        parts.values.first { $0.teamID == team && $0.number == 0 }
+    }
+
+    /// 비어 있는 가장 작은 파트장 번호 (1부터)
+    private func freePartNumber(in team: TeamID) -> Int {
+        let used = Set(parts.values.filter { $0.teamID == team }.map(\.number))
+        var number = 1
+        while used.contains(number) { number += 1 }
+        return number
+    }
+
+    /// 이미 있는 세션에 늦게 온 힌트 (데스크톱 정보 파일이 나중에 생긴 경우, 제목이 바뀐 경우)
+    private mutating func absorb(_ hint: SessionHint, for session: SessionID, beats: inout [Beat]) {
+        guard var part = parts[session] else { return }
+        if let title = hint.title { part.title = title }
+        let ancestorsChanged = !hint.ancestors.isEmpty && hint.ancestors != part.ancestors
+        if ancestorsChanged { part.ancestors = hint.ancestors }
+        parts[session] = part
+        if ancestorsChanged { reconcileLead(in: part.teamID, beats: &beats) }
+    }
+
+    /// 팀장이 같은 방에 있는 다른 세션이 띄운 세션이면, 가장 위 조상에게 팀장 자리를 넘깁니다.
+    private mutating func reconcileLead(in team: TeamID, beats: inout [Beat]) {
+        guard let current = leadPart(in: team) else { return }
+        var candidate = current
+        for _ in 0..<8 {
+            guard let top = candidate.ancestors.last(where: { parts[$0]?.teamID == team }), top != candidate.session else { break }
+            candidate = parts[top]!
+        }
+        guard candidate.session != current.session else { return }
+        let number = candidate.number
+        setPartNumber(candidate.session, 0)
+        setPartNumber(current.session, number)
+        // 자리를 맞바꿉니다
+        let newLeadSeat = agents[candidate.lead]!.seat
+        update(candidate.lead) { $0.seat = 0 }
+        update(current.lead) { $0.seat = newLeadSeat }
+        relabel(team, promoted: candidate.lead, force: [current.lead, candidate.lead], beats: &beats)
+    }
+
+    /// 팀장을 파트장으로 내립니다 (늦게 온 메인 세션에게 자리를 넘길 때). 직함 비트는 호출한 쪽이 relabel로 냅니다.
+    private mutating func demote(_ session: SessionID) {
+        guard let part = parts[session] else { return }
+        setPartNumber(session, freePartNumber(in: part.teamID))
+        if let agent = agents[part.lead] {
+            let seat = assignSeat(teamID: part.teamID, profile: agent.profile, leadSeat: false)
+            update(part.lead) { $0.seat = seat }
+        }
+    }
+
+    private mutating func setPartNumber(_ session: SessionID, _ number: Int) {
+        guard parts[session] != nil else { return }
+        parts[session]!.number = number
+        for id in agents.values.filter({ $0.session == session }).map(\.id) {
+            update(id) { $0.part = number }
+        }
+    }
+
+    /// 방의 세션 직원 직함을 다시 정하고, 바뀐 사람마다 비트를 냅니다.
+    private mutating func relabel(_ team: TeamID, promoted: AgentID? = nil, force: Set<AgentID> = [], beats: inout [Beat]) {
+        let roomParts = parts.values.filter { $0.teamID == team }.sorted { $0.order < $1.order }
+        let partLeads = roomParts.filter { $0.number > 0 }.count
+        for part in roomParts {
+            guard let agent = agents[part.lead] else { continue }
+            let title = JobTitle.lead(number: part.number, partLeadCount: partLeads)
+            guard agent.title != title || force.contains(agent.id) else { continue }
+            update(part.lead) { $0.title = title }
+            beats.append(part.lead == promoted ? .promoted(agents[part.lead]!) : .retitled(agents[part.lead]!))
+        }
+    }
+
     private mutating func endSession(_ session: SessionID, beats: inout [Beat]) {
-        guard let leadID = leadBySession[session], let lead = agents[leadID] else { return }
+        guard let part = parts[session] else { return }
         for member in agents.values.filter({ $0.session == session && $0.role == .member }).sorted(by: { $0.serial < $1.serial }) {
             beats.append(.left(member))
             removeAgent(member.id)
         }
-        beats.append(.left(lead))
-        removeAgent(leadID)
-        leadBySession[session] = nil
+        if let lead = agents[part.lead] {
+            beats.append(.left(lead))
+            removeAgent(part.lead)
+        }
+        parts[session] = nil
+
+        let team = part.teamID
+        var promoted: AgentID?
+        if part.number == 0, let next = parts.values.filter({ $0.teamID == team }).min(by: { $0.order < $1.order }) {
+            // 가장 먼저 온 파트장이 팀장석으로
+            setPartNumber(next.session, 0)
+            update(next.lead) { $0.seat = 0 }
+            promoted = next.lead
+        }
+        relabel(team, promoted: promoted, force: promoted.map { [$0] } ?? [], beats: &beats)
+
+        if !agents.values.contains(where: { $0.teamID == team }), let closed = teams.removeValue(forKey: team) {
+            beats.append(.teamClosed(closed))
+        }
     }
 
     // MARK: - 팀원
@@ -267,10 +416,17 @@ public struct OfficeState: Sendable {
         session: SessionID, teamID: TeamID, agentType: String?, delegatedBy: AgentID?, task: String?,
         toolUseID: String?, background: Bool, term: String?, at now: Date
     ) -> AgentID {
-        let duplicates = agents.values.filter { $0.teamID == teamID && $0.profile.agentType == agentType && $0.role == .member }.count
-        let profile = AgentProfile.member(agentType: agentType, serial: serial + 1, duplicateIndex: duplicates)
+        // 같은 종류가 이미 있으면 비어 있는 가장 작은 번호를 붙입니다 (먼저 온 사람이 퇴근해도 이름이 겹치지 않게)
+        let usedNames = Set(agents.values.filter { $0.teamID == teamID && $0.role == .member }.map(\.profile.displayName))
+        var duplicates = 0
+        var profile = AgentProfile.member(agentType: agentType, serial: serial + 1, duplicateIndex: 0)
+        while profile.kind == .fixed, usedNames.contains(profile.displayName) {
+            duplicates += 1
+            profile = AgentProfile.member(agentType: agentType, serial: serial + 1, duplicateIndex: duplicates)
+        }
         let id = makeAgent(
-            role: .member, profile: profile, teamID: teamID, session: session, delegatedBy: delegatedBy,
+            role: .member, profile: profile, teamID: teamID, session: session, part: parts[session]?.number ?? 0,
+            title: .member, delegatedBy: delegatedBy,
             task: task, toolUseID: toolUseID, background: background, term: term, at: now)
         if let toolUseID { memberByDelegation[toolUseID] = id }
         return id
@@ -293,22 +449,22 @@ public struct OfficeState: Sendable {
     // MARK: - 공통
 
     private mutating func makeAgent(
-        role: Role, profile: AgentProfile, teamID: TeamID, session: SessionID, delegatedBy: AgentID?,
-        task: String?, toolUseID: String?, background: Bool, term: String?, at now: Date
+        role: Role, profile: AgentProfile, teamID: TeamID, session: SessionID, part: Int, title: JobTitle,
+        delegatedBy: AgentID?, task: String?, toolUseID: String?, background: Bool, term: String?, at now: Date
     ) -> AgentID {
         serial += 1
         let id = AgentID(role == .lead ? "lead-\(serial)" : "member-\(serial)")
-        let seat = assignSeat(teamID: teamID, profile: profile)
+        let seat = assignSeat(teamID: teamID, profile: profile, leadSeat: role == .lead && part == 0)
         agents[id] = Agent(
-            id: id, role: role, profile: profile, teamID: teamID, session: session, seat: seat,
+            id: id, role: role, profile: profile, teamID: teamID, session: session, part: part, title: title, seat: seat,
             subagentID: nil, delegatedBy: delegatedBy, task: task, delegationToolUseID: toolUseID,
             runsInBackground: background, activity: .arriving, activitySince: now, runningTools: [],
             consecutiveErrors: 0, term: term, serial: serial)
         return id
     }
 
-    /// 좌석 규칙: 0번은 팀장석, 고정 직원은 지정석, 임시 직원은 지정석이 아닌 빈자리. 자리가 없으면 늘립니다.
-    private mutating func assignSeat(teamID: TeamID, profile: AgentProfile) -> Int {
+    /// 좌석 규칙: 0번은 팀장석, 파트장·임시 직원은 지정석이 아닌 빈자리, 고정 직원은 지정석. 자리가 없으면 늘립니다.
+    private mutating func assignSeat(teamID: TeamID, profile: AgentProfile, leadSeat: Bool) -> Int {
         guard var team = teams[teamID] else { return 0 }
         let occupied = Set(agents.values.filter { $0.teamID == teamID }.map(\.seat))
         let reserved = Set(team.reservedSeats.values)
@@ -323,7 +479,7 @@ public struct OfficeState: Sendable {
 
         switch profile.kind {
         case .lead:
-            return occupied.contains(0) ? firstFree(excludingReserved: true) : 0
+            return leadSeat && !occupied.contains(0) ? 0 : firstFree(excludingReserved: true)
         case .fixed:
             if let seat = team.reservedSeats[profile.key] {
                 if !occupied.contains(seat) { return seat }

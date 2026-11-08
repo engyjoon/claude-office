@@ -202,9 +202,9 @@ public final class HookServer: @unchecked Sendable {
             switch policy.evaluate(request) {
             case .reject(let status, _):
                 respond(client, status: status)
-            case .accept(let body, let term):
+            case .accept(let body, let term, let hostSession):
                 respond(client, status: 202)
-                let delivery = HookDelivery(body: body, term: term, receivedAt: Date())
+                let delivery = HookDelivery(body: body, term: term, hostSession: hostSession, receivedAt: Date())
                 let handler = self.handler
                 deliveryQueue.async { handler(delivery) }
             }

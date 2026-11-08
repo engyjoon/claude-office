@@ -46,6 +46,14 @@ struct ScenarioStep {
     var time: Double
     var term: String?
     var payload: JSONValue
+    /// 앱이 데스크톱 세션 정보로 붙이는 방 힌트 ({"ancestors": [...], "rootCwd": ..., "title": ...})
+    var hint: SessionHint?
+
+    func event(at date: Date) -> OfficeEvent? {
+        guard var event = HookParser.parse(payload, term: term, receivedAt: date) else { return nil }
+        event.hint = hint
+        return event
+    }
 }
 
 func loadScenario(_ path: String) throws -> [ScenarioStep] {
@@ -66,7 +74,15 @@ func loadScenario(_ path: String) throws -> [ScenarioStep] {
         }
         let time = value["t"]?.doubleValue ?? (lastTime + 1)
         lastTime = time
-        steps.append(ScenarioStep(time: time, term: value["term"]?.stringValue ?? value["term_program"]?.stringValue, payload: payload))
+        var hint: SessionHint?
+        if let raw = value["hint"] {
+            let ancestors = raw["ancestors"]?.arrayValue?.compactMap { $0.stringValue.map(SessionID.init) } ?? []
+            hint = SessionHint(
+                hostSession: raw["hostSession"]?.stringValue, ancestors: ancestors,
+                rootCwd: raw["rootCwd"]?.stringValue, title: raw["title"]?.stringValue)
+        }
+        steps.append(ScenarioStep(
+            time: time, term: value["term"]?.stringValue ?? value["term_program"]?.stringValue, payload: payload, hint: hint))
     }
     return steps.sorted { $0.time < $1.time }
 }
@@ -99,7 +115,7 @@ func run(_ arguments: [String]) throws {
             let name = step.payload["hook_event_name"]?.stringValue ?? "?"
             let tool = step.payload["tool_name"]?.stringValue.map { " \($0)" } ?? ""
             let agent = step.payload["agent_id"]?.stringValue.map { " (서브에이전트 \($0))" } ?? ""
-            if let event = HookParser.parse(step.payload, term: step.term, receivedAt: epoch.addingTimeInterval(step.time)) {
+            if let event = step.event(at: epoch.addingTimeInterval(step.time)) {
                 emit(engine.handle(event), at: step.time, label: "훅 \(name)\(tool)\(agent)")
             } else {
                 print(String(format: "%8.2fs  ── 훅 %@%@ (무시)", step.time, name, tool))
@@ -279,7 +295,7 @@ func snapshot(_ arguments: [String]) throws {
         while now < target {
             while let step = pending.first, step.time <= now {
                 pending = pending.dropFirst()
-                if let event = HookParser.parse(step.payload, term: step.term, receivedAt: epoch.addingTimeInterval(step.time)) {
+                if let event = step.event(at: epoch.addingTimeInterval(step.time)) {
                     stage.enqueue(engine.handle(event))
                 }
             }
@@ -295,7 +311,7 @@ func snapshot(_ arguments: [String]) throws {
         let file = folder.appendingPathComponent(String(format: "%@-%06.2fs.svg", base, target))
         try SVGRenderer.render(stage: stage).write(to: file, atomically: true, encoding: .utf8)
         let summary = stage.sortedActors.map { actor in
-            "\(actor.agent.profile.displayName)@\(actor.position)\(actor.isWalking ? "→" : "")\(actor.seated ? "(앉음)" : "") \(actor.pose.rawValue)"
+            "\(actor.agent.displayName)@\(actor.position)\(actor.isWalking ? "→" : "")\(actor.seated ? "(앉음)" : "") \(actor.pose.rawValue)"
         }.joined(separator: ", ")
         print(String(format: "%7.2fs  %@", target, file.path))
         print("          \(summary.isEmpty ? "(아무도 없음)" : summary)")

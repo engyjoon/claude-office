@@ -103,6 +103,32 @@ public struct Choreographer: Sendable {
         case .teamOpened(let team):
             out.append(Directive(nil, .openTeam(team)))
 
+        case .teamClosed(let team):
+            out.append(Directive(nil, .closeTeam(team.id)))
+
+        case .promoted(let agent):
+            let oldSeat = presences[agent.id]?.agent.seat
+            touch(agent)
+            guard presences[agent.id] != nil else { return }
+            out.append(Directive(agent.id, .refresh(agent)))
+            reseat(agent, from: oldSeat, at: now, into: &out)
+            if presences[agent.id]?.waiting == false {
+                out.append(Directive(agent.id, .gesture(.cheer)))
+                out.append(Directive(agent.id, .express(.proud)))
+                setEmote(agent.id, .sparkle, into: &out)
+                say(agent.id, "promote.lead", into: &out)
+                out.append(Directive(agent.id, .wait(2)))
+                setEmote(agent.id, nil, into: &out)
+                out.append(Directive(agent.id, .express(.neutral)))
+            }
+
+        case .retitled(let agent):
+            let oldSeat = presences[agent.id]?.agent.seat
+            touch(agent)
+            guard presences[agent.id] != nil else { return }
+            out.append(Directive(agent.id, .refresh(agent)))
+            reseat(agent, from: oldSeat, at: now, into: &out)
+
         case .arrived(let agent):
             enter(agent, at: now, into: &out)
             if agent.role == .lead {
@@ -532,6 +558,22 @@ public struct Choreographer: Sendable {
         }
         move(agent.id, to: seatSpot(agent), into: &out)
         out.append(Directive(agent.id, .express(.neutral)))
+    }
+
+    /// 좌석이 바뀐 직원을 새 자리로 옮깁니다. 예전 자리에 앉아 있으면 바로, 다른 곳에 있으면 돌아올 때 새 자리로 갑니다.
+    private mutating func reseat(_ agent: Agent, from oldSeat: Int?, at now: Date, into out: inout [Directive]) {
+        guard let presence = presences[agent.id], let oldSeat, oldSeat != agent.seat,
+            presence.spot == .seat(agent.teamID, oldSeat)
+        else { return }
+        if presence.waiting || presence.rest > 0 {
+            // 손을 든 채이거나 자는 중이면 깨어나거나 승인이 끝난 뒤 옮깁니다
+            let returnAt = now.addingTimeInterval(config.linger)
+            modify(agent.id) { $0.returnAt = returnAt }
+            return
+        }
+        let pose: Pose = presence.shown == .idle ? .sitting : (presence.shown == .thinking ? .thinking : .typing)
+        move(agent.id, to: seatSpot(agent), into: &out)
+        out.append(Directive(agent.id, .pose(pose)))
     }
 
     private mutating func leave(_ id: AgentID, into out: inout [Directive]) {
