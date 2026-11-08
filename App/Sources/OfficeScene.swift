@@ -80,10 +80,22 @@ final class OfficeScene: SKScene {
         return window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
 
-    /// 장면이나 그 뷰가 멈춰 있으면 풉니다 (모델이 0.25초마다 부름)
+    /// 장면이나 그 뷰가 멈춰 있으면 풉니다
     func resumeIfPaused() {
         if isPaused { isPaused = false }
         if let view, view.isPaused { view.isPaused = false }
+    }
+
+    /// 창이 화면에 보이는데 0.5초 넘게 그리지 않았으면 그리기를 다시 시작합니다 (모델이 0.25초마다 부름).
+    /// SwiftUI는 닫은 사무실 창을 다시 열 때 같은 창을 다시 보여 주는데, 그 안의 SKView는 창이 닫힐 때 멈춘 그리기를
+    /// 다시 시작하지 않습니다(M5(4) 화면 확인: 미니 → 사무실 창에서 캐릭터가 멈춤. 일시 정지를 껐다 켜면 다시 그림).
+    func restartIfStalled() {
+        resumeIfPaused()
+        guard let view, let window = view.window, window.isVisible, !window.isMiniaturized,
+            window.occlusionState.contains(.visible), Date().timeIntervalSince(lastUpdate) > 0.5
+        else { return }
+        view.isPaused = true
+        view.isPaused = false
     }
 
     required init?(coder: NSCoder) {
@@ -103,7 +115,10 @@ final class OfficeScene: SKScene {
         sync()
     }
 
+    /// 마지막으로 그린 때 (그리기가 멈췄는지 보려고)
+    private(set) var lastUpdate = Date.distantPast
     override func update(_ currentTime: TimeInterval) {
+        lastUpdate = Date()
         sync()
     }
 

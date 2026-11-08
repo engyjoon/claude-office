@@ -200,8 +200,8 @@ final class AppModel {
             record(engine.tick(at: now))
             refreshMiniFocus(now: now)
             syncMiniPanel()
-            officeScene.resumeIfPaused()
-            miniScene.resumeIfPaused()
+            officeScene.restartIfStalled()
+            miniScene.restartIfStalled()
         }
         // 두 무대가 같은 지시를 받으므로 효과음은 한쪽에서만: 사무실 창이 보이면 사무실, 아니면 미니가 보일 때 미니
         let officeEvents = stageStore.floor.drainEvents()
