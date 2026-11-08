@@ -600,6 +600,13 @@ public struct OfficeState: Sendable {
             let subs = agents.values.filter { $0.teamID == teamID && $0.number > 0 }.count + 1
             title = .sub(subs > 1 ? number : nil)
         }
+        // 외형: 지금 사무실에 있는 모든 사람(모든 디렉토리, 쉬는 사람 포함)과 겹치지 않게 (M5(6))
+        var profile = profile
+        profile.appearance = AppearanceAllocator.allocate(
+            key: profile.key, kind: profile.kind,
+            among: agents.values.sorted { $0.serial < $1.serial }.map {
+                AppearanceAllocator.Occupant(appearance: $0.profile.appearance, sameRow: $0.teamID == teamID)
+            })
         serial += 1
         let id = AgentID(role == .lead ? "lead-\(serial)" : "member-\(serial)")
         agents[id] = Agent(
