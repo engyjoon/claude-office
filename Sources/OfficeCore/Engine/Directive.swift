@@ -37,12 +37,12 @@ public enum Pose: String, Hashable, Sendable {
 }
 
 /// 한 번 하고 끝나는 동작 (설계서 §9.3 제스처 12종 중 상황 연출에 쓰는 것)
-public enum Gesture: String, Hashable, Sendable {
+public enum BodyGesture: String, Hashable, Sendable {
     case wave, nod, beckon, thumbsUp, cheer, highFive, tilt, scratchHead, stretch, sip
 }
 
 /// 표정 10종 (설계서 §9.3)
-public enum Expression: String, Hashable, Sendable {
+public enum FacialExpression: String, Hashable, Sendable {
     case neutral, happy, focus, think, surprised, troubled, sleepy, proud, sad, eager
 }
 
@@ -105,8 +105,8 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         case sit
         case stand
         case pose(Pose)
-        case gesture(Gesture)
-        case express(Expression)
+        case gesture(BodyGesture)
+        case express(FacialExpression)
         case emote(Emote?)
         case say(Bubble)
         case dismissBubble

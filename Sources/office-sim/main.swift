@@ -1,6 +1,7 @@
 import Foundation
 import OfficeCore
 import OfficeServer
+import OfficeStage
 
 // office-sim: 앱 없이 연출 엔진을 확인하는 개발용 도구
 //
@@ -10,6 +11,8 @@ import OfficeServer
 //       모든 효과음을 WAV(44.1kHz, 16비트, 모노)로 저장합니다.
 //   office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
 //       맥 앱 없이 훅 서버와 엔진만 돌립니다 (헤드리스). 받은 훅의 연출 지시와 직원 목록을 출력합니다.
+//   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더]
+//       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
@@ -28,6 +31,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
@@ -255,6 +259,49 @@ func serve(_ arguments: [String]) throws -> Never {
     dispatchMain()
 }
 
+// MARK: - snapshot
+
+func snapshot(_ arguments: [String]) throws {
+    guard let path = arguments.first, !path.hasPrefix("--") else { usage() }
+    let times = (option("--at", in: arguments) ?? "5").split(separator: ",").compactMap { Double($0) }.sorted()
+    let folder = URL(fileURLWithPath: option("--out", in: arguments) ?? "build/snapshots")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let steps = try loadScenario(path)
+    var engine = OfficeEngine(seed: option("--seed", in: arguments).flatMap(UInt64.init) ?? 1)
+    var stage = Stage()
+    let epoch = Date(timeIntervalSince1970: 1_800_000_000)
+    let frame = 1.0 / 30
+    var now = 0.0
+    var nextTick = 0.25
+    var pending = steps[...]
+    let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+    for target in times {
+        while now < target {
+            while let step = pending.first, step.time <= now {
+                pending = pending.dropFirst()
+                if let event = HookParser.parse(step.payload, term: step.term, receivedAt: epoch.addingTimeInterval(step.time)) {
+                    stage.enqueue(engine.handle(event))
+                }
+            }
+            let dt = min(frame, target - now)
+            now += dt
+            stage.update(dt: dt)
+            if now >= nextTick {
+                stage.enqueue(engine.tick(at: epoch.addingTimeInterval(now)))
+                nextTick += 0.25
+            }
+            _ = stage.drainEvents()
+        }
+        let file = folder.appendingPathComponent(String(format: "%@-%06.2fs.svg", base, target))
+        try SVGRenderer.render(stage: stage).write(to: file, atomically: true, encoding: .utf8)
+        let summary = stage.sortedActors.map { actor in
+            "\(actor.agent.profile.displayName)@\(actor.position)\(actor.isWalking ? "→" : "")\(actor.seated ? "(앉음)" : "") \(actor.pose.rawValue)"
+        }.joined(separator: ", ")
+        print(String(format: "%7.2fs  %@", target, file.path))
+        print("          \(summary.isEmpty ? "(아무도 없음)" : summary)")
+    }
+}
+
 // MARK: - replay
 
 func replay(_ arguments: [String]) throws {
@@ -305,6 +352,7 @@ do {
     case "sounds": try sounds(Array(arguments.dropFirst()))
     case "serve": try serve(Array(arguments.dropFirst()))
     case "replay": try replay(Array(arguments.dropFirst()))
+    case "snapshot": try snapshot(Array(arguments.dropFirst()))
     default: usage()
     }
 } catch {

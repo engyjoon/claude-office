@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "OfficeCore", targets: ["OfficeCore"]),
         .library(name: "OfficeServer", targets: ["OfficeServer"]),
+        .library(name: "OfficeStage", targets: ["OfficeStage"]),
         .executable(name: "office-sim", targets: ["office-sim"]),
     ],
     targets: [
@@ -21,10 +22,15 @@ let package = Package(
             dependencies: ["OfficeCore"],
             resources: [.copy("Resources/claude-office.sh")]
         ),
+        // 사무실 배치·길찾기·연출 지시 실행(무대)·그림 데이터. 렌더러(SpriteKit, SVG)와 무관한 순수 Swift입니다.
+        .target(
+            name: "OfficeStage",
+            dependencies: ["OfficeCore"]
+        ),
         // 개발용 CLI: 연출 타임라인(run), 효과음 WAV(sounds), 헤드리스 서버(serve), 앱으로 재생(replay)
         .executableTarget(
             name: "office-sim",
-            dependencies: ["OfficeCore", "OfficeServer"]
+            dependencies: ["OfficeCore", "OfficeServer", "OfficeStage"]
         ),
         .testTarget(
             name: "OfficeCoreTests",
@@ -34,6 +40,10 @@ let package = Package(
         .testTarget(
             name: "OfficeServerTests",
             dependencies: ["OfficeServer", "OfficeCore"]
+        ),
+        .testTarget(
+            name: "OfficeStageTests",
+            dependencies: ["OfficeStage", "OfficeCore"]
         ),
     ]
 )
