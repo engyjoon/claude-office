@@ -82,6 +82,8 @@ public enum Overlay {
     static let gap = 3.0
     static let pillHeight = 17.0
     static let maxPillCharacters = 28
+    /// 같은 공용 구역(책장·리서치 데스크 …)에서 이만큼 넘게 칩이 뜨면 하나로 묶습니다 ("책장 · 3명 읽는 중")
+    public static let pillGroupThreshold = 3
 
     public static func items(for stage: Stage, options: OverlayOptions = .init()) -> [OverlayItem] {
         let bounds = options.bounds ?? MapRect(0, 0, OfficeLayout.width, stage.layout.height)
@@ -94,9 +96,25 @@ public enum Overlay {
         // 앞(화면 아래쪽)에 선 직원부터 자리를 잡습니다
         let actors = stage.sortedActors.reversed()
 
-        // 1) 상태 칩: 머리 바로 위
+        // 1) 상태 칩: 머리 바로 위. 공용 구역에 여럿이 모이면 칩이 위로 쌓여 화면 밖으로 밀리지 않도록 하나로 묶습니다.
         if tier.showsPills, options.privacy != .hidden {
-            for actor in actors {
+            var grouped = Set<AgentID>()
+            for group in pillGroups(actors) {
+                let text = group.text
+                let width = TextMetrics.width(text, size: 9.5) + 26
+                let anchor = MapPoint(group.centerX, group.top + headTop)
+                var frame = MapRect(anchor.x - width / 2, anchor.y - pillHeight, width, pillHeight)
+                frame = place(frame, avoiding: placed, in: area)
+                placed.append(frame)
+                for member in group.members {
+                    grouped.insert(member.id)
+                    pillTops[member.id] = frame.y
+                }
+                items.append(OverlayItem(
+                    id: "pill:zone:\(group.zone.rawValue)", kind: .pill, agent: nil, origin: MapPoint(frame.x, frame.y),
+                    shapes: OverlayArt.pill(text: text, width: width, category: group.category), frame: frame, text: text))
+            }
+            for actor in actors where !grouped.contains(actor.id) {
                 guard let pill = actor.pill else { continue }
                 let label = options.privacy == .summary ? pill.category.summaryLabel : pill.text
                 let text = truncate(label, maxPillCharacters)
@@ -141,7 +159,9 @@ public enum Overlay {
         // 3) 머리 위 아이콘: 머리 옆에서 통통
         for actor in actors {
             guard let emote = actor.emote else { continue }
-            let side = emote == .exclamation ? MapPoint(-26, -82) : MapPoint(24, -84)
+            var side = emote == .exclamation ? MapPoint(-26, -82) : MapPoint(24, -84)
+            // 상태 칩이 머리 위에 떠 있으면 칩과 겹치지 않게 머리 옆으로 조금 내립니다 (⏳ + "Bash · swift build")
+            if pillTops[actor.id] != nil { side.y = -68; side.x = emote == .exclamation ? -28 : 28 }
             let elapsed = time - actor.emoteShownAt
             let bounce = -3 * pow(sin(Double.pi * elapsed / 1.8), 2)
             let appear = min(max(elapsed / 0.2, 0), 1)
@@ -174,6 +194,58 @@ public enum Overlay {
             }
         }
         return items
+    }
+
+    struct PillGroup {
+        var zone: OfficeLayout.Zone
+        var members: [StageActor]
+        var category: ToolCategory
+        var text: String
+        var centerX: Double
+        var top: Double
+    }
+
+    /// 공용 구역마다 칩이 뜬 직원을 모아, 문턱을 넘는 구역만 묶음으로 돌려줍니다
+    static func pillGroups(_ actors: ReversedCollection<[StageActor]>) -> [PillGroup] {
+        var byZone: [OfficeLayout.Zone: [StageActor]] = [:]
+        for actor in actors where actor.pill != nil {
+            guard let zone = OfficeLayout.zone(ofKey: actor.place?.key), zone != .lounge, zone != .massageChair else { continue }
+            byZone[zone, default: []].append(actor)
+        }
+        return byZone.keys.sorted { $0.rawValue < $1.rawValue }.compactMap { zone in
+            let members = byZone[zone]!
+            guard members.count >= pillGroupThreshold else { return nil }
+            // 가장 많은 툴 종류로 묶음 이름을 정합니다
+            var counts: [ToolCategory: Int] = [:]
+            for member in members { counts[member.pill!.category, default: 0] += 1 }
+            let category = counts.max { ($0.value, $1.key.summaryLabel) < ($1.value, $0.key.summaryLabel) }!.key
+            let xs = members.map(\.position.x)
+            return PillGroup(
+                zone: zone, members: members, category: category,
+                text: "\(zoneLabel(zone)) · \(members.count)명 \(groupVerb(category))",
+                centerX: (xs.min()! + xs.max()!) / 2, top: members.map(\.position.y).min()!)
+        }
+    }
+
+    static func zoneLabel(_ zone: OfficeLayout.Zone) -> String {
+        switch zone {
+        case .bookshelf: "책장"
+        case .research: "리서치 데스크"
+        case .whiteboard: "화이트보드"
+        case .pantry: "탕비 코너"
+        case .lounge, .massageChair: "휴게 공간"
+        }
+    }
+
+    static func groupVerb(_ category: ToolCategory) -> String {
+        switch category {
+        case .read: "읽는 중"
+        case .write: "편집 중"
+        case .shell: "명령 실행 중"
+        case .web: "검색 중"
+        case .plan: "계획 중"
+        case .delegate, .report, .mcp, .other: "일하는 중"
+        }
     }
 
     /// 글자 수가 넘치면 `…`로 줄입니다
@@ -400,6 +472,16 @@ public enum OverlayArt {
             return [
                 .ellipse(-2.5, 4, 4.2, 3.2, fill: .swatch(.ink)),
                 .line("M1.4,3.5 L1.4,-11 Q6,-9 7.5,-4", width: 2),
+            ]
+        case .hourglass:
+            // 모래시계 ⏳: 위 모래가 줄고 아래 모래가 쌓인 모습
+            return [
+                .circle(0, 0, 9, fill: .swatch(.white)),
+                .rect(-6, -7.5, 12, 2.4, r: 1.2, fill: .swatch(.woodDark), width: 1),
+                .rect(-6, 5.1, 12, 2.4, r: 1.2, fill: .swatch(.woodDark), width: 1),
+                .path("M-4.2,-5 L4.2,-5 L0.8,0 L4.2,5 L-4.2,5 L-0.8,0 Z", fill: .swatch(.sky), width: 1.2),
+                .path("M-2.2,-3.6 L2.2,-3.6 L0,-0.8 Z", fill: .swatch(.butter), outline: false),
+                .path("M-3.4,4.6 Q0,1.4 3.4,4.6 Z", fill: .swatch(.butter), outline: false),
             ]
         }
     }

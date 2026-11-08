@@ -18,47 +18,53 @@ struct RoomStageTests {
         #expect(partLead.seated)
         let oldSeat = partLead.agent.seat
         #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[oldSeat] == "파트장")
-        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[0] == "★ 팀장")
+        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[.office] == "★ 팀장")
 
         h.hook(hook("SessionEnd", session: "s1"), at: 12)
         h.run(until: 30)
         let promoted = try #require(h.actor("lead-2"))
         #expect(promoted.agent.displayName == "팀장")
-        #expect(promoted.agent.seat == 0)
-        #expect(promoted.position == OfficeLayout.seat(island: 0, index: 0).final)
+        #expect(promoted.agent.seat == .office)
+        #expect(promoted.position == h.stage.layout.seat(TeamID("/w/a-sdn-portal"), .office).final)
         #expect(promoted.seated)
         #expect(h.actor("lead-1") == nil)
         // 파트장 명패는 떼고 팀장석 명패는 그대로
         #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[oldSeat] == nil)
-        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[0] == "★ 팀장")
+        #expect(h.stage.nameplates[TeamID("/w/a-sdn-portal")]?[.office] == "★ 팀장")
         #expect(h.stage.teams.count == 1)
     }
 
-    @Test("빈 방은 마지막 직원이 문을 나간 뒤 닫히고, 맨 아래 줄이 비면 사무실이 줄어든다")
-    func roomClosesAfterLeaving() {
+    @Test("빈 방은 마지막 직원이 문을 나간 뒤 닫히고, 그 띠가 빠지면 아래 방이 직원과 함께 올라온다")
+    func roomClosesAfterLeaving() throws {
         var h = StageHarness()
         h.hook(hook("SessionStart", session: "a", cwd: "/w/a"))
         h.hook(hook("SessionStart", session: "b", cwd: "/w/b"))
         h.hook(hook("SessionStart", session: "c", cwd: "/w/c"))
-        h.run(until: 10)
-        #expect(h.stage.layout.rows == 2)
+        h.run(until: 12)
+        // 방마다 띠 하나: 첫 방은 휴게 공간 때문에 2줄, 나머지는 1줄씩
+        #expect(h.stage.layout.bands.map(\.team.raw) == ["/w/a", "/w/b", "/w/c"])
+        #expect(h.stage.layout.rows == 4)
         #expect(h.stage.teams.count == 3)
 
-        h.hook(hook("SessionEnd", session: "c", cwd: "/w/c"), at: 11)
-        // 아직 문으로 걸어가는 중이면 섬이 남아 있습니다
+        h.hook(hook("SessionEnd", session: "c", cwd: "/w/c"), at: 13)
+        // 아직 문으로 걸어가는 중이면 띠가 남아 있습니다
         #expect(h.stage.teams[TeamID("/w/c")] != nil)
         h.run(until: 30)
         #expect(h.stage.teams[TeamID("/w/c")] == nil)
         #expect(h.events.contains(.teamClosed(TeamID("/w/c"))))
-        #expect(h.stage.layout.rows == 1)
+        #expect(h.stage.layout.rows == 3)
 
-        // 다음 방은 빈 섬을 다시 씁니다
+        // 첫 방이 닫히면 b가 왼쪽 위 팀장실로 올라오고, 새 방은 맨 아래에 붙습니다
         h.hook(hook("SessionEnd", session: "a", cwd: "/w/a"), at: 31)
         h.hook(hook("SessionStart", session: "d", cwd: "/w/d"), at: 31.5)
-        h.run(until: 45)
+        h.run(until: 50)
         #expect(h.stage.teams[TeamID("/w/d")]?.island == 0)
         #expect(h.stage.teams[TeamID("/w/a")] == nil)
-        #expect(h.stage.sortedTeams.map(\.name) == ["d", "b"])
+        #expect(h.stage.layout.bands.map(\.team.raw) == ["/w/b", "/w/d"])
+        let b = try #require(h.actor("lead-2"))
+        #expect(b.position == OfficeLayout.seat(h.stage.layout.bands[0], .office).final)
+        #expect(b.position == MapPoint(OfficeLayout.officeDeskX, OfficeLayout.firstDeskY))
+        #expect(b.seated)
     }
 
     @Test("연출: 승진하면 정보 갱신, 팀장석으로 이동, 축하 대사")
@@ -73,8 +79,8 @@ struct RoomStageTests {
         let directives = send(hook("SessionEnd", session: "s1"), 5)
         let promoted = AgentID("lead-2")
         let actions = directives.filter { $0.agent == promoted }.map(\.action)
-        #expect(actions.contains { if case .refresh(let agent) = $0 { agent.displayName == "팀장" && agent.seat == 0 } else { false } })
-        #expect(actions.contains(.walk(to: .seat(TeamID("/w/a-sdn-portal"), 0))))
+        #expect(actions.contains { if case .refresh(let agent) = $0 { agent.displayName == "팀장" && agent.seat == .office } else { false } })
+        #expect(actions.contains(.walk(to: .seat(TeamID("/w/a-sdn-portal"), .office))))
         #expect(actions.contains(.gesture(.cheer)))
         #expect(actions.contains { if case .say = $0 { true } else { false } })
     }

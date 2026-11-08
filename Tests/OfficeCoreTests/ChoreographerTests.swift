@@ -18,7 +18,7 @@ struct ChoreographerTests {
         started(&h)
         let actions = h.actions(of: lead)
         guard case .spawn(_, .door) = actions.first else { Issue.record("\(actions)"); return }
-        #expect(actions.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal"), 0)])
+        #expect(actions.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal"), .office)])
         #expect(actions.contains(.sit))
         #expect(actions.contains(.gesture(.wave)))
         #expect(h.all.sounds.contains(.door))
@@ -63,19 +63,35 @@ struct ChoreographerTests {
         #expect(h.actions(of: lead).walks.contains(.bookshelf))
     }
 
-    @Test("셸 명령이 2초를 넘기면 서버랙으로 가고, 끝나면 잠시 뒤 자리로 돌아온다")
-    func shellToServerRack() {
+    @Test("셸 명령이 2초를 넘기면 자기 책상에서 모니터를 보며 기다리고(⏳), 성공하면 반가운 표정을 짓는다")
+    func longShellAtDesk() {
         var h = EngineHarness()
         started(&h)
         h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm run build"]), at: 1)
         h.advance(to: 2.9)
-        #expect(!h.actions(of: lead).walks.contains(.serverRack))
+        #expect(!h.actions(of: lead).contains(.pose(.watching)))
         h.advance(to: 3.1)
-        #expect(h.actions(of: lead).walks.contains(.serverRack))
-        #expect(h.actions(of: lead).bubbles.contains { $0.kind == .thought })
-        h.send(hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 8)
-        h.advance(to: 20)
-        #expect(h.actions(of: lead).walks.last == .seat(TeamID("/Users/demo/work/a-sdn-portal"), 0))
+        let waiting = h.actions(of: lead)
+        #expect(waiting.contains(.pose(.watching)))
+        #expect(waiting.contains(.emote(.hourglass)))
+        // 서버랙(사라짐)이나 다른 구역으로 가지 않고 자기 자리에 그대로
+        #expect(waiting.walks == [.seat(TeamID("/Users/demo/work/a-sdn-portal"), .office)])
+        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), .office))
+        let done = h.send(hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 8)
+        #expect(done.contains(Directive(lead, .emote(nil))))
+        #expect(done.contains(Directive(lead, .express(.happy))))
+    }
+
+    @Test("책상에서 기다리던 긴 명령이 실패하면 ⏳를 내리고 곤란한 표정")
+    func longShellFails() {
+        var h = EngineHarness()
+        started(&h)
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "swift test"]), at: 1)
+        h.advance(to: 4)
+        let failed = h.send(hook.tool("PostToolUseFailure", "Bash", id: "b1", input: [:], extra: [("error", "x")]), at: 9)
+        #expect(failed.contains(Directive(lead, .emote(.sweat))))
+        #expect(failed.contains(Directive(lead, .express(.troubled))))
+        #expect(!failed.contains(Directive(lead, .express(.happy))))
     }
 
     @Test("빨리 끝난 셸 명령은 자리에서 처리한다")
@@ -85,7 +101,8 @@ struct ChoreographerTests {
         h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "git status"]), at: 1)
         h.send(hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 1.3)
         h.advance(to: 6)
-        #expect(!h.actions(of: lead).walks.contains(.serverRack))
+        #expect(!h.actions(of: lead).contains(.pose(.watching)))
+        #expect(!h.actions(of: lead).contains(.emote(.hourglass)))
     }
 
     @Test("승인 대기: 대기열을 비우고 일어나 손을 들고, 노크는 30초마다 최대 3번")
@@ -120,7 +137,7 @@ struct ChoreographerTests {
         #expect(leadLine.text.contains("RouterConfig") || leadLine.text.contains("code-reviewer") || leadLine.text.contains("부탁") || leadLine.text.contains("맡아"))
         let memberActions = h.actions(of: member)
         #expect(memberActions.walks.first == .beside(lead))
-        #expect(memberActions.walks.last == .seat(TeamID("/Users/demo/work/a-sdn-portal"), 1))
+        #expect(memberActions.walks.last == .seat(TeamID("/Users/demo/work/a-sdn-portal"), Seat(part: 0, desk: 1)))
         #expect(memberActions.contains(.gesture(.nod)))
 
         h.send(hook.make("SubagentStart", ["agent_id": "x1", "agent_type": "code-reviewer"]), at: 1.2)
@@ -135,16 +152,19 @@ struct ChoreographerTests {
         #expect(!h.engine.choreographer.isPresent(member))
     }
 
-    @Test("입력 대기가 1분 넘으면 휴게실, 10분 넘으면 자리에서 존다. 새 프롬프트가 오면 깬다")
+    @Test("쉼 단계: 1분 → 휴게 공간, 3분 → 안마 의자, 10분 → 안마 의자에서 잠듦. 새 프롬프트가 오면 깬다")
     func restStages() {
         var h = EngineHarness()
         started(&h)
         h.send(hook.make("Stop"), at: 1)
         h.advance(to: 62)
         #expect(h.engine.choreographer.spot(of: lead) == .lounge)
+        h.advance(to: 182)
+        #expect(h.engine.choreographer.spot(of: lead) == .massageChair)
+        #expect(h.actions(of: lead).contains(.pose(.massage)))
         h.advance(to: 602)
         #expect(h.actions(of: lead).contains(.pose(.sleeping)))
-        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), 0))
+        #expect(h.engine.choreographer.spot(of: lead) == .massageChair)
         let woke = h.send(hook.make("UserPromptSubmit"), at: 610)
         #expect(woke.contains(Directive(lead, .emote(nil))))
         #expect(woke.contains(Directive(nil, .effect(.paperPlane(to: lead)))))
@@ -228,7 +248,7 @@ struct ChoreographerDetailTests {
         h.advance(to: 7)
         #expect(h.engine.choreographer.spot(of: lead) == .bookshelf)
         h.send(hook.tool("PreToolUse", "Agent", id: "a", input: ["description": "리뷰", "subagent_type": "code-reviewer"]), at: 8)
-        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), 0))
+        #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal"), .office))
         #expect(h.actions(of: lead).bubbles.last?.text.contains("리뷰") == true)
     }
 

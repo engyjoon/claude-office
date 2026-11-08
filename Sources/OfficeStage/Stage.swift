@@ -95,8 +95,11 @@ public struct StageConfig: Hashable, Sendable {
     /// 걷는 속도 (pt/초)
     public var walkSpeed = 120.0
     public var gestureDuration = 1.2
-    /// 팀 구역마다 동시에 보이는 말풍선 수 (설계서 §7.2)
-    public var maxBubblesPerTeam = 3
+    /// 파트 칸(팀장실 포함)마다 동시에 보이는 말풍선 수 (설계서 §7.2, M4.5b)
+    public var maxBubblesPerUnit = 3
+    /// 이 방만 그립니다 (M5 방 선택기용). nil이면 모든 방을 띠로 쌓아 그립니다.
+    /// 다른 방 직원의 지시와 방 열기·닫기는 무시합니다.
+    public var room: TeamID?
     /// 대기열에서 이보다 오래 기다린 말풍선은 버립니다 (외침 풍선은 버리지 않음)
     public var bubbleQueueTimeout = 6.0
     public var paperPlaneDuration = 1.3
@@ -113,7 +116,7 @@ public struct StageConfig: Hashable, Sendable {
 /// - 직원마다 대기열이 있고 지시를 순서대로 실행합니다.
 /// - `walk`는 도착할 때까지, `wait`는 그 시간만큼, `await`는 신호가 오거나 시간이 다 될 때까지 다음 지시를 막습니다.
 /// - `clearQueue`는 아직 실행하지 않은 지시를 버리고 막힘을 풉니다. 걷던 중이면 목적지까지 걸으면서 새 지시를 바로 실행합니다.
-/// - 같은 구역(책장, 휴게실 …)에는 자리를 예약해서 겹쳐 서지 않게 합니다.
+/// - 같은 구역(책장, 휴게 공간 …)에는 자리를 예약해서 겹쳐 서지 않게 하고, 자리가 넘치면 구역 가까이 흩어 섭니다.
 ///
 /// 순수 값 타입이라 Linux에서 시간을 직접 흘려가며 테스트할 수 있습니다.
 public struct Stage: Sendable {
@@ -122,8 +125,8 @@ public struct Stage: Sendable {
     public private(set) var teams: [TeamID: Team] = [:]
     public private(set) var actors: [AgentID: StageActor] = [:]
     public private(set) var time: Double = 0
-    /// 책상 명패 (팀 → 좌석 → 이름). 고정 직원의 지정석은 퇴근해도 명패가 남습니다 (설계서 §6.2).
-    public private(set) var nameplates: [TeamID: [Int: String]] = [:]
+    /// 책상 명패 (방 → 자리 → 이름). 고정 직원의 지정석은 퇴근해도 명패가 남습니다 (설계서 §6.2).
+    public private(set) var nameplates: [TeamID: [Seat: String]] = [:]
     /// 지금 그리는 효과
     public private(set) var effects: [StageEffect] = []
     private var nextEffectID = 0
@@ -136,8 +139,12 @@ public struct Stage: Sendable {
     private var events: [StageEvent] = []
     /// 닫으라는 지시를 받았지만 아직 직원이 문을 나가는 중인 방
     private var closingTeams: Set<TeamID> = []
-    /// 방이 닫혀 맨 아래 줄이 비었을 수 있음 → 아래 구역에 아무도 없을 때 사무실을 줄입니다
+    /// 방이 닫히거나 칸이 비어 띠를 줄일 수 있음 → 줄어드는 곳에 아무도 없을 때 줄입니다
     private var compactionPending = false
+    /// 걸어갈 자리의 칸이 아직 배치에 없을 때 잠깐 요청하는 칸 수
+    private var requestedCells: [TeamID: Int] = [:]
+    /// `config.room`이 있을 때 무시하는 다른 방 직원
+    private var ignoredAgents: Set<AgentID> = []
 
     private enum Block: Hashable, Sendable {
         case walking
@@ -173,6 +180,10 @@ public struct Stage: Sendable {
             guard let id = directive.agent else {
                 performGlobal(directive.action)
                 continue
+            }
+            if let room = config.room {
+                if case .spawn(let agent, _) = directive.action, agent.teamID != room { ignoredAgents.insert(id) }
+                if ignoredAgents.contains(id) { continue }
             }
             if directive.action == .clearQueue {
                 queues[id] = []
@@ -215,7 +226,7 @@ public struct Stage: Sendable {
         settleSignals()
         promoteQueuedBubbles()
         effects.removeAll { time >= $0.startedAt + $0.duration }
-        if compactionPending { compactLayoutIfPossible() }
+        if compactionPending { updateLayout() }
     }
 
     // MARK: - 실행
@@ -242,18 +253,22 @@ public struct Stage: Sendable {
             break
         case .refresh(let agent):
             let previous = actors[id]!.agent
+            let unit = Self.bubbleUnit(previous)
             actors[id]!.agent = agent
             removePlate(of: previous)
             setPlate(of: agent)
+            updateLayout()
+            if Self.bubbleUnit(agent) != unit { promoteQueuedBubbles(in: unit) }
         case .despawn:
             release(id)
             let agent = actors[id]!.agent
             actors[id] = nil
             removePlate(of: agent)
-            promoteQueuedBubbles(in: agent.teamID)
+            promoteQueuedBubbles(in: Self.bubbleUnit(agent))
             blocks[id] = nil
             queues[id] = nil
             events.append(.despawned(id))
+            compactionPending = true
             finishClosingTeams()
         case .walk(let spot):
             walk(id, to: spot)
@@ -313,22 +328,17 @@ public struct Stage: Sendable {
     private mutating func performGlobal(_ action: Directive.Action) {
         switch action {
         case .openTeam(let team):
+            if let room = config.room, team.id != room { break }
             closingTeams.remove(team.id)
-            // 같은 섬을 쓰던 방이 아직 닫히는 중이면 지금 비웁니다 (남은 직원은 그대로 문으로 나갑니다)
-            for other in closingTeams where teams[other]?.island == team.island {
-                closeNow(other)
-            }
             teams[team.id] = team
-            if team.island >= layout.islandCount {
-                layout.ensureIsland(team.island)
-                pathfinder = Pathfinder(layout: layout)
-            }
+            updateLayout()
             events.append(.teamOpened(team))
         case .closeTeam(let id):
             guard teams[id] != nil else { break }
             closingTeams.insert(id)
             finishClosingTeams()
         case .effect(let effect):
+            if case .paperPlane(let target) = effect, ignoredAgents.contains(target) { break }
             addEffect(effect)
             events.append(.effect(effect))
         case .sound(let cue):
@@ -340,19 +350,21 @@ public struct Stage: Sendable {
 
     private mutating func spawn(_ agent: Agent, at spot: Spot) {
         release(agent.id)
+        prepare(spot)
         let place = resolve(spot, for: agent.id)
         actors[agent.id] = StageActor(id: agent.id, agent: agent, position: place.final, place: place)
         reserve(place, for: agent.id)
         blocks[agent.id] = nil
         setPlate(of: agent)
+        updateLayout()
         events.append(.spawned(agent.id))
     }
 
     // MARK: - 명패와 방 닫기
 
-    /// 팀장석은 "★ 팀장", 파트장은 직함, 고정 직원은 종류 이름
+    /// 팀장실은 "★ 팀장", 파트장 자리(칸의 ★)는 직함, 고정 직원은 종류 이름
     private static func plate(for agent: Agent) -> String? {
-        if agent.role == .lead { return agent.seat == 0 ? "★ 팀장" : agent.title.label }
+        if agent.role == .lead { return agent.seat.isOffice ? "★ 팀장" : agent.title.label }
         if agent.profile.kind == .fixed, let key = agent.profile.agentType { return key }
         return nil
     }
@@ -362,12 +374,29 @@ public struct Stage: Sendable {
         nameplates[agent.teamID, default: [:]][agent.seat] = plate
     }
 
-    /// 파트장 명패는 자리를 떠나면 뗍니다. 팀장석과 고정 직원의 지정석 명패는 남깁니다.
+    /// 파트장 명패는 자리를 떠나면 뗍니다. 팀장실과 고정 직원의 지정석 명패는 남깁니다.
+    /// 고정 직원이 다른 칸으로 옮기면(승진으로 파트가 바뀜) 예전 자리 명패도 뗍니다.
     private mutating func removePlate(of agent: Agent) {
-        guard agent.role == .lead, agent.seat != 0, let plate = Self.plate(for: agent),
-            nameplates[agent.teamID]?[agent.seat] == plate
-        else { return }
-        nameplates[agent.teamID]?[agent.seat] = nil
+        guard let plate = Self.plate(for: agent), nameplates[agent.teamID]?[agent.seat] == plate else { return }
+        if agent.role == .lead, !agent.seat.isOffice {
+            nameplates[agent.teamID]?[agent.seat] = nil
+        } else if agent.role == .member, let current = actors[agent.id]?.agent, current.seat != agent.seat {
+            nameplates[agent.teamID]?[agent.seat] = nil
+        }
+    }
+
+    /// 파트 칸 표지 (방 → 칸 → 글자): 0번 칸 "팀장 파트", 파트장 칸은 직함, 쓰는 파트가 없는 칸은 "빈 칸"
+    public var podSigns: [TeamID: [Int: String]] {
+        var signs: [TeamID: [Int: String]] = [:]
+        for band in layout.bands {
+            var row: [Int: String] = [:]
+            for cell in 0..<band.cells { row[cell] = cell == 0 ? "팀장 파트" : "빈 칸" }
+            for actor in actors.values where actor.agent.teamID == band.team && actor.agent.role == .lead && !actor.agent.seat.isOffice {
+                if actor.agent.part < band.cells { row[actor.agent.part] = actor.agent.title.label }
+            }
+            signs[band.team] = row
+        }
+        return signs
     }
 
     /// 닫히는 방 중 남은 직원이 모두 나간 방을 비웁니다.
@@ -383,30 +412,118 @@ public struct Stage: Sendable {
         nameplates[id] = nil
         events.append(.teamClosed(id))
         compactionPending = true
-        compactLayoutIfPossible()
+        updateLayout()
     }
 
-    /// 맨 아래 줄의 섬이 모두 비었으면 사무실을 줄입니다. 아래쪽(리서치 코너·휴게실)이 함께 올라오므로
-    /// 그 근처에 서 있거나 지나가는 직원이 없을 때만 합니다.
-    private mutating func compactLayoutIfPossible() {
-        let needed = (teams.values.map(\.island).max() ?? 0) + 1
-        let target = OfficeLayout(islandCount: needed)
-        guard target.rows < layout.rows else {
+    // MARK: - 배치 늘리기·줄이기 (설계서 §8.1)
+
+    /// 방의 띠에 필요한 칸 수: 방 직원의 파트·자리와 지금 가 있는(빌려 앉은) 자리 중 가장 큰 칸 번호가 있는 줄까지
+    private func neededCells(_ team: TeamID) -> Int {
+        var maxPart = requestedCells[team].map { $0 - 1 } ?? 0
+        for actor in actors.values {
+            if actor.agent.teamID == team { maxPart = max(maxPart, actor.agent.part, actor.agent.seat.part) }
+            if let place = actor.place, place.team == team, let seat = place.seat { maxPart = max(maxPart, seat.part) }
+        }
+        return Choreographer.cellCount(maxPart: maxPart)
+    }
+
+    /// 자리 지시를 실행하기 전에 그 칸이 배치에 있게 합니다
+    private mutating func prepare(_ spot: Spot) {
+        guard case .seat(let team, let seat) = spot, teams[team] != nil,
+            (layout.band(for: team)?.cells ?? 0) <= seat.part
+        else { return }
+        requestedCells[team] = seat.part + 1
+        updateLayout()
+        requestedCells[team] = nil
+    }
+
+    /// 방이 열리거나 칸이 필요해지면 띠를 바로 늘리고(아래 띠는 통째로 내려감), 닫힌 방이나 비게 된 맨 아래 줄은
+    /// 그 자리에 서 있거나 지나가는 직원이 없을 때 줄입니다. 띠 순서는 방이 열린 순서이고, 새 방은 맨 아래에 붙습니다.
+    private mutating func updateLayout() {
+        var grown = layout.rooms.map { room in
+            teams[room.team] == nil ? room : OfficeLayout.Room(team: room.team, cells: max(room.cells, neededCells(room.team)))
+        }
+        for team in sortedTeams where !grown.contains(where: { $0.team == team.id }) {
+            grown.append(OfficeLayout.Room(team: team.id, cells: neededCells(team.id)))
+        }
+        let grownLayout = OfficeLayout(rooms: grown)
+        if grownLayout != layout { relayout(to: grownLayout) }
+
+        let target = OfficeLayout(rooms: grown.filter { teams[$0.team] != nil }.map { OfficeLayout.Room(team: $0.team, cells: neededCells($0.team)) })
+        guard target != layout else {
             compactionPending = false
             return
         }
-        let limit = target.lastDeskY + 120
-        let busy = actors.values.contains { actor in
-            actor.position.y > limit || (actor.place?.final.y ?? 0) > limit || actor.path.contains { $0.y > limit }
+        if isBusy(removing: target) {
+            compactionPending = true
+        } else {
+            relayout(to: target)
+            compactionPending = false
         }
-        guard !busy else { return }
-        layout = target
-        pathfinder = Pathfinder(layout: layout)
-        compactionPending = false
+    }
+
+    /// 줄어드는 곳(사라지는 띠, 비게 된 맨 아래 줄)에 직원이 있거나 지나가는 중인지
+    private func isBusy(removing target: OfficeLayout) -> Bool {
+        var removed: [MapRect] = []
+        for (index, band) in layout.bands.enumerated() {
+            let kept = target.band(for: band.team)
+            let keptRows = kept?.rows ?? 0
+            guard keptRows < band.rows else { continue }
+            let from = band.top + OfficeLayout.rowSpacing * Double(keptRows)
+            removed.append(MapRect(0, from, OfficeLayout.width, band.bottom - from))
+            if index == 0, kept == nil { removed.append(band.office) }
+        }
+        guard !removed.isEmpty else { return false }
+        func inside(_ point: MapPoint) -> Bool {
+            !OfficeLayout.lounge.contains(point) && removed.contains { $0.contains(point) }
+        }
+        return actors.values.contains { actor in
+            inside(actor.position) || actor.place.map { inside($0.final) || inside($0.approach) } == true || actor.path.contains(where: inside)
+        }
+    }
+
+    /// 새 배치로 바꿉니다. 자리를 옮긴 띠의 직원은 띠와 함께 옮기고, 걷던 직원은 새 길로 다시 걷습니다.
+    private mutating func relayout(to new: OfficeLayout) {
+        let old = layout
+        layout = new
+        pathfinder = Pathfinder(layout: new)
+        func shift(_ point: MapPoint) -> Double {
+            for (index, band) in old.bands.enumerated() {
+                let inside: Bool
+                if index == 0 {
+                    inside = (point.y >= band.top && point.y < band.bottom && !OfficeLayout.lounge.contains(point)) || band.office.contains(point)
+                } else {
+                    inside = point.y >= band.top && point.y < band.bottom
+                }
+                guard inside else { continue }
+                guard let moved = new.band(for: band.team) else { return 0 }
+                return moved.top - band.top
+            }
+            return 0
+        }
+        for id in actors.keys.sorted() {
+            var actor = actors[id]!
+            actor.position.y += shift(actor.position)
+            if let place = actor.place {
+                if let team = place.team, let seat = place.seat, new.band(for: team) != nil {
+                    actor.place = new.seat(team, seat)
+                } else {
+                    actor.place = place.shifted(by: shift(place.final))
+                }
+            }
+            if !actor.path.isEmpty, let place = actor.place {
+                var path = pathfinder.route(from: actor.position, to: place.approach)
+                if place.final != place.approach { path.append(place.final) }
+                actor.path = path.isEmpty ? [place.final] : path
+            }
+            actors[id] = actor
+        }
     }
 
     private mutating func walk(_ id: AgentID, to spot: Spot) {
-        guard let actor = actors[id] else { return }
+        guard actors[id] != nil else { return }
+        prepare(spot)
+        let actor = actors[id]!
         let target = resolve(spot, for: id)
         var path: [MapPoint] = []
         var position = actor.position
@@ -500,18 +617,23 @@ public struct Stage: Sendable {
 
     // MARK: - 말풍선 (설계서 §7.2)
 
-    /// 팀 구역에서 지금 보이는 말풍선 수 (자기 것은 빼고 셉니다)
-    private func visibleBubbles(in team: TeamID, excluding id: AgentID? = nil) -> [StageActor] {
-        actors.values.filter { $0.agent.teamID == team && $0.bubble != nil && $0.id != id }
+    /// 말풍선 수를 세는 단위: 파트 칸 (팀장실은 따로). 팀장 파트원은 0번 칸, 파트장과 그 파트원은 파트장의 칸입니다.
+    static func bubbleUnit(_ agent: Agent) -> String {
+        agent.teamID.raw + (agent.seat.isOffice ? "#office" : "#\(agent.part)")
     }
 
-    /// 말풍선을 띄웁니다. 팀 구역이 꽉 찼으면 덜 중요한 말풍선의 자리를 빼앗거나, 대기열에서 기다립니다.
+    /// 같은 단위에서 지금 보이는 말풍선 (자기 것은 빼고 셉니다)
+    private func visibleBubbles(in unit: String, excluding id: AgentID? = nil) -> [StageActor] {
+        actors.values.filter { Self.bubbleUnit($0.agent) == unit && $0.bubble != nil && $0.id != id }
+    }
+
+    /// 말풍선을 띄웁니다. 그 파트 칸이 꽉 찼으면 덜 중요한 말풍선의 자리를 빼앗거나, 대기열에서 기다립니다.
     private mutating func present(_ bubble: Bubble, blip: SoundCue?, for id: AgentID) {
         guard let actor = actors[id] else { return }
         actors[id]!.queuedBubble = nil
-        let team = actor.agent.teamID
-        let others = visibleBubbles(in: team, excluding: id)
-        if others.count >= config.maxBubblesPerTeam {
+        let unit = Self.bubbleUnit(actor.agent)
+        let others = visibleBubbles(in: unit, excluding: id)
+        if others.count >= config.maxBubblesPerUnit {
             let weakest = others.min {
                 ($0.bubble!.kind.priority, -$0.bubbleShownAt, $0.id) < ($1.bubble!.kind.priority, -$1.bubbleShownAt, $1.id)
             }
@@ -541,22 +663,22 @@ public struct Stage: Sendable {
 
     private mutating func hideBubble(_ id: AgentID, promote: Bool = true) {
         guard actors[id] != nil else { return }
-        let team = actors[id]!.agent.teamID
+        let unit = Self.bubbleUnit(actors[id]!.agent)
         let hadBubble = actors[id]!.bubble != nil
         actors[id]!.bubble = nil
         actors[id]!.bubbleUntil = nil
         actors[id]!.bubbleBlip = nil
-        if hadBubble, promote { promoteQueuedBubbles(in: team, skipping: id) }
+        if hadBubble, promote { promoteQueuedBubbles(in: unit, skipping: id) }
     }
 
-    /// 자리가 난 팀 구역에 기다리던 말풍선을 중요한 것, 오래 기다린 것부터 띄웁니다
-    private mutating func promoteQueuedBubbles(in team: TeamID? = nil, skipping skipped: AgentID? = nil) {
-        let teams = team.map { [$0] } ?? Array(Set(actors.values.map(\.agent.teamID))).sorted { $0.raw < $1.raw }
-        for team in teams {
-            var free = config.maxBubblesPerTeam - visibleBubbles(in: team).count
+    /// 자리가 난 파트 칸에 기다리던 말풍선을 중요한 것, 오래 기다린 것부터 띄웁니다
+    private mutating func promoteQueuedBubbles(in unit: String? = nil, skipping skipped: AgentID? = nil) {
+        let units = unit.map { [$0] } ?? Array(Set(actors.values.map { Self.bubbleUnit($0.agent) })).sorted()
+        for unit in units {
+            var free = config.maxBubblesPerUnit - visibleBubbles(in: unit).count
             guard free > 0 else { continue }
             let waiting = actors.values
-                .filter { $0.agent.teamID == team && $0.queuedBubble != nil && $0.id != skipped }
+                .filter { Self.bubbleUnit($0.agent) == unit && $0.queuedBubble != nil && $0.id != skipped }
                 .sorted {
                     let a = $0.queuedBubble!, b = $1.queuedBubble!
                     return (-a.bubble.kind.priority, a.since, $0.id) < (-b.bubble.kind.priority, b.since, $1.id)
@@ -610,28 +732,33 @@ public struct Stage: Sendable {
     // MARK: - 자리 정하기
 
     private func resolve(_ spot: Spot, for id: AgentID) -> Place {
+        func isFree(_ place: Place) -> Bool {
+            guard let key = place.key else { return true }
+            return reservations[key] == nil || reservations[key] == id
+        }
         switch spot {
         case .door:
             return Place(final: OfficeLayout.doorPoint)
-        case .seat(let teamID, let index):
-            let island = teams[teamID]?.island ?? 0
-            return OfficeLayout.seat(island: island, index: index)
+        case .seat(let teamID, let seat):
+            return layout.seat(teamID, seat)
         case .beside(let other):
             guard let target = actors[other] else { return Place(final: OfficeLayout.doorPoint) }
             let anchor = target.place?.approach ?? target.position
-            // 책상에 앉은 직원이면 책상 뒤 통로에서 옆에 섭니다
-            let candidates = [anchor + MapPoint(40, 0), anchor + MapPoint(-40, 0), anchor + MapPoint(0, 34), anchor + MapPoint(40, 30)]
-            let spot = candidates.first { layout.isWalkable($0) } ?? anchor
-            return Place(final: spot)
-        case .bookshelf, .whiteboard, .serverRack, .research, .lounge:
-            let zone = OfficeLayout.zone(for: spot)!
-            let slots = layout.slots(zone)
-            let free = slots.first { slot in
-                guard let key = slot.key else { return true }
-                return reservations[key] == nil || reservations[key] == id
+            // 책상에 앉은 직원이면 책상 뒤 통로에서 옆에 섭니다. 여럿이 오면 옆자리를 나눠 섭니다.
+            let offsets = [MapPoint(40, 0), MapPoint(-40, 0), MapPoint(0, 34), MapPoint(40, 30), MapPoint(-40, 30), MapPoint(76, -14), MapPoint(-76, -14)]
+            let candidates = offsets.enumerated().map { index, offset in
+                Place(final: anchor + offset, key: "beside:\(other.raw):\(index)")
             }
-            // 자리가 모두 찼으면 첫 자리 근처에 조금 비켜 섭니다
-            return free ?? Place(final: slots[0].approach + MapPoint(Double(id.raw.count % 3) * 18 - 18, 22))
+            return candidates.first { layout.isWalkable($0.final) && isFree($0) }
+                ?? candidates.first { layout.isWalkable($0.final) }.map { Place(final: $0.final) }
+                ?? Place(final: anchor)
+        case .bookshelf, .whiteboard, .research, .lounge, .massageChair, .pantry:
+            let zone = OfficeLayout.zone(for: spot)!
+            // 정해진 자리가 다 차면 구역 가까이 흩어 섭니다 (한 점에 겹치지 않게)
+            if let free = layout.slots(zone).first(where: isFree) { return free }
+            let overflowZone: OfficeLayout.Zone = zone == .massageChair ? .lounge : zone
+            if let free = layout.overflow(overflowZone).first(where: isFree) { return free }
+            return layout.slots(zone)[0]
         }
     }
 

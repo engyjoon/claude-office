@@ -56,8 +56,8 @@ struct PortraitAndPlateTests {
 
     @Test("명패는 책상 앞판 가운데보다 조금 위, 글자는 명패 가운데보다 아주 조금 아래에 놓인다")
     func plateCentered() throws {
-        let layers = OfficeArt.island(0, team: nil, plates: [0: "★ 팀장"])
-        let desk = try #require(layers.first { $0.name == "desk-0-0" })
+        let layers = OfficeArt.desk("t", x: 105, y: 346, chair: 0, plate: "★ 팀장", plant: true)
+        let desk = try #require(layers.first { $0.name == "desk-t" })
         let box = try #require(desk.shapes.compactMap { shape -> MapRect? in
             if case .rect(let rect, _) = shape.geometry, shape.fill == .swatch(.plate) { return rect }
             return nil

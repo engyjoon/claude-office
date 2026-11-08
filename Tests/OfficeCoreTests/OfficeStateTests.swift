@@ -22,7 +22,7 @@ struct OfficeStateTests {
         #expect(team.name == "a-sdn-portal")
         #expect(team.island == 0)
         #expect(lead.role == .lead)
-        #expect(lead.seat == 0)
+        #expect(lead.seat == .office)
         #expect(lead.profile.kind == .lead)
         // 같은 세션의 SessionStart(resume)가 또 와도 새로 출근하지 않습니다
         #expect(apply(&state, hook.make("SessionStart", ["source": "resume"])).isEmpty)
@@ -49,7 +49,8 @@ struct OfficeStateTests {
         #expect(state.teams.count == 1)
         guard case .arrived(let second) = beats.first else { Issue.record("\(beats)"); return }
         #expect(second.displayName == "파트장")
-        #expect(second.seat != 0)
+        // 파트장은 자기 파트 칸(1번)의 ★ 자리
+        #expect(second.seat == Seat(part: 1, desk: 0))
         _ = apply(&state, Hook(session: "s3", cwd: "/Users/demo/work/other").make("SessionStart"))
         #expect(state.sortedTeams.map(\.island) == [0, 1])
     }
@@ -136,14 +137,14 @@ struct OfficeStateTests {
         #expect(reviewer2.profile.appearance == reviewer1.profile.appearance)
     }
 
-    @Test("자리가 모자라면 좌석이 늘어난다")
+    @Test("파트원은 자기 파트 칸의 1번 책상부터 앉고, 책상이 모자라면 칸 앞에 서는 자리를 받는다")
     func seatsGrow() {
         var state = OfficeState()
         for index in 0..<5 {
             _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a\(index)", input: ["subagent_type": "general-purpose"]))
         }
-        let team = state.sortedTeams[0]
-        #expect(team.seatCount == 6)
+        let members = state.agents.values.filter { $0.role == .member }.map(\.seat).sorted()
+        #expect(members == (1...5).map { Seat(part: 0, desk: $0) })
         #expect(Set(state.agents.values.map(\.seat)).count == 6)
     }
 

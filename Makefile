@@ -33,9 +33,9 @@ sounds:
 	$(SWIFT) run -q office-sim sounds build/sounds
 
 ## 위임 시나리오의 사무실 장면을 build/snapshots/*.svg로 (맥 없이 그림 확인)
-##   2.6초 종이비행기 · 10초 상태 칩 · 16초 외침 풍선 · 52.4초 보고 · 61.5초 응답 완료 · 125초 휴게실
+##   2.6초 종이비행기 · 10초 책장 상태 칩 · 16초 외침 풍선 · 54.6초 보고 · 61.5초 응답 완료 · 128초 휴게 공간
 snapshot:
-	$(SWIFT) run -q office-sim snapshot Scenarios/delegation.jsonl --at 2.6,10,16,52.4,61.5,125 --out build/snapshots
+	$(SWIFT) run -q office-sim snapshot Scenarios/delegation.jsonl --at 2.6,10,16,54.6,61.5,128 --out build/snapshots
 
 ## 맥 앱 없이 훅 서버+엔진만 실행 (직원 목록만 출력)
 serve:

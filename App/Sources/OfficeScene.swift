@@ -23,6 +23,9 @@ final class OfficeScene: SKScene {
     /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
     private let world = SKNode()
     private let furniture = SKNode()
+    /// 움직이는 가구 (안마 의자 롤러, 긴 명령을 기다리는 모니터). 그림이 바뀔 때만 다시 만듭니다.
+    private let liveFurniture = SKNode()
+    private var shownLiveLayers: [ArtLayer] = []
     /// 말풍선·상태 칩·아이콘·효과 층 (가구와 직원 모두의 위)
     private let overlayLayer = SKNode()
     private var overlays: [String: OverlayNode] = [:]
@@ -48,6 +51,7 @@ final class OfficeScene: SKScene {
         backgroundColor = Swatch.floor.color.skColor
         addChild(world)
         world.addChild(furniture)
+        world.addChild(liveFurniture)
         overlayLayer.zPosition = 1_000_000
         world.addChild(overlayLayer)
     }
@@ -82,6 +86,7 @@ final class OfficeScene: SKScene {
         let height = stage.layout.height
         let extent = fitWorld(officeHeight: height)
         rebuildFurnitureIfNeeded(stage, extent: extent)
+        rebuildLiveFurnitureIfNeeded(stage)
 
         var present = Set<AgentID>()
         for actor in stage.sortedActors {
@@ -130,6 +135,19 @@ final class OfficeScene: SKScene {
         }
     }
 
+    private func rebuildLiveFurnitureIfNeeded(_ stage: Stage) {
+        let layers = OfficeArt.liveLayers(stage: stage)
+        guard layers != shownLiveLayers else { return }
+        shownLiveLayers = layers
+        liveFurniture.removeAllChildren()
+        let height = stage.layout.height
+        for layer in layers {
+            let node = ArtNodes.node(for: layer.shapes, colors: nil) { CGPoint(x: $0.x, y: height - $0.y) }
+            node.zPosition = layer.depth
+            liveFurniture.addChild(node)
+        }
+    }
+
     // MARK: - 클릭
 
     override func mouseDown(with event: NSEvent) {
@@ -169,15 +187,21 @@ final class OfficeScene: SKScene {
         let plates = stage.nameplates.keys.sorted().map { team in
             team.raw + ":" + (stage.nameplates[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
         }
+        let podSigns = stage.podSigns
+        let signs = podSigns.keys.sorted().map { team in
+            team.raw + ":" + (podSigns[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+        }
+        let bands = stage.layout.bands.map { "\($0.team.raw)#\($0.cells)@\(Int($0.top))" }
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
         let fit = [extent.x, extent.width, extent.height].map { String(Int(($0 / 4).rounded())) }.joined(separator: ",")
-        let signature = fit + "|\(stage.layout.islandCount)|" + teams.map { "\($0.island):\($0.name)" }.joined(separator: ",") + "|" + plates.joined(separator: ";")
+        let signature = [fit, bands.joined(separator: ","), teams.map { "\($0.id.raw):\($0.name):\($0.colorIndex)" }.joined(separator: ","),
+            plates.joined(separator: ";"), signs.joined(separator: ";")].joined(separator: "|")
         guard signature != furnitureSignature else { return }
         furnitureSignature = signature
 
         furniture.removeAllChildren()
         let height = stage.layout.height
-        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent)
+        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, podSigns: podSigns, extent: extent)
 
         // 바닥과 벽은 움직이지 않으므로 한 번 그려서 캐시합니다
         let background = SKEffectNode()

@@ -4,14 +4,14 @@ import Testing
 
 @testable import OfficeStage
 
-/// 팀장 1명과 팀원 4명이 자리에 앉아 있는 사무실
+/// 팀장실의 팀장 1명과 팀장 파트 칸의 파트원 5명 (5번째는 옆 빈 칸의 책상을 빌림)
 private func crowdedOffice() -> StageHarness {
     var h = StageHarness()
     h.hook(hook("SessionStart"))
-    for index in 1...4 {
+    for index in 1...5 {
         h.hook(tool("PreToolUse", "Agent", "a\(index)", #"{"description":"일 \#(index)","subagent_type":"general-purpose"}"#), at: Double(index))
     }
-    h.run(until: 30)
+    h.run(until: 40)
     return h
 }
 
@@ -21,27 +21,49 @@ private func say(_ h: inout StageHarness, _ raw: String, _ kind: BubbleKind, _ t
 
 @Suite("말풍선 표시 규칙 (설계서 §7.2)")
 struct BubbleRuleTests {
-    @Test("팀 구역당 말풍선은 3개까지, 넘치면 기다렸다가 자리가 나면 뜬다")
-    func perTeamLimit() {
+    @Test("파트 칸마다 말풍선은 3개까지(팀장실은 따로), 넘치면 기다렸다가 자리가 나면 뜬다")
+    func perUnitLimit() {
         var h = crowdedOffice()
-        let ids = ["lead-1", "member-2", "member-3", "member-4", "member-5"]
+        let ids = ["lead-1", "member-2", "member-3", "member-4", "member-5", "member-6"]
         #expect(ids.allSatisfy { h.actor($0) != nil })
-        for id in ids.prefix(3) { say(&h, id, .speech, "안녕하세요", duration: 2) }
-        say(&h, "member-4", .speech, "저도요", duration: 2)
-        #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 3)
-        #expect(h.actor("member-4")?.bubble == nil)
-        #expect(h.actor("member-4")?.queuedBubble?.bubble.text == "저도요")
+        for id in ["member-2", "member-3", "member-4"] { say(&h, id, .speech, "안녕하세요", duration: 2) }
+        say(&h, "member-5", .speech, "저도요", duration: 2)
+        #expect(h.actor("member-5")?.bubble == nil)
+        #expect(h.actor("member-5")?.queuedBubble?.bubble.text == "저도요")
+        // 팀장실은 파트 칸과 따로 셉니다
+        say(&h, "lead-1", .speech, "다들 고마워요", duration: 2)
+        #expect(h.actor("lead-1")?.bubble?.text == "다들 고마워요")
+        #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 4)
 
         // 앞의 말풍선이 사라지면 기다리던 말풍선이 뜹니다
         h.run(until: h.now + 2.1)
-        #expect(h.actor("member-4")?.bubble?.text == "저도요")
-        #expect(h.actor("member-4")?.queuedBubble == nil)
+        #expect(h.actor("member-5")?.bubble?.text == "저도요")
+        #expect(h.actor("member-5")?.queuedBubble == nil)
+    }
+
+    @Test("파트장 칸의 말풍선은 팀장 파트 칸과 따로 센다")
+    func partPodsCountSeparately() {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.hook(hook("SessionStart", session: "s2"), at: 0.5)
+        for index in 1...3 {
+            h.hook(tool("PreToolUse", "Agent", "a\(index)", #"{"subagent_type":"general-purpose"}"#), at: Double(index))
+            h.hook(hook("PreToolUse", #""tool_name":"Agent","tool_use_id":"b\#(index)","tool_input":{"subagent_type":"general-purpose"}"#, session: "s2"), at: Double(index) + 0.5)
+        }
+        h.run(until: 40)
+        let mainPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.part == 0 }.map(\.id.raw)
+        let partPod = h.stage.actors.values.filter { $0.agent.role == .member && $0.agent.part == 1 }.map(\.id.raw)
+        #expect(mainPod.count == 3 && partPod.count == 3)
+        for id in mainPod + partPod + ["lead-2"] { say(&h, id, .speech, "네!", duration: 3) }
+        // 팀장 파트 칸 3개 + 파트장 칸 3개 (파트장 포함 4명 중 3개)
+        #expect(h.stage.actors.values.filter { $0.bubble != nil }.count == 6)
+        #expect(h.actor("lead-2")?.queuedBubble != nil)
     }
 
     @Test("외침 풍선은 덜 중요한 말풍선의 자리를 빼앗고, 밀려난 말풍선은 남은 시간을 들고 기다린다")
     func shoutDisplaces() {
         var h = crowdedOffice()
-        say(&h, "lead-1", .speech, "부탁해요!")
+        say(&h, "member-5", .speech, "부탁해요!")
         say(&h, "member-2", .thought, "음…")
         say(&h, "member-3", .speech, "네!")
         say(&h, "member-4", .shout, "npm test 해도 될까요?")
@@ -58,29 +80,29 @@ struct BubbleRuleTests {
     @Test("오래 기다린 말풍선은 버리고, 닫으면 기다리던 것도 함께 버린다")
     func queueTimeoutAndDismiss() {
         var h = crowdedOffice()
-        for id in ["lead-1", "member-2", "member-3"] { say(&h, id, .shout, "승인 부탁드려요!") }
-        say(&h, "member-4", .speech, "저기요")
-        say(&h, "member-5", .shout, "이것도요!")
-        #expect(h.actor("member-4")?.queuedBubble != nil)
+        for id in ["member-2", "member-3", "member-4"] { say(&h, id, .shout, "승인 부탁드려요!") }
+        say(&h, "member-5", .speech, "저기요")
+        say(&h, "member-6", .shout, "이것도요!")
+        #expect(h.actor("member-5")?.queuedBubble != nil)
         h.run(until: h.now + 7)
-        #expect(h.actor("member-4")?.queuedBubble == nil)  // 6초 넘게 기다린 말은 버립니다
-        #expect(h.actor("member-5")?.queuedBubble != nil)  // 외침 풍선은 기다립니다
-        h.stage.enqueue([Directive(AgentID("member-5"), .dismissBubble)])
-        #expect(h.actor("member-5")?.queuedBubble == nil)
-        h.stage.enqueue([Directive(AgentID("lead-1"), .dismissBubble)])
-        #expect(h.actor("lead-1")?.bubble == nil)
+        #expect(h.actor("member-5")?.queuedBubble == nil)  // 6초 넘게 기다린 말은 버립니다
+        #expect(h.actor("member-6")?.queuedBubble != nil)  // 외침 풍선은 기다립니다
+        h.stage.enqueue([Directive(AgentID("member-6"), .dismissBubble)])
+        #expect(h.actor("member-6")?.queuedBubble == nil)
+        h.stage.enqueue([Directive(AgentID("member-2"), .dismissBubble)])
+        #expect(h.actor("member-2")?.bubble == nil)
     }
 
     @Test("말풍선 블립은 말풍선이 실제로 뜰 때 울린다")
     func blipFollowsBubble() {
         var h = crowdedOffice()
         _ = h.stage.drainEvents()
-        for id in ["lead-1", "member-2", "member-3"] { say(&h, id, .speech, "하나둘", duration: 1) }
+        for id in ["member-2", "member-3", "member-4"] { say(&h, id, .speech, "하나둘", duration: 1) }
         let blip = SoundCue.bubble(voice: 1, syllables: 2)
-        h.stage.enqueue([Directive(AgentID("member-4"), .sound(blip)), Directive(AgentID("member-4"), .say(.timed(.speech, "기다려요")))])
-        #expect(!h.stage.drainEvents().contains(.sound(blip, AgentID("member-4"))))
+        h.stage.enqueue([Directive(AgentID("member-5"), .sound(blip)), Directive(AgentID("member-5"), .say(.timed(.speech, "기다려요")))])
+        #expect(!h.stage.drainEvents().contains(.sound(blip, AgentID("member-5"))))
         h.run(until: h.now + 1.1)
-        #expect(h.events.contains(.sound(blip, AgentID("member-4"))))
+        #expect(h.events.contains(.sound(blip, AgentID("member-5"))))
     }
 }
 

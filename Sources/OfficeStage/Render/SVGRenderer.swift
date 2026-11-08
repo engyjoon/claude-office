@@ -10,7 +10,8 @@ public enum SVGRenderer {
         let width = OfficeLayout.width
         let height = layout.height
         var body = ""
-        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates)
+        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, podSigns: stage.podSigns)
+            + OfficeArt.liveLayers(stage: stage)
 
         for layer in layers where layer.depth == -.infinity {
             body += layer.shapes.map { element($0, colors: nil) }.joined()

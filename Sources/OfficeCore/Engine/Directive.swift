@@ -3,14 +3,20 @@ import Foundation
 /// 사무실 안의 장소 (설계서 §8.1). 실제 좌표는 씬이 맵에서 정합니다.
 public enum Spot: Hashable, Sendable, CustomStringConvertible {
     case door
-    case seat(TeamID, Int)
+    /// 방 안의 자리: 팀장실 책상(`Seat.office`) 또는 파트 칸의 책상·칸 앞에 서는 자리
+    case seat(TeamID, Seat)
     /// 특정 직원 바로 옆 (위임·보고 대화용)
     case beside(AgentID)
     case bookshelf
-    case serverRack
+    /// 뒷벽 창가의 스탠딩 리서치 데스크 (웹 검색)
     case research
     case whiteboard
+    /// 휴게 공간 (소파·커피)
     case lounge
+    /// 휴게 공간의 안마 의자 (1개)
+    case massageChair
+    /// 탕비 코너 (냉장고·정수기)
+    case pantry
 
     public var isSeat: Bool {
         if case .seat = self { return true }
@@ -20,13 +26,14 @@ public enum Spot: Hashable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .door: "문"
-        case .seat(let team, let index): "자리(\(team.raw.split(separator: "/").last ?? "")#\(index))"
+        case .seat(let team, let seat): "자리(\(team.raw.split(separator: "/").last ?? "")#\(seat))"
         case .beside(let agent): "\(agent) 옆"
         case .bookshelf: "책장"
-        case .serverRack: "서버랙"
-        case .research: "리서치 코너"
+        case .research: "리서치 데스크"
         case .whiteboard: "화이트보드"
-        case .lounge: "휴게실"
+        case .lounge: "휴게 공간"
+        case .massageChair: "안마 의자"
+        case .pantry: "탕비 코너"
         }
     }
 }
@@ -34,6 +41,10 @@ public enum Spot: Hashable, Sendable, CustomStringConvertible {
 /// 계속 유지되는 자세
 public enum Pose: String, Hashable, Sendable {
     case standing, sitting, typing, reading, thinking, writingBoard, holdingCup, raisingHand, sleeping, sorting
+    /// 오래 걸리는 셸 명령을 자기 책상에서 모니터를 보며 기다림 (M4.5b, 서버랙 대신)
+    case watching
+    /// 안마 의자에 앉아 안마받기: 몸 미세 진동, 느린 고개 흔들림, 팔은 팔걸이
+    case massage
 }
 
 /// 한 번 하고 끝나는 동작 (설계서 §9.3 제스처 12종 중 상황 연출에 쓰는 것)
@@ -49,6 +60,8 @@ public enum FacialExpression: String, Hashable, Sendable {
 /// 머리 위 아이콘
 public enum Emote: String, Hashable, Sendable {
     case exclamation, question, bulb, sweat, sparkle, zzz, note
+    /// 오래 걸리는 명령을 기다리는 중 ⏳
+    case hourglass
 }
 
 public enum BubbleKind: String, Hashable, Sendable {
@@ -81,6 +94,8 @@ public struct StatusPill: Hashable, Sendable {
 
 public enum Prop: String, Hashable, Sendable {
     case book, cup, documents, marker
+    /// 탕비 코너 냉장고에서 꺼낸 음료
+    case drink
 }
 
 public enum Effect: Hashable, Sendable {
@@ -135,7 +150,7 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         let who = agent.map { "\($0)" } ?? "*"
         let what: String
         switch action {
-        case .openTeam(let team): what = "팀 열기 \(team.name) (섬 \(team.island))"
+        case .openTeam(let team): what = "팀 열기 \(team.name) (방 \(team.island))"
         case .closeTeam(let team): what = "팀 닫기 \(team.raw.split(separator: "/").last ?? "")"
         case .spawn(let agent, let spot): what = "등장 \(agent.displayName) @\(spot)"
         case .refresh(let agent): what = "정보 갱신 \(agent.displayName) (자리 \(agent.seat))"

@@ -62,6 +62,12 @@ public enum CharacterArt {
             return [.rect(-4.5, 11, 9, 9, r: 2, fill: .swatch(.white)), .line("M4.5,13 q4,1 0,5", width: 1.4)]
         case .marker:
             return [.rect(-1.6, 12, 3.2, 12, r: 1.2, fill: .swatch(.alert), width: 1)]
+        case .drink:
+            // 냉장고에서 꺼낸 캔 음료
+            return [
+                .rect(-4, 10, 8, 12, r: 2, fill: .swatch(.peach), width: 1.3),
+                .rect(-4, 14, 8, 3, fill: .swatch(.white), outline: false),
+            ]
         default:
             return []
         }
@@ -336,6 +342,15 @@ public enum RigAnimator {
                 pose.headDrop = 2 + sin(time * 2.1)
             case .holdingCup:
                 pose.rightArm = sipAngle(time)
+            case .watching:
+                // 모니터를 보며 기다림: 손은 책상 위, 고개를 천천히 갸웃하다 가끔 콕 끄덕
+                pose.headRotation = 3 * sin(time * 1.4 + seed)
+                let tap = (time + seed).truncatingRemainder(dividingBy: 2.2)
+                pose.headDrop = tap < 0.25 ? 1.6 * sin(tap / 0.25 * Double.pi) : 0
+            case .massage:
+                // 안마받는 중: 몸이 잘게 떨리고 고개는 느리게 흔들림, 팔은 팔걸이에
+                pose.bob = -0.7 * (1 + sin(time * 38)) / 2
+                pose.headRotation = 6 * sin(time * 1.2 + seed)
             default:
                 break
             }
@@ -357,6 +372,8 @@ public enum RigAnimator {
         switch pose {
         case .typing: (-38, 38)
         case .reading, .sorting, .sleeping: (-34, 34)
+        case .watching: (-30, 30)
+        case .massage: (30, -30)
         case .thinking: (12, 125)
         case .writingBoard: (12, -110)
         case .holdingCup: (12, 95)

@@ -146,6 +146,39 @@ public enum Activity: Hashable, Sendable {
     case reporting
 }
 
+/// 방 안의 자리 (설계서 §8.1, M4.5b).
+///
+/// - 팀장석은 왼쪽 위 팀장실의 책상 하나(`Seat.office`)입니다.
+/// - 파트 칸은 파트 번호와 같은 번호의 칸(책상 4개)입니다. 0번 칸 = 팀장 직속 파트, n번 칸 = 파트장 n의 파트.
+///   칸의 0번 책상(맨 왼쪽)은 파트장 자리(★)이고, 파트원은 1번 책상부터 앉습니다.
+///   `desk`가 `desksPerPod` 이상이면 책상이 없는 자리(칸 앞에 서는 자리)라, 일할 때는 빈 책상을 빌립니다.
+public struct Seat: Hashable, Sendable, Comparable, CustomStringConvertible {
+    /// 파트 칸 하나의 책상 수
+    public static let desksPerPod = 4
+    /// 팀장실 책상
+    public static let office = Seat(part: 0, desk: -1)
+
+    /// 칸 번호 (= 파트 번호)
+    public var part: Int
+    /// 칸 안 책상 번호. -1은 팀장실
+    public var desk: Int
+
+    public init(part: Int, desk: Int) {
+        self.part = part
+        self.desk = desk
+    }
+
+    public var isOffice: Bool { desk < 0 }
+    /// 책상이 있는 자리인지 (팀장실 포함)
+    public var hasDesk: Bool { desk < Self.desksPerPod }
+    /// 파트장 자리 (칸의 맨 왼쪽 ★)
+    public var isPartLeadDesk: Bool { desk == 0 }
+
+    public var description: String { isOffice ? "팀장실" : "\(part)-\(desk)" }
+
+    public static func < (lhs: Seat, rhs: Seat) -> Bool { (lhs.part, lhs.desk) < (rhs.part, rhs.desk) }
+}
+
 public struct Agent: Identifiable, Hashable, Sendable {
     public let id: AgentID
     public let role: Role
@@ -157,7 +190,7 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var part: Int
     /// 직함. 팀장·파트장은 승진하거나 파트장 수가 바뀌면 달라집니다.
     public internal(set) var title: JobTitle
-    public internal(set) var seat: Int
+    public internal(set) var seat: Seat
     /// 훅의 `agent_id`. 아직 SubagentStart를 못 받았으면 nil.
     public internal(set) var subagentID: String?
     public internal(set) var delegatedBy: AgentID?
@@ -187,23 +220,21 @@ public struct TeamID: Hashable, Sendable, Comparable, CustomStringConvertible {
     public static func < (lhs: TeamID, rhs: TeamID) -> Bool { lhs.raw < rhs.raw }
 }
 
-/// 방 하나 = 사무실의 책상 섬 하나 (설계서 §1.3 ②, §5).
+/// 방 하나 = 팀장실 + 파트 칸들 (설계서 §1.3 ②, §5, §8.1).
 ///
 /// 방은 메인 세션(팀장) 단위입니다. 데스크톱 앱 정보로 부모를 알면 부모의 방에, 모르면 같은 폴더의 방에 들어갑니다.
 /// 워크트리(`…/.claude/worktrees/<이름>`)는 원래 폴더로 합칩니다. 코드에서는 예전 이름 그대로 `Team`이라고 부릅니다.
 public struct Team: Identifiable, Hashable, Sendable {
     public static let colorCount = 4
-    public static let minimumSeats = 3
 
     public let id: TeamID
     public let name: String
-    /// 사무실 안 책상 섬의 순서 (0부터). 방이 닫히면 다음 방이 그 섬을 다시 씁니다.
+    /// 방 순서 (0부터). 방이 닫히면 다음 방이 그 번호를 다시 씁니다. 사무실 창은 이 순서로 방을 위에서 아래로 놓고,
+    /// 0번째로 놓인 방이 왼쪽 위 팀장실과 휴게 공간 옆에 옵니다.
     public let island: Int
     public let colorIndex: Int
-    /// 좌석 수. 0번은 팀장석. 사람이 늘면 늘어납니다.
-    public internal(set) var seatCount: Int
-    /// 고정 직원의 지정석 (프로필 키 → 좌석 번호). 퇴근해도 명패가 남습니다.
-    public internal(set) var reservedSeats: [String: Int]
+    /// 고정 직원의 지정석 (프로필 키 → 자리). 퇴근해도 명패가 남습니다.
+    public internal(set) var reservedSeats: [String: Seat]
 
     /// 워크트리 표시. `…/proj/.claude/worktrees/<이름>/…`는 `…/proj/…`로 합칩니다.
     public static let worktreeMarker = "/.claude/worktrees/"

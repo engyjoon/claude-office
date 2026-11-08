@@ -42,9 +42,9 @@ struct RoomTests {
         #expect(partLead.displayName == "파트장")
         #expect(partLead.title == .partLead(nil))
         #expect(partLead.part == 1)
-        #expect(partLead.seat != 0)
+        #expect(partLead.seat == Seat(part: 1, desk: 0))
         #expect(name(state, "s1") == "팀장")
-        #expect(state.lead(of: SessionID("s1"))?.seat == 0)
+        #expect(state.lead(of: SessionID("s1"))?.seat == .office)
 
         let third = apply(&state, session: "s3")
         // 첫 파트장은 "파트장" → "파트장1"로 바뀌고, 새 사람은 "파트장2"
@@ -119,15 +119,15 @@ struct RoomTests {
         var state = OfficeState()
         _ = apply(&state, session: "child", hint: SessionHint(ancestors: [SessionID("main")], rootCwd: Self.folder))
         let childSeat = try #require(state.lead(of: SessionID("child"))).seat
-        #expect(childSeat == 0)
+        #expect(childSeat == .office)
 
         let beats = apply(&state, session: "main", hint: SessionHint(rootCwd: Self.folder))
         guard case .retitled(let demoted) = beats.first, case .arrived(let main) = beats.last else { Issue.record("\(beats)"); return }
         #expect(demoted.displayName == "파트장")
-        #expect(demoted.seat != 0)
+        #expect(demoted.seat == Seat(part: 1, desk: 0))
         #expect(main.displayName == "팀장")
-        #expect(main.seat == 0)
-        #expect(state.agents.values.filter { $0.seat == 0 }.count == 1)
+        #expect(main.seat == .office)
+        #expect(state.agents.values.filter { $0.seat == .office }.count == 1)
     }
 
     @Test("힌트가 늦게 와도 (정보 파일이 나중에 생김) 메인 세션에게 팀장 자리를 돌려준다")
@@ -141,7 +141,7 @@ struct RoomTests {
         let beats = apply(&state, session: "child", "UserPromptSubmit", hint: SessionHint(ancestors: [SessionID("main")], rootCwd: Self.folder))
         #expect(name(state, "main") == "팀장")
         #expect(name(state, "child") == "파트장")
-        #expect(state.lead(of: SessionID("main"))?.seat == 0)
+        #expect(state.lead(of: SessionID("main"))?.seat == .office)
         #expect(beats.contains { if case .promoted(let agent) = $0 { agent.session == SessionID("main") } else { false } })
         #expect(beats.contains { if case .retitled(let agent) = $0 { agent.session == SessionID("child") } else { false } })
         // 같은 힌트가 다시 와도 아무 일 없음
@@ -178,9 +178,9 @@ struct RoomTests {
         guard case .promoted(let promoted) = beats[1] else { Issue.record("\(beats)"); return }
         #expect(promoted.session == SessionID("s2"))
         #expect(promoted.displayName == "팀장")
-        #expect(promoted.seat == 0)
+        #expect(promoted.seat == .office)
         #expect(promoted.part == 0)
-        #expect(s2Seat != 0)
+        #expect(s2Seat == Seat(part: 1, desk: 0))
         #expect(name(state, "s3") == "파트장")
         #expect(state.teams.count == 1)  // 방은 남은 사람이 있는 동안 유지
     }
@@ -197,7 +197,7 @@ struct RoomTests {
         let all = names(state)
         #expect(Set(all).count == all.count, "\(all)")
         #expect(all.filter { $0 == "팀장" }.count == 1)
-        #expect(state.agents.values.filter { $0.seat == 0 }.count == 1)
+        #expect(state.agents.values.filter { $0.seat == .office }.count == 1)
         let seats = state.agents.values.map(\.seat)
         #expect(Set(seats).count == seats.count)
     }
