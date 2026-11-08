@@ -7,20 +7,31 @@ enum Palette {
     static let tops: [UInt32] = [0x9FD8C7, 0xF6B9A0, 0xC7BCEB, 0xF7DE8B, 0xA9D3F0, 0xF4A3B4]
     static let skins: [UInt32] = [0xFBDDC8, 0xF3C6A5, 0xD9A47F, 0xB07A5C]
     static let teams: [UInt32] = [0x9FD8C7, 0xF6B9A0, 0xC7BCEB, 0xF7DE8B]
+    /// 승인 대기 형광펜 (현황 줄·타임라인 글자 바탕). 글자는 언제나 `ink`
     static let attention = Color(hex: 0xF7DE8B)
+    /// 승인 대기 칩 바탕: 형광펜보다 진한 노랑 (M5(9) 화면 확인: 어두운 모드에서 흐린 노랑에 흰 글자가 안 보임)
+    static let attentionStrong = Color(hex: 0xF5C443)
+    /// 밝은 바탕(파스텔 칩·형광펜) 위 글자색. 어두운 모드에서도 흰 글자가 되지 않게 고정합니다.
+    static let ink = Color(hex: 0x2B2418)
 
     static func top(_ index: Int) -> Color { Color(hex: tops[abs(index) % tops.count]) }
     static func skin(_ index: Int) -> Color { Color(hex: skins[abs(index) % skins.count]) }
     static func team(_ index: Int) -> Color { Color(hex: teams[abs(index) % teams.count]) }
 
-    static func chip(_ tone: RosterStatus.Tone) -> Color {
+    /// 상태 칩 바탕. 밝은 모드는 흰 바탕에 비치는 연한 파스텔, 어두운 모드는 비치지 않는 파스텔(글자는 `chipText`의 진한 잉크).
+    static func chip(_ tone: RosterStatus.Tone, dark: Bool = false) -> Color {
         switch tone {
-        case .working: Color(hex: 0x9FD8C7).opacity(0.55)
-        case .reading: Color(hex: 0xC7BCEB).opacity(0.6)
-        case .running: Color(hex: 0xA9D3F0).opacity(0.6)
-        case .attention: Color(hex: 0xF7DE8B)
+        case .working: Color(hex: 0x9FD8C7).opacity(dark ? 1 : 0.55)
+        case .reading: Color(hex: 0xC7BCEB).opacity(dark ? 1 : 0.6)
+        case .running: Color(hex: 0xA9D3F0).opacity(dark ? 1 : 0.6)
+        case .attention: attentionStrong
         case .calm: Color.secondary.opacity(0.15)
         }
+    }
+
+    /// 상태 칩 글자색: 색이 있는 칩은 진한 잉크(어두운 모드에서도), 쉬는 칩은 기본 글자색
+    static func chipText(_ tone: RosterStatus.Tone) -> Color {
+        tone == .calm ? .primary : ink
     }
 }
 

@@ -214,13 +214,20 @@ struct RosterRowView: View {
 
 struct StatusChip: View {
     let status: RosterStatus
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let tone = status.tone
         Text(status.label)
-            .font(.system(size: 11))
+            .font(.system(size: 11, weight: tone == .attention ? .semibold : .regular))
+            .foregroundStyle(Palette.chipText(tone))
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(Palette.chip(status.tone), in: Capsule())
+            .background(Palette.chip(tone, dark: colorScheme == .dark), in: Capsule())
+            // 승인 대기는 테두리로 한 번 더 눈에 띄게 (어두운 바탕에서도 칩 경계가 보이게)
+            .overlay {
+                if tone == .attention { Capsule().strokeBorder(Color(hex: 0xC99A1E), lineWidth: 1) }
+            }
     }
 }
 

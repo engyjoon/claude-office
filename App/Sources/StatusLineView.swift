@@ -98,7 +98,7 @@ struct StatusLineView: View {
             text.foregroundColor = .secondary
         case .attention:
             // 승인 대기: 노랑 형광펜
-            text.foregroundColor = .primary
+            text.foregroundColor = Palette.ink  // 어두운 모드에서도 흰 글자가 되지 않게
             text.backgroundColor = Palette.attention
         case .error:
             text.foregroundColor = .red

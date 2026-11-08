@@ -266,6 +266,22 @@ struct StatusLineTests {
         #expect(office.texts(at: 10) == ["a-sdn-portal · 메인 · 서브가 Bash rm -rf build 승인 대기 (6초째)"])
     }
 
+    @Test("notify-demo 흐름: 명령 승인 대기 중에는 행 줄도 승인 대기, 끝나면 쉬는 중")
+    func notifyDemo() {
+        var office = Office()
+        let demo = session("s1", "notify-demo")
+        office.send(demo.make("SessionStart", ["source": "startup"]), at: 0)
+        office.send(demo.make("UserPromptSubmit", ["prompt": "(생략)"]), at: 1)
+        office.send(demo.tool("PreToolUse", "Bash", id: "t1", input: ["command": "npm test"]), at: 3)
+        office.send(demo.tool("PermissionRequest", "Bash", id: nil, input: ["command": "npm test"]), at: 3.5)
+        office.send(demo.make("Notification", ["notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"]), at: 4)
+        #expect(office.texts(at: 10) == ["notify-demo · 메인 · Bash npm test 승인 대기 (6초째)"])
+        #expect(office.line().lines[0].segment.tone == .attention)
+        office.send(demo.tool("PostToolUse", "Bash", id: "t1", input: ["command": "npm test"], extra: [("tool_response", [:])]), at: 44)
+        office.send(demo.make("Stop"), at: 47)
+        #expect(office.texts(at: 50) == ["notify-demo · 메인 · 쉬는 중"])
+    }
+
     @Test("디렉토리를 고르면 그 디렉토리의 행만, 디렉토리 이름은 생략")
     func folderFilter() {
         var office = Office()

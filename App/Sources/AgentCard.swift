@@ -301,7 +301,7 @@ private struct TimelineRow: View {
         case .normal: text.foregroundColor = .primary
         case .muted: text.foregroundColor = .secondary
         case .attention:
-            text.foregroundColor = .primary
+            text.foregroundColor = Palette.ink  // 어두운 모드에서도 흰 글자가 되지 않게
             text.backgroundColor = Palette.attention
         case .error: text.foregroundColor = .red
         }
