@@ -420,6 +420,11 @@ final class AppModel {
         if next != miniFocus { miniFocus = next }
     }
 
+    /// 그 세션 직원이 마지막으로 요청을 받은 때 (미니 머리줄 "요청 받음")
+    func promptedAt(_ row: RosterRow) -> Date? {
+        row.role == .lead ? engine.state.parts[row.session]?.lastPromptAt : nil
+    }
+
     /// 답변을 기다리는 까닭 ("승인 대기", "질문 답 대기", "계획 승인 대기")
     func waitLabel(of id: AgentID) -> String {
         if case .waitingForPermission(let call) = engine.state.agents[id]?.activity { return call?.waitLabel ?? "승인 대기" }
@@ -449,9 +454,10 @@ final class AppModel {
         miniStore.floor.setViewport(width: Double(size.width), height: OfficeLayout.minHeight, engine: engine)
     }
 
-    /// 미니 사무실은 켜져 있고 사무실 창이 닫혀 있을 때만 보입니다 (사무실 창을 닫으면 다시 나타남)
+    /// 미니 사무실은 켜져 있고 사무실 창이 닫혀 있을 때만 보입니다 (사무실 창을 닫으면 다시 나타남).
+    /// 최소화는 그냥 최소화입니다 (화면 확인: 최소화 버튼으로는 미니가 나타나지 않기를 원함).
     private func syncMiniPanel() {
-        let wanted = miniSettings.enabled && !isOfficeWindowOpen && Date() >= miniHiddenUntil
+        let wanted = miniSettings.enabled && !isOfficeWindowOpenOrMinimized && Date() >= miniHiddenUntil
         guard let miniPanel, wanted != miniPanel.isShown else { return }
         wanted ? miniPanel.show() : miniPanel.hide()
     }
@@ -494,6 +500,12 @@ final class AppModel {
         } else if let window = NSApp.windows.first(where: { $0.title == OfficeWindowView.title }) {
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    /// 사무실 창이 떠 있거나 Dock에 최소화돼 있음 (닫지 않음)
+    private var isOfficeWindowOpenOrMinimized: Bool {
+        guard let app = NSApp else { return false }
+        return app.windows.contains { $0.title == OfficeWindowView.title && ($0.isVisible || $0.isMiniaturized) }
     }
 
     private var isOfficeWindowOpen: Bool {

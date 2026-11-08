@@ -126,7 +126,7 @@ struct MenuContentView: View {
             } label: {
                 Image(systemName: model.miniSettings.enabled ? "pip.fill" : "pip")
             }
-            .help(model.miniSettings.enabled ? "미니 사무실 끄기 (켜 두면 사무실 창이 닫혀 있거나 최소화돼 있을 때 화면 구석에 보여요)" : "미니 사무실 켜기")
+            .help(model.miniSettings.enabled ? "미니 사무실 끄기 (켜 두면 사무실 창이 닫혀 있을 때 화면 구석에 보여요)" : "미니 사무실 켜기")
             Button {
                 var settings = model.soundSettings
                 settings.masterEnabled.toggle()

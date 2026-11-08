@@ -306,13 +306,13 @@ struct MiniHeaderView: View {
         let focus = model.miniFocus
         let current = roster.teams.first { $0.id == focus.team }
         let waiting = (current?.rows ?? []).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
-        let main = current?.rows.first(where: \.isMain)
+        let line = Self.latest(focus: focus, rows: current?.rows ?? [], waiting: waiting)
         let others = roster.teams.filter { $0.id != current?.id }
             .sorted { Self.rank(focus.tiers[$0.id]) < Self.rank(focus.tiers[$1.id]) }
         HStack(spacing: 5) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(current == nil ? "아직 출근한 직원이 없어요" : statusText(focus: focus, waiting: waiting, main: main, now: context.date))
-                    .font(.system(size: 10.5, weight: focus.tier == .answer || focus.tier == .completed ? .semibold : .regular))
+                Text(current == nil ? "아직 출근한 직원이 없어요" : statusText(line, waitingCount: waiting.count, now: context.date))
+                    .font(.system(size: 10.5, weight: line?.kind == .normal ? .regular : .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -333,7 +333,7 @@ struct MiniHeaderView: View {
         .padding(.leading, 10)
         .padding(.trailing, CGFloat(MiniOffice.headerHeight))  // ✕ 자리
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(focus.tier == .answer ? Palette.attention : focus.tier == .completed ? Self.done : Self.paper)
+        .background(line?.kind == .answer ? Palette.attention : line?.kind == .completed ? Self.done : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
     }
@@ -367,20 +367,35 @@ struct MiniHeaderView: View {
         .fixedSize()
     }
 
-    private func statusText(focus: MiniFocus, waiting: [RosterRow], main: RosterRow?, now: Date) -> String {
-        switch focus.tier {
+    /// 머리줄에 보여 줄 한 사람: 답변을 기다리는 사람이 있으면 가장 오래 기다린 사람, 아니면 가장 마지막으로 상태가 바뀐 사람
+    struct Line {
+        enum Kind { case answer, completed, normal }
+        var row: RosterRow
+        var kind: Kind
+    }
+
+    static func latest(focus: MiniFocus, rows: [RosterRow], waiting: [RosterRow]) -> Line? {
+        if let first = waiting.first { return Line(row: first, kind: .answer) }
+        guard let row = rows.max(by: { ($0.since, $1.id) < ($1.since, $0.id) }) else { return nil }
+        let resting = row.status == .idle || row.status == .waitingForInput
+        return Line(row: row, kind: row.isMain && resting && focus.tier == .completed ? .completed : .normal)
+    }
+
+    /// "서브: 요청 받음 · 방금", "메인: 응답 완료 · 1분 전", "서브3: 승인 대기 12초째", "메인: 쉬는 중 · 3분 전"
+    private func statusText(_ line: Line?, waitingCount: Int, now: Date) -> String {
+        guard let line else { return "" }
+        let row = line.row
+        let name = row.title.label
+        switch line.kind {
         case .answer:
-            guard let first = waiting.first else { return "답변 필요" }
-            let elapsed = StatusLine.elapsed(now.timeIntervalSince(first.since)).map { " \($0)" } ?? ""
-            let more = waiting.count > 1 ? " 외 \(waiting.count - 1)명" : ""
-            return "\(first.title.label) \(model.waitLabel(of: first.id))\(elapsed)\(more)"
+            let elapsed = StatusLine.elapsed(now.timeIntervalSince(row.since)).map { " \($0)" } ?? ""
+            let more = waitingCount > 1 ? " (외 \(waitingCount - 1)명)" : ""
+            return "\(name): \(model.waitLabel(of: row.id))\(elapsed)\(more)"
         case .completed:
-            return "✓ 응답 완료 · \(Self.ago(focus.tierAt, now: now))"
-        case .requested:
-            let resting = main.map { $0.status == .idle || $0.status == .waitingForInput } ?? false
-            return "\(resting ? "쉬는 중" : "작업 중") · 요청 \(Self.ago(focus.tierAt, now: now))"
-        case .none:
-            return ""
+            return "\(name): 응답 완료 · \(Self.ago(row.since, now: now))"
+        case .normal:
+            let prompted = row.status == .thinking && model.promptedAt(row).map { abs($0.timeIntervalSince(row.since)) < 1 } == true
+            return "\(name): \(prompted ? "요청 받음" : row.status.label) · \(Self.ago(row.since, now: now))"
         }
     }
 
