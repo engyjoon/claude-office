@@ -137,6 +137,8 @@ public enum OfficeArt {
     static let chairColors: [UInt32] = [0x7FC9B3, 0xF0A58B, 0xB6A6E4, 0xE9CB6C]
     static let plateFontSize = 9.5
     static let platePadding = 6.0
+    /// 명패를 앞판 가운데보다 올리는 양
+    static let plateLift = 1.5
 
     /// 글자 폭 어림값 (한글·기호는 정사각형, 영문·숫자는 그 절반 남짓). 렌더러마다 글꼴이 달라 넉넉하게 잡습니다.
     static func estimatedWidth(_ text: String, size: Double) -> Double {
@@ -175,8 +177,9 @@ public enum OfficeArt {
             if let name = plates[index] {
                 let (text, textWidth) = fitted(name, size: plateFontSize, maxWidth: 78 - 2 * platePadding)
                 let width = max(textWidth, 28) + 2 * platePadding
-                // 책상 앞판에서 보이는 부분(상판 아래 y-22 ~ y+3)의 세로 가운데에 명패를 답니다
-                let plateCenter = y - 9.5
+                // 책상 앞판에서 보이는 부분(상판 아래 y-22 ~ y+3)의 세로 가운데보다 조금 위에 답니다
+                // (상판 테두리 때문에 기하학적 가운데는 화면에서 아래로 치우쳐 보입니다)
+                let plateCenter = y - 9.5 - plateLift
                 desk += [
                     .rect(x - width / 2, plateCenter - 7.5, width, 15, r: 4, fill: .swatch(.plate), width: 1.2),
                     .text(text, x, plateCenter, size: plateFontSize, bold: true, baseline: .central),

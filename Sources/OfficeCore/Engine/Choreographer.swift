@@ -20,6 +20,9 @@ public struct ChoreographyConfig: Hashable, Sendable {
     public var chatterInterval: Double = 60
     /// 보고하러 오는 팀원을 팀장이 기다리는 최대 시간
     public var reportAwaitTimeout: Double = 8
+    /// 섬 하나의 책상 수 (OfficeStage `OfficeLayout.deskOffsets.count`와 같아야 합니다).
+    /// 이보다 큰 좌석 번호는 책상 없이 섬 앞에 서는 자리라, 일할 때는 빈 책상을 빌려 앉습니다.
+    public var desksPerTeam = 4
 
     public init() {}
 }
@@ -107,11 +110,10 @@ public struct Choreographer: Sendable {
             out.append(Directive(nil, .closeTeam(team.id)))
 
         case .promoted(let agent):
-            let oldSeat = presences[agent.id]?.agent.seat
             touch(agent)
             guard presences[agent.id] != nil else { return }
             out.append(Directive(agent.id, .refresh(agent)))
-            reseat(agent, from: oldSeat, at: now, into: &out)
+            reseat(agent, at: now, into: &out)
             if presences[agent.id]?.waiting == false {
                 out.append(Directive(agent.id, .gesture(.cheer)))
                 out.append(Directive(agent.id, .express(.proud)))
@@ -123,11 +125,10 @@ public struct Choreographer: Sendable {
             }
 
         case .retitled(let agent):
-            let oldSeat = presences[agent.id]?.agent.seat
             touch(agent)
             guard presences[agent.id] != nil else { return }
             out.append(Directive(agent.id, .refresh(agent)))
-            reseat(agent, from: oldSeat, at: now, into: &out)
+            reseat(agent, at: now, into: &out)
 
         case .arrived(let agent):
             enter(agent, at: now, into: &out)
@@ -404,7 +405,10 @@ public struct Choreographer: Sendable {
             let since = current.idleSince
         {
             let elapsed = now.timeIntervalSince(since)
-            if elapsed >= config.napAfter, current.rest < 2 {
+            if elapsed >= config.napAfter, current.rest < 2, !isDesk(seatSpot(current.agent)) {
+                // 빌릴 책상도 없으면 휴게실에서 계속 쉽니다 (섬 앞에 서서 졸지 않도록)
+                modify(id) { $0.rest = 2 }
+            } else if elapsed >= config.napAfter, current.rest < 2 {
                 move(id, to: seatSpot(current.agent), into: &out)
                 out.append(Directive(id, .prop(nil)))
                 out.append(Directive(id, .pose(.sleeping)))
@@ -560,20 +564,55 @@ public struct Choreographer: Sendable {
         out.append(Directive(agent.id, .express(.neutral)))
     }
 
-    /// 좌석이 바뀐 직원을 새 자리로 옮깁니다. 예전 자리에 앉아 있으면 바로, 다른 곳에 있으면 돌아올 때 새 자리로 갑니다.
-    private mutating func reseat(_ agent: Agent, from oldSeat: Int?, at now: Date, into out: inout [Directive]) {
-        guard let presence = presences[agent.id], let oldSeat, oldSeat != agent.seat,
-            presence.spot == .seat(agent.teamID, oldSeat)
-        else { return }
+    /// 좌석이 바뀐 직원을 새 자리로 옮깁니다. 자리(책상이나 섬 앞)에 있으면 바로, 다른 곳에 있으면 돌아올 때 새 자리로 갑니다.
+    private mutating func reseat(_ agent: Agent, at now: Date, into out: inout [Directive]) {
+        guard let presence = presences[agent.id], case .seat(agent.teamID, _) = presence.spot else { return }
+        let target = seatSpot(agent)
+        guard target != presence.spot else { return }
         if presence.waiting || presence.rest > 0 {
             // 손을 든 채이거나 자는 중이면 깨어나거나 승인이 끝난 뒤 옮깁니다
             let returnAt = now.addingTimeInterval(config.linger)
             modify(agent.id) { $0.returnAt = returnAt }
             return
         }
-        let pose: Pose = presence.shown == .idle ? .sitting : (presence.shown == .thinking ? .thinking : .typing)
-        move(agent.id, to: seatSpot(agent), into: &out)
-        out.append(Directive(agent.id, .pose(pose)))
+        move(agent.id, to: target, into: &out)
+        out.append(Directive(agent.id, .pose(currentPose(presence, atDesk: isDesk(target)))))
+    }
+
+    /// 주인이 돌아와 빌린 책상을 비켜 줍니다. 다른 빈 책상이 있으면 그리로, 없으면 섬 앞에 서서 하던 일을 이어 갑니다.
+    private mutating func makeRoom(_ id: AgentID, leaving desk: Int, into out: inout [Directive]) {
+        guard let presence = presences[id] else { return }
+        let target = seatSpot(presence.agent, avoiding: desk)
+        if presence.rest == 2, !isDesk(target) {
+            // 졸던 직원은 옮겨 앉을 책상이 없으면 휴게실로 가서 쉽니다
+            move(id, to: .lounge, into: &out)
+            out.append(Directive(id, .pose(.holdingCup)))
+            out.append(Directive(id, .prop(.cup)))
+            setEmote(id, .note, into: &out)
+            return
+        }
+        move(id, to: target, into: &out)
+        out.append(Directive(id, .pose(currentPose(presence, atDesk: isDesk(target)))))
+        if presence.waiting {
+            out.append(Directive(id, .stand))
+            modify(id) { $0.seated = false }
+        }
+    }
+
+    /// 자리를 옮긴 뒤 이어 갈 자세
+    private func currentPose(_ presence: Presence, atDesk: Bool) -> Pose {
+        if presence.waiting { return .raisingHand }
+        if presence.rest == 2 { return .sleeping }
+        switch presence.shown {
+        case .idle: return atDesk ? .sitting : .standing
+        case .thinking: return .thinking
+        case .working(let call):
+            switch call.category {
+            case .read, .web: return .reading
+            case .report: return .sorting
+            default: return .typing
+            }
+        }
     }
 
     private mutating func leave(_ id: AgentID, into out: inout [Directive]) {
@@ -596,6 +635,12 @@ public struct Choreographer: Sendable {
             presence.seated = true
         }
         presences[id] = presence
+        // 주인이 자기 책상으로 오면 빌려 앉은 사람이 비켜 줍니다 (이동한 사람의 자리를 먼저 바꿔 두어야 그 책상을 피합니다)
+        if case .seat(let team, let desk) = spot, hasDesk(desk),
+            let borrower = presences.first(where: { $0.key != id && $0.value.spot == .seat(team, desk) })?.key
+        {
+            makeRoom(borrower, leaving: desk, into: &out)
+        }
     }
 
     /// 휴게실이나 낮잠에서 깨워 자리로 돌려보냅니다.
@@ -681,8 +726,43 @@ public struct Choreographer: Sendable {
         return ("permission.tool", ["tool": call.name])
     }
 
-    private func seatSpot(_ agent: Agent) -> Spot {
-        .seat(agent.teamID, agent.seat)
+    // MARK: - 자리 (빈 책상 빌리기)
+
+    /// 일하고 쉬는 자리. 좌석은 사람마다 정해져 있지만 책상은 섬마다 `desksPerTeam`개뿐이라,
+    /// 자기 책상이 있으면 그 책상, 없으면 지금 빌려 앉은 책상, 그것도 없으면 빈 책상을 빌립니다.
+    /// 빌릴 책상이 하나도 없을 때만 섬 앞에 서는 자리로 갑니다. `avoiding`은 비켜 줘야 하는 책상입니다.
+    private func seatSpot(_ agent: Agent, avoiding avoided: Int? = nil) -> Spot {
+        let team = agent.teamID
+        if hasDesk(agent.seat), agent.seat != avoided { return .seat(team, agent.seat) }
+        if case .seat(team, let held) = presences[agent.id]?.spot, held != avoided, canBorrow(held, in: team, by: agent.id) {
+            return .seat(team, held)
+        }
+        // 팀장석은 마지막에, 주인이 아예 없는 책상을 주인이 쉬러 간 책상보다 먼저 빌립니다
+        let free = (Array(1..<config.desksPerTeam) + [0]).filter { $0 != avoided && canBorrow($0, in: team, by: agent.id) }
+        if let desk = free.first(where: { owner(of: $0, in: team, except: agent.id) == nil }) ?? free.first {
+            return .seat(team, desk)
+        }
+        return .seat(team, hasDesk(agent.seat) ? max(agent.seat, config.desksPerTeam) : agent.seat)
+    }
+
+    private func hasDesk(_ seat: Int) -> Bool { seat >= 0 && seat < config.desksPerTeam }
+
+    private func isDesk(_ spot: Spot) -> Bool {
+        if case .seat(_, let index) = spot { return hasDesk(index) }
+        return false
+    }
+
+    /// 지금 사무실에 있는 그 책상의 주인
+    private func owner(of desk: Int, in team: TeamID, except id: AgentID) -> Presence? {
+        presences.first { $0.key != id && $0.value.agent.teamID == team && $0.value.agent.seat == desk }?.value
+    }
+
+    /// 아무도 앉아 있지 않고, 주인이 없거나 휴게실에 가 있는 책상이면 빌릴 수 있습니다.
+    private func canBorrow(_ desk: Int, in team: TeamID, by id: AgentID) -> Bool {
+        guard hasDesk(desk) else { return false }
+        if presences.contains(where: { $0.key != id && $0.value.spot == .seat(team, desk) }) { return false }
+        guard let owner = owner(of: desk, in: team, except: id) else { return true }
+        return owner.spot == .lounge
     }
 
     private mutating func touch(_ agent: Agent) {

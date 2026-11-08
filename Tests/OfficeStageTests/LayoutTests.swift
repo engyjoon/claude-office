@@ -56,6 +56,11 @@ struct LayoutTests {
         #expect(layout.isWalkable(extra.final))
     }
 
+    @Test("연출 엔진이 빌려 앉는 책상 수가 섬의 책상 수와 같다")
+    func deskCountMatchesChoreography() {
+        #expect(ChoreographyConfig().desksPerTeam == OfficeLayout.deskOffsets.count)
+    }
+
     @Test("모든 구역 자리와 출입문은 걸어서 갈 수 있다")
     func zonesReachable() {
         for rows in [1, 2, 3] {
