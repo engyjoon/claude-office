@@ -13,7 +13,14 @@ ifeq ($(origin DEVELOPER_DIR),undefined)
   endif
 endif
 
-.PHONY: build test demo sounds snapshot serve replay notify-demo bootstrap app run install uninstall clean
+.PHONY: build test demo sounds snapshot serve replay notify-demo bootstrap app run install uninstall clean perf
+
+## 설치된 앱의 CPU·메모리를 상황별로 측정 (설계서 §8.3): make perf CASE=a DURATION=60
+##   격리 실행·창 조작·바쁜 부하는 scripts/perf-launch.sh, perf-window.sh, perf-busy.sh
+CASE ?= now
+DURATION ?= 30
+perf:
+	scripts/perf.sh $(CASE) $(DURATION)
 
 ## ---- 코어 (macOS·Linux) ----
 

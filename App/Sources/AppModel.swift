@@ -84,7 +84,10 @@ final class AppModel {
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     @ObservationIgnored private var motionObserver: NSObjectProtocol?
     let installer = HookInstaller()
-    let endpointURL = EndpointFile.defaultURL()
+    /// 훅 스크립트가 읽는 엔드포인트 파일. 환경 변수 `CLAUDE_OFFICE_ENDPOINT`로 바꿀 수 있습니다 (훅 스크립트와 같은 이름).
+    /// 성능 측정(scripts/perf-launch.sh isolated)은 다른 파일을 써서 실제 세션의 훅이 섞이지 않게 합니다 (M6(1)).
+    let endpointURL = ProcessInfo.processInfo.environment["CLAUDE_OFFICE_ENDPOINT"].map { URL(fileURLWithPath: $0) }
+        ?? EndpointFile.defaultURL()
     /// 데스크톱 앱 세션 정보 (방·직함 힌트, 설계서 §4.4)
     let desktopSessions = DesktopSessionDirectory()
     /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
@@ -100,6 +103,17 @@ final class AppModel {
     @ObservationIgnored private let notifier = Notifier()
     @ObservationIgnored private var lastFrame = Date()
     @ObservationIgnored private var tickAccumulator = 0.0
+    /// 사무실 창·미니가 화면에 보이는지 (M6(1)): 안 보이면 SwiftUI 시계 글자도 멈춥니다
+    private(set) var officeVisible = false
+    private(set) var miniVisible = false
+    /// 모델 타이머 간격 (보이는 장면에 맞춰 바뀜, M6(1))
+    @ObservationIgnored private var tickInterval = 1.0 / 30
+    /// 연출 지시를 받은 뒤 이때까지는 30fps (등장·퇴장 페이드 등)
+    @ObservationIgnored private var settleUntil = Date.distantPast
+    /// 장면마다 마지막으로 빠른 움직임이 있었거나 연출 지시를 받은 때 (오래 조용하면 잠잠함 3fps)
+    @ObservationIgnored private var officeBusyAt = Date()
+    @ObservationIgnored private var miniBusyAt = Date()
+    @ObservationIgnored private var windowObservers: [NSObjectProtocol] = []
 
     private static let selectAllKey = "office.selection.all"
     private static let selectedFoldersKey = "office.selection.folders"
@@ -206,31 +220,82 @@ final class AppModel {
         EndpointFile.remove(at: endpointURL)
     }
 
-    /// 30fps로 무대를 흘리고, 0.25초마다 연출 엔진의 tick을 돌립니다.
+    /// 무대를 흘리고 0.25초마다 연출 엔진의 tick을 돌립니다. 간격은 보이는 장면의 빈도를 따릅니다 (M6(1), 설계서 §8.3):
+    /// 움직이는 장면이 보이면 30Hz, 잔잔하면 10Hz, 아무 장면도 안 보이면 4Hz.
     private func startTicking() {
         lastFrame = Date()
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+        scheduleTicks(interval: tickInterval)
+        // 창이 가려지거나 다시 보이는 순간 바로 빈도를 맞춥니다 (다음 tick까지 기다리지 않음)
+        let center = NotificationCenter.default
+        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
+            windowObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updatePacing() }
+            })
+        }
+        // 레티나 화면을 연결하거나 빼면 텍스처 굽는 배율을 다시 정합니다
+        windowObservers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ShapeBaker.screensChanged() }
+        })
+    }
+
+    private func scheduleTicks(interval: TimeInterval) {
+        timer?.invalidate()
+        tickInterval = interval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.frame() }
         }
+        // 느린 간격일 때는 다른 깨움과 묶일 수 있게 여유를 둡니다
+        timer.tolerance = interval >= RenderPacer.hiddenTickInterval ? interval * 0.2 : 0
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
+    /// 두 장면의 그리기 빈도와 모델 타이머 간격을 맞춥니다
+    private func updatePacing(now: Date = Date()) {
+        let settling = now < settleUntil
+        let officeMotion = RenderPacer.motion(stageStore.stage), miniMotion = RenderPacer.motion(miniStore.stage)
+        if officeMotion != .still || settling { officeBusyAt = now }
+        if miniMotion != .still || settling { miniBusyAt = now }
+        let office = RenderPacer.pace(
+            visible: officeScene.isVisibleOnScreen, motion: officeMotion, settling: settling,
+            quietFor: now.timeIntervalSince(officeBusyAt))
+        let mini = RenderPacer.pace(
+            visible: miniScene.isVisibleOnScreen, motion: miniMotion, settling: settling, quietFor: now.timeIntervalSince(miniBusyAt))
+        officeScene.applyPace(office)
+        miniScene.applyPace(mini)
+        if (office != .paused) != officeVisible { officeVisible = office != .paused }
+        if (mini != .paused) != miniVisible { miniVisible = mini != .paused }
+        officeScene.renderOneFrame(now: now)
+        miniScene.renderOneFrame(now: now)
+        let interval = RenderPacer.tickInterval(for: [office, mini])
+        if abs(interval - tickInterval) > 1e-6 { scheduleTicks(interval: interval) }
+    }
+
+    private var anySceneVisible: Bool {
+        officeScene.isVisibleOnScreen || miniScene.isVisibleOnScreen
+    }
+
     private func frame() {
         let now = Date()
-        let dt = min(max(now.timeIntervalSince(lastFrame), 0), 0.1)
+        let dt = max(now.timeIntervalSince(lastFrame), 0)
         lastFrame = now
-        stageStore.floor.update(dt: dt)
-        miniStore.floor.update(dt: dt)
+        PerfProbe.shared?.modelTicked()
+        // 타이머가 느려도(4Hz) 무대 시간은 실제 시간대로, 0.1초 조각으로 나눠 흘립니다
+        for step in RenderPacer.steps(dt: dt) {
+            stageStore.floor.update(dt: step)
+            miniStore.floor.update(dt: step)
+        }
         tickAccumulator += dt
-        if tickAccumulator >= 0.25 {
+        if tickAccumulator >= 0.25 - 1e-3 {
             tickAccumulator = 0
             record(engine.tick(at: now))
             refreshMiniFocus(now: now)
             syncMiniPanel()
-            officeScene.restartIfStalled()
-            miniScene.restartIfStalled()
+            // 30초 넘게 안 보이는 장면은 가구 텍스처를 놓습니다 (닫힌 사무실 창이 미니만 보일 때 메모리를 잡고 있지 않게)
+            officeScene.releaseFurnitureIfHidden(for: 30, now: now)
+            miniScene.releaseFurnitureIfHidden(for: 30, now: now)
         }
+        updatePacing(now: now)
         // 두 무대가 같은 지시를 받으므로 효과음은 한쪽에서만: 사무실 창이 보이면 사무실, 아니면 미니가 보일 때 미니
         let officeEvents = stageStore.floor.drainEvents()
         let miniEvents = miniStore.floor.drainEvents()
@@ -260,6 +325,7 @@ final class AppModel {
             let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, hint: hint, at: delivery.receivedAt)
             append(.hook, Self.summary(of: delivery, hint: hint))
             record(directives)
+            PerfProbe.shared?.hookApplied(receivedAt: delivery.receivedAt, anyVisible: anySceneVisible)
             notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
         } catch {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
@@ -296,6 +362,9 @@ final class AppModel {
         guard !directives.isEmpty else { return }
         stageStore.floor.apply(directives, engine: engine)
         miniStore.floor.apply(directives, engine: engine)
+        // 받은 지시를 바로 30fps로 그립니다 (다음 tick을 기다리지 않음, 훅 → 화면 지연)
+        settleUntil = Date().addingTimeInterval(RenderPacer.settleTime)
+        updatePacing()
         updateHidden()
         for directive in directives {
             append(.directive, directive.description)
@@ -315,6 +384,7 @@ final class AppModel {
         let timer = Timer(timeInterval: Self.directoryRefreshInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshDirectories() }
         }
+        timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
         directoryTimer = timer
     }

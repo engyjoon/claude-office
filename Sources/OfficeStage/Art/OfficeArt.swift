@@ -25,8 +25,9 @@ public enum OfficeArt {
 
     /// 시간에 따라 움직이는 가구: 안마 의자 등판 롤러, 긴 명령을 기다리는 직원의 모니터 진행 표시.
     /// 매 프레임 다시 계산합니다 (렌더러는 바뀐 경우에만 다시 그리면 됩니다).
-    public static func liveLayers(stage: Stage) -> [ArtLayer] {
-        let time = stage.time
+    /// - Parameter time: 그림에 쓸 무대 시각 (기본은 지금). 앱은 1/15초 단위로 맞춰 넘겨서 같은 그림(구운 텍스처)이 주기마다 다시 쓰이게 합니다 (M6(1)).
+    public static func liveLayers(stage: Stage, time: Double? = nil) -> [ArtLayer] {
+        let time = time ?? stage.time
         var layers: [ArtLayer] = []
         for (index, seat) in OfficeLayout.massageSeats.enumerated() where !stage.config.commonAreasAtDesk {
             let massaged = stage.actors.values.contains { actor in
@@ -343,7 +344,8 @@ public enum OfficeArt {
     /// 안마 의자 등판 롤러 두 개. 누가 앉아 있으면 위아래로 오르내리고, 비어 있으면 위쪽에 멈춰 있습니다.
     static func massageRoller(at s: MapPoint = massageSeat, time: Double?) -> [ArtShape] {
         let phase = time.map { (1 - cos($0 * 2 * Double.pi / 2.6)) / 2 } ?? 0
-        let y = s.y - 82 + phase * 46
+        // 0.25pt 단위로 맞춰 같은 위치면 같은 그림이 되게 합니다 (앱이 구운 텍스처를 다시 씀, M6(1))
+        let y = s.y - 82 + quarter(phase * 46)
         return [
             .rect(s.x - 15, s.y - 86, 4, 56, r: 2, fill: .color(ArtColor(0x6F86A8)), outline: false, opacity: 0.6),
             .rect(s.x + 11, s.y - 86, 4, 56, r: 2, fill: .color(ArtColor(0x6F86A8)), outline: false, opacity: 0.6),
@@ -362,9 +364,14 @@ public enum OfficeArt {
         return [
             .rect(x - 38, y - 44, 22, 10, r: 2, fill: .swatch(.screenGlow), outline: false),
             .rect(x - 36, y - 40, 18, 3, r: 1.5, fill: .swatch(.white), outline: false, opacity: 0.7),
-            .rect(x - 36, y - 40, max(1.5, 18 * progress), 3, r: 1.5, fill: .swatch(.drop), outline: false),
+            .rect(x - 36, y - 40, max(1.5, quarter(18 * progress)), 3, r: 1.5, fill: .swatch(.drop), outline: false),
             .circle(x - 19, y - 36, 1.4, fill: .swatch(blink ? .butter : .metalDot), outline: false),
         ]
+    }
+
+    /// 0.25pt 단위로 반올림 (움직이는 가구가 부동소수점 오차로 매번 다른 그림이 되지 않게)
+    static func quarter(_ value: Double) -> Double {
+        (value * 4).rounded() / 4
     }
 
     /// 화분 (발 위치 기준)

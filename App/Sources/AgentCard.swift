@@ -17,6 +17,8 @@ struct AgentCard: View {
     /// 그 세션의 Claude 앱이나 터미널을 앞으로
     let onFocus: () -> Void
     let onClose: () -> Void
+    /// 창이 보일 때만 시계 글자를 다시 그림 (M6(1))
+    @Environment(\.liveClock) private var liveClock
 
     /// 타임라인을 펼쳤는지 (앱을 다시 켜도 기억)
     @AppStorage("inspector.timelineExpanded") private var expanded = false
@@ -128,7 +130,7 @@ struct AgentCard: View {
             GridRow {
                 label("지금")
                 VStack(alignment: .leading, spacing: 3) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(NextChangeSchedule.every(1, live: liveClock)) { context in
                         HStack(spacing: 6) {
                             StatusChip(status: row.status)
                             if let elapsed = StatusLine.elapsed(context.date.timeIntervalSince(row.since)) {
@@ -215,7 +217,7 @@ struct AgentCard: View {
                 Text("아직 기록이 없어요").font(.system(size: 11)).foregroundStyle(Self.labelColor)
             } else {
                 // 새 일은 아래에 붙습니다 (시간 순서). 접혀 있으면 앞이 더 있다는 표시만.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                TimelineView(NextChangeSchedule.every(1, live: liveClock)) { context in
                     VStack(alignment: .leading, spacing: 3) {
                         if hidden > 0 || (expanded && timeline.truncated) {
                             Text("…").font(.system(size: 11)).foregroundStyle(.tertiary)

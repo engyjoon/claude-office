@@ -45,7 +45,6 @@ final class OfficeScene: SKScene {
     private var characters: [AgentID: CharacterNode] = [:]
     /// 마우스를 올린 직원 (말풍선 전체 문구를 보여줍니다)
     private var hoveredAgent: AgentID?
-    private var furnitureSignature = ""
     /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
     var onSelect: ((AgentID?) -> Void)?
     /// 캐릭터 더블클릭 (M5(7)): 그 세션의 Claude 앱이나 터미널을 앞으로
@@ -87,22 +86,97 @@ final class OfficeScene: SKScene {
         return window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
 
-    /// 장면이나 그 뷰가 멈춰 있으면 풉니다
+    /// 창을 닫으면 SwiftUI가 장면을 멈춘 채로 두기도 해서 장면 멈춤은 풀고, 뷰는 지금 빈도대로 둡니다
+    /// (안 보이는 동안 멈춘 뷰는 창이 다시 보이면 모델이 `applyPace`로 풂)
     func resumeIfPaused() {
         if isPaused { isPaused = false }
-        if let view, view.isPaused { view.isPaused = false }
+        applyPace(pace)
     }
 
-    /// 창이 화면에 보이는데 0.5초 넘게 그리지 않았으면 그리기를 다시 시작합니다 (모델이 0.25초마다 부름).
-    /// SwiftUI는 닫은 사무실 창을 다시 열 때 같은 창을 다시 보여 주는데, 그 안의 SKView는 창이 닫힐 때 멈춘 그리기를
-    /// 다시 시작하지 않습니다(M5(4) 화면 확인: 미니 → 사무실 창에서 캐릭터가 멈춤. 일시 정지를 껐다 켜면 다시 그림).
-    func restartIfStalled() {
-        resumeIfPaused()
-        guard let view, let window = view.window, window.isVisible, !window.isMiniaturized,
-            window.occlusionState.contains(.visible), Date().timeIntervalSince(lastUpdate) > 0.5
+    /// 지금 그리기 빈도 (M6(1)). 모델이 무대를 흘릴 때마다 정해 줍니다.
+    private(set) var pace: RenderPace = .active
+    /// 마지막으로 뷰의 멈춤을 푼 때 (멈춤 감시는 그 뒤 0.5초부터)
+    private var resumedAt = Date.distantPast
+
+    /// 그리기 빈도를 맞춥니다 (설계서 §8.3, M6(1)).
+    ///
+    /// - 멈춤(안 보임): SKView를 멈춥니다. 멈추지 않은 SKView는 그릴 게 없어도 디스플레이 링크가 vsync(120Hz)마다 메인 스레드를 깨웁니다.
+    /// - 일하는 중·잔잔함·잠잠함: SKView는 멈춰 두고, 모델이 무대를 흘릴 때마다(15·6·3Hz) `renderOneFrame`으로 한 장씩만 그립니다.
+    ///   `preferredFramesPerSecond`를 낮추는 것만으로는 디스플레이 링크가 그대로 120Hz로 돌아 CPU가 줄지 않았습니다
+    ///   (M6(1) 측정: 미니만 보일 때 12fps 2.6% → 6fps로 낮춰도 2.6%).
+    /// - 빠른 움직임: 30fps로 계속 그립니다.
+    ///
+    /// 움직임 단계에서 보이는데 0.5초 넘게 그리지 않았으면 그리기를 다시 시작합니다. SwiftUI는 닫은 사무실 창을 다시 열 때 같은 창을 다시 보여 주는데,
+    /// 그 안의 SKView는 창이 닫힐 때 멈춘 그리기를 다시 시작하지 않습니다(M5(4) 화면 확인: 미니 → 사무실 창에서 캐릭터가 멈춤.
+    /// 일시 정지를 껐다 켜면 다시 그림). 잔잔함 단계는 한 장마다 껐다 켜므로 같은 효과가 있습니다.
+    func applyPace(_ next: RenderPace) {
+        if next != pace {
+            if next == .paused { pausedAt = Date() }
+            pace = next
+            PerfProbe.shared?.paceChanged(probeName, to: next)
+        }
+        guard let view else { return }
+        switch next {
+        case .paused:
+            if !view.isPaused { view.isPaused = true }
+        case .ambient, .calm, .working:
+            // 뷰는 한 장을 그린 뒤 `didFinishUpdate`에서 다시 멈춥니다 (장면 멈춤은 뷰를 풀 때 같이 풀림)
+            if view.preferredFramesPerSecond != RenderPacer.activeFPS { view.preferredFramesPerSecond = RenderPacer.activeFPS }
+        case .active:
+            if isPaused { isPaused = false }
+            if view.preferredFramesPerSecond != RenderPacer.activeFPS { view.preferredFramesPerSecond = RenderPacer.activeFPS }
+            let now = Date()
+            if view.isPaused {
+                view.isPaused = false
+                resumedAt = now
+            } else if now.timeIntervalSince(resumedAt) > 0.5, now.timeIntervalSince(lastUpdate) > 0.5 {
+                view.isPaused = true
+                view.isPaused = false
+                resumedAt = now
+            }
+        }
+    }
+
+    /// 잔잔함·잠잠함 단계에서 한 장을 그립니다 (모델이 무대를 흘린 뒤 부름). 직전 장에서 한 장 간격이 지나지 않았으면 건너뜁니다.
+    func renderOneFrame(now: Date = Date()) {
+        guard isPulsed, let view, view.window != nil,
+            now.timeIntervalSince(lastPulse) >= 1 / Double(pace.framesPerSecond) - 0.02
         else { return }
-        view.isPaused = true
+        if !view.isPaused {
+            // 멈추지 않았는데 지난 요청 뒤로 한 장도 안 그렸으면 멈춘 그리기입니다 (창을 처음 열 때 재현, M5(4)와 같은 증상): 껐다 켭니다.
+            // 그렸다면 곧 `didFinishUpdate`가 멈추므로 기다립니다.
+            guard lastUpdate < lastPulse else { return }
+            PerfProbe.shared?.count("\(probeName).restart")
+            view.isPaused = true
+        }
+        lastPulse = now
+        if isPaused { isPaused = false }
         view.isPaused = false
+    }
+
+    /// 깜빡임 길이: 잠잠함(3fps)에서는 늘려서 빠지지 않게 (M6(1))
+    private var blinkDuration: Double { pace == .calm ? RenderPacer.calmBlinkDuration : 0.14 }
+
+    /// 한 장씩 그리는 단계인지
+    private var isPulsed: Bool { pace == .ambient || pace == .calm || pace == .working }
+
+    private var lastPulse = Date.distantPast
+
+    /// 디버그 계측에 쓰는 이름
+    var probeName: String {
+        if case .band = framing { return "mini" }
+        return "office"
+    }
+
+    override func didFinishUpdate() {
+        PerfProbe.shared?.frameRendered(probeName, visible: isVisibleOnScreen)
+        // 잔잔함·잠잠함: 이 장을 그린 뒤(같은 vsync 콜백이 끝난 뒤) 다시 멈춥니다
+        if isPulsed, let view {
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard self?.isPulsed == true else { return }
+                view?.isPaused = true
+            }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -112,7 +186,7 @@ final class OfficeScene: SKScene {
     override func didMove(to view: SKView) {
         // 창을 닫으면 SwiftUI가 장면을 멈춘 채로 두기도 해서, 다시 보일 때 풀어 줍니다 (M5(4) 화면 확인: 미니 → 사무실 창에서 캐릭터가 멈춤)
         resumeIfPaused()
-        furnitureSignature = ""
+        furnitureKey = nil
         view.window?.acceptsMouseMovedEvents = true
         sync()
     }
@@ -142,7 +216,18 @@ final class OfficeScene: SKScene {
         let stage = store.stage
         let height = stage.layout.height
         let extent = fitWorld(officeHeight: height)
-        rebuildFurnitureIfNeeded(stage, extent: extent)
+        // 가구가 바뀌었는지는 0.25초마다만 봅니다 (명패 계산이 매 프레임 하기엔 무거움). 크기가 바뀌면 바로.
+        let now = Date()
+        if bakedGeneration != ShapeBaker.generation {
+            bakedGeneration = ShapeBaker.generation
+            furnitureKey = nil
+            shownLiveLayers = []
+        }
+        if furnitureKey == nil || now.timeIntervalSince(furnitureCheckedAt) >= 0.25 || extent != lastExtent {
+            furnitureCheckedAt = now
+            lastExtent = extent
+            rebuildFurnitureIfNeeded(stage, extent: extent)
+        }
         rebuildLiveFurnitureIfNeeded(stage)
 
         var present = Set<AgentID>()
@@ -160,7 +245,7 @@ final class OfficeScene: SKScene {
                 world.addChild(node)
                 characters[actor.id] = node
             }
-            node.apply(actor, time: stage.time, sceneHeight: height)
+            node.apply(actor, time: stage.time, sceneHeight: height, blinkDuration: blinkDuration)
         }
         for (id, node) in characters where !present.contains(id) {
             characters[id] = nil
@@ -197,8 +282,12 @@ final class OfficeScene: SKScene {
         }
     }
 
+    /// 움직이는 가구 그림의 시각 단위 (초). 롤러(2.6초 주기)·모니터(3초 주기)가 이 단위로 같은 그림을 되풀이해서 구운 텍스처를 다시 씁니다.
+    private static let liveFurnitureStep = 1.0 / 15
+
     private func rebuildLiveFurnitureIfNeeded(_ stage: Stage) {
-        let layers = OfficeArt.liveLayers(stage: stage)
+        let time = (stage.time / Self.liveFurnitureStep).rounded(.down) * Self.liveFurnitureStep
+        let layers = OfficeArt.liveLayers(stage: stage, time: time)
         // 지도 높이가 바뀌면(창 크기 조절) 위아래를 뒤집는 기준이 달라지므로 그림이 같아도 다시 만듭니다
         // (M5(4) 화면 확인: 창을 키우면 안마 의자 롤러가 의자 한참 아래에 남아 있었음)
         let height = stage.layout.height
@@ -207,7 +296,9 @@ final class OfficeScene: SKScene {
         shownLiveHeight = height
         liveFurniture.removeAllChildren()
         for layer in layers {
-            let node = ArtNodes.node(for: layer.shapes, colors: nil) { CGPoint(x: $0.x, y: height - $0.y) }
+            // 구운 텍스처는 캐시에서 다시 씁니다 (M6(1) 측정: 매 프레임 도형 노드를 새로 만들면 Metal 버퍼 할당·해제가 사무실 창 CPU의 절반)
+            let node = ArtNodes.node(for: layer.shapes, colors: nil)
+            node.position = CGPoint(x: 0, y: height)
             node.zPosition = layer.depth
             liveFurniture.addChild(node)
         }
@@ -306,40 +397,73 @@ final class OfficeScene: SKScene {
         return MapRect(-left / scale, -top / scale, view.width / scale, view.height / scale)
     }
 
+    /// 가구를 다시 만들어야 하는지 가리는 값 (매 프레임 비교하므로 문자열을 만들지 않고 값 그대로 비교, M6(1))
+    private struct FurnitureKey: Equatable {
+        var fit: [Int]
+        var layout: OfficeLayout
+        var teams: [Team]
+        var nameplates: [TeamID: [Seat: String]]
+    }
+
+    private var furnitureKey: FurnitureKey?
+    private var furnitureCheckedAt = Date.distantPast
+    private var bakedGeneration = ShapeBaker.generation
+    private var lastExtent: MapRect?
+
+    /// 오래 안 보이면 가구 텍스처를 놓습니다 (다시 보이면 다음 장에서 다시 구움, M6(1) 메모리)
+    func releaseFurnitureIfHidden(for seconds: TimeInterval, now: Date = Date()) {
+        guard pace == .paused, furnitureKey != nil, now.timeIntervalSince(pausedAt) >= seconds else { return }
+        furniture.removeAllChildren()
+        liveFurniture.removeAllChildren()
+        shownLiveLayers = []
+        furnitureKey = nil
+        PerfProbe.shared?.count("\(probeName).released")
+    }
+
+    private var pausedAt = Date()
+
     private func rebuildFurnitureIfNeeded(_ stage: Stage, extent: MapRect) {
         let teams = stage.sortedTeams
-        let rows = stage.layout.rows.map { "\($0.team.raw)#\($0.desks)+\($0.hidden)@\($0.index)" }
-        let plates = stage.nameplates.keys.sorted().map { team in
-            team.raw + ":" + (stage.nameplates[team] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        }
-
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
-        let fit = [extent.x, extent.width, extent.height].map { String(Int(($0 / 4).rounded())) }.joined(separator: ",")
-        let signature = [fit, "\(Int(stage.layout.width))x\(Int(stage.layout.height))", rows.joined(separator: ","),
-            teams.map { "\($0.id.raw):\($0.name):\($0.colorIndex)" }.joined(separator: ","), plates.joined(separator: ";")].joined(separator: "|")
-        guard signature != furnitureSignature else { return }
-        furnitureSignature = signature
+        let key = FurnitureKey(
+            fit: [extent.x, extent.width, extent.height].map { Int(($0 / 4).rounded()) }, layout: stage.layout, teams: teams,
+            nameplates: stage.nameplates)
+        guard key != furnitureKey else { return }
+        furnitureKey = key
 
         furniture.removeAllChildren()
         let height = stage.layout.height
         let layers = OfficeArt.layers(
             layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk)
 
-        // 바닥과 벽은 움직이지 않으므로 한 번 그려서 캐시합니다
-        let background = SKEffectNode()
-        background.shouldRasterize = true
-        background.shouldEnableEffects = false
-        background.zPosition = -100_000
-        for layer in layers where layer.depth == -.infinity {
-            background.addChild(ArtNodes.node(for: layer.shapes, colors: nil) { CGPoint(x: $0.x, y: height - $0.y) })
-        }
-        furniture.addChild(background)
-
-        for layer in layers where layer.depth != -.infinity {
-            let node = ArtNodes.node(for: layer.shapes, colors: nil) { CGPoint(x: $0.x, y: height - $0.y) }
-            node.zPosition = layer.depth
-            node.name = layer.name
+        // 가구는 비트맵으로 구워 둡니다 (M6(1)). 깊이가 같은 층(한 행의 책상들, 의자들, 바닥·벽·표지)은 한 장으로 합칩니다:
+        // 깊이가 같으면 SpriteKit도 넣은 순서대로 그리므로 순서가 같고, 그릴 노드 수가 줄어 매 프레임 순회 비용이 줄어듭니다.
+        // 합친 묶음의 글자(명패·폴더 표지)는 도형 위에 그립니다 (같은 깊이의 다른 가구와 겹치지 않음).
+        // 그림 좌표 (x, y) → 지도 (x, height - y)이므로 원점을 height만큼 올립니다.
+        // 보이는 영역(지도 좌표, y 아래로) → 노드 안 좌표 (x, -y)
+        let visible = CGRect(x: extent.x, y: -(extent.y + extent.height), width: extent.width, height: extent.height).insetBy(dx: -2, dy: -2)
+        for group in Self.groupByDepth(layers) {
+            let node = ArtNodes.node(for: group.shapes, colors: nil, clip: visible)
+            node.position = CGPoint(x: 0, y: height)
+            node.zPosition = group.depth == -.infinity ? -100_000 : group.depth
             furniture.addChild(node)
+        }
+    }
+
+    /// 깊이가 같은 층을 처음 나온 순서대로 묶습니다. 층이 하나면 그대로, 여럿이면 글자가 아닌 도형을 먼저, 글자를 나중에.
+    static func groupByDepth(_ layers: [ArtLayer]) -> [(depth: Double, shapes: [ArtShape])] {
+        var order: [Double] = []
+        var groups: [Double: [ArtLayer]] = [:]
+        for layer in layers {
+            if groups[layer.depth] == nil { order.append(layer.depth) }
+            groups[layer.depth, default: []].append(layer)
+        }
+        return order.map { depth in
+            let members = groups[depth]!
+            if members.count == 1 { return (depth, members[0].shapes) }
+            let shapes = members.flatMap(\.shapes)
+            let isText: (ArtShape) -> Bool = { if case .text = $0.geometry { true } else { false } }
+            return (depth, shapes.filter { !isText($0) } + shapes.filter(isText))
         }
     }
 }
@@ -396,11 +520,11 @@ final class CharacterNode: SKNode {
         selectionRing.lineWidth = 1.6
         selectionRing.isAntialiased = true
         selectionRing.isHidden = true
-        leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors, transform: Self.local)
-        rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors, transform: Self.local)
-        shadow = ArtNodes.node(for: CharacterArt.shadow, colors: colors, transform: Self.local)
-        leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
-        rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
+        leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors)
+        rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors)
+        shadow = ArtNodes.node(for: CharacterArt.shadow, colors: colors)
+        leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
+        rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
         super.init()
 
         addChild(selectionRing)
@@ -417,7 +541,7 @@ final class CharacterNode: SKNode {
         let neck = Self.local(CharacterArt.headOrigin + MapPoint(0, 20))
         hairBackPivot.position = neck
         headPivot.position = neck
-        let hairBack = ArtNodes.node(for: CharacterArt.hairBack(style: appearance.hairStyle), colors: colors, transform: Self.local)
+        let hairBack = ArtNodes.node(for: CharacterArt.hairBack(style: appearance.hairStyle), colors: colors)
         hairBack.position = CGPoint(x: 0, y: 20)
         hairBackPivot.addChild(hairBack)
         body.addChild(hairBackPivot)
@@ -426,7 +550,7 @@ final class CharacterNode: SKNode {
 
         headContent.position = CGPoint(x: 0, y: 20)
         headPivot.addChild(headContent)
-        headContent.addChild(ArtNodes.node(for: CharacterArt.face, colors: colors, transform: Self.local))
+        headContent.addChild(ArtNodes.node(for: CharacterArt.face, colors: colors))
         eyes.position = Self.local(MapPoint(0, 1))  // 눈높이를 축으로 세로로 깜빡입니다
         headContent.addChild(eyes)
         headContent.addChild(faceDetails)
@@ -447,7 +571,7 @@ final class CharacterNode: SKNode {
         fatalError("init(coder:)는 쓰지 않습니다")
     }
 
-    func apply(_ actor: StageActor, time: Double, sceneHeight: Double) {
+    func apply(_ actor: StageActor, time: Double, sceneHeight: Double, blinkDuration: Double) {
         position = CGPoint(x: actor.position.x, y: sceneHeight - actor.position.y)
         zPosition = actor.position.y
 
@@ -455,7 +579,7 @@ final class CharacterNode: SKNode {
         if shownStar != star {
             shownStar = star
             torso.removeAllChildren()
-            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors, transform: Self.local))
+            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors))
         }
         if shownExpression != actor.expression {
             shownExpression = actor.expression
@@ -464,16 +588,16 @@ final class CharacterNode: SKNode {
         if shownProp == nil || shownProp! != actor.prop {
             shownProp = .some(actor.prop)
             handProp.removeAllChildren()
-            handProp.addChild(ArtNodes.node(for: CharacterArt.handProp(actor.prop), colors: colors, transform: Self.local))
+            handProp.addChild(ArtNodes.node(for: CharacterArt.handProp(actor.prop), colors: colors))
             heldProp.removeAllChildren()
-            heldProp.addChild(ArtNodes.node(for: CharacterArt.heldProp(actor.prop), colors: colors, transform: Self.local))
+            heldProp.addChild(ArtNodes.node(for: CharacterArt.heldProp(actor.prop), colors: colors))
         }
 
         let handShape: BodyGesture? = CharacterArt.handGesture(actor.gesture).isEmpty ? nil : actor.gesture
         if shownHandGesture != handShape {
             shownHandGesture = handShape
             handGesture.removeAllChildren()
-            handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors, transform: Self.local))
+            handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors))
         }
 
         let seat = actor.loungeSeat
@@ -481,14 +605,14 @@ final class CharacterNode: SKNode {
             shownSeat = .some(seat)
             seatedLegs.removeAllChildren()
             if let seat {
-                seatedLegs.addChild(ArtNodes.node(for: CharacterArt.seatedLegs(seat), colors: colors, transform: Self.local))
+                seatedLegs.addChild(ArtNodes.node(for: CharacterArt.seatedLegs(seat), colors: colors))
             }
             leftLeg.isHidden = seat != nil
             rightLeg.isHidden = seat != nil
             shadow.isHidden = seat != nil
         }
 
-        let pose = RigAnimator.pose(for: actor, time: time)
+        let pose = RigAnimator.pose(for: actor, time: time, blinkDuration: blinkDuration)
         body.position = CGPoint(x: 0, y: -pose.bob)
         body.xScale = pose.mirrored ? -1 : 1
         body.yScale = pose.stretch
@@ -508,11 +632,11 @@ final class CharacterNode: SKNode {
     private func rebuildFace(_ expression: FacialExpression) {
         eyes.removeAllChildren()
         // 눈 도형을 눈높이(y=1) 기준으로 옮겨서 넣습니다
-        eyes.addChild(ArtNodes.node(for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -1)), colors: colors, transform: Self.local))
+        eyes.addChild(ArtNodes.node(for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -1)), colors: colors))
         faceDetails.removeAllChildren()
         let details = CharacterArt.blush(expression) + CharacterArt.mouth(expression) + CharacterArt.hairFront(style: appearance.hairStyle)
             + CharacterArt.brows(expression) + CharacterArt.accessory(appearance.accessory) + CharacterArt.effects(expression)
-        faceDetails.addChild(ArtNodes.node(for: details, colors: colors, transform: Self.local))
+        faceDetails.addChild(ArtNodes.node(for: details, colors: colors))
         // 겹침 순서는 zPosition이 아니라 노드를 넣은 순서(얼굴 → 눈 → 세부)로 정합니다.
         // zPosition을 주면 팔(턱 괴기 손)보다 얼굴이 앞에 그려집니다.
     }
@@ -521,20 +645,12 @@ final class CharacterNode: SKNode {
 /// 말풍선·상태 칩·아이콘 하나. 도형이 바뀔 때만 다시 만들고, 매 프레임에는 위치·크기·투명도만 바꿉니다.
 final class OverlayNode: SKNode {
     private var shownShapes: [ArtShape] = []
-    /// 그림 데이터(y 아래로 증가)를 노드 안의 좌표(y 위로 증가)로
-    private static let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
 
     func apply(_ item: OverlayItem, sceneHeight: Double) {
         if item.shapes != shownShapes {
             shownShapes = item.shapes
             removeAllChildren()
-            for shape in item.shapes {
-                let node = ArtNodes.node(for: shape, colors: nil, transform: Self.local)
-                if let label = node as? SKLabelNode {
-                    ArtNodes.fit(label, in: item, shape: shape)
-                }
-                addChild(node)
-            }
+            addChild(ArtNodes.node(for: item.shapes, colors: nil) { label, shape in ArtNodes.fit(label, in: item, shape: shape) })
         }
         position = CGPoint(x: item.origin.x, y: sceneHeight - item.origin.y)
         setScale(item.scale)
@@ -555,7 +671,41 @@ enum ArtNodes {
         }
     }
 
-    static func node(for shapes: [ArtShape], colors: CharacterArt.Colors?, transform: @escaping (MapPoint) -> CGPoint) -> SKNode {
+    /// 도형 묶음 → 노드 (노드 안 좌표 `(x, -y)`). 글자가 아닌 도형은 이어진 것끼리 비트맵 한 장으로 구워 스프라이트로 만들고
+    /// (`ShapeBaker`, M6(1)), 글자는 SKLabelNode로 둡니다. 그리는 순서는 도형 순서 그대로입니다.
+    /// - Parameter onLabel: 글자 노드를 만든 뒤 부름 (말풍선 글자 폭 맞추기)
+    static func node(
+        for shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect? = nil, onLabel: ((SKLabelNode, ArtShape) -> Void)? = nil
+    ) -> SKNode {
+        var parts: [SKNode] = []
+        var run: [ArtShape] = []
+        func flush() {
+            guard !run.isEmpty else { return }
+            parts.append(ShapeBaker.node(for: run, colors: colors, clip: clip))
+            run.removeAll()
+        }
+        for shape in shapes {
+            guard case .text = shape.geometry else {
+                run.append(shape)
+                continue
+            }
+            flush()
+            let node = node(for: shape, colors: colors, transform: local)
+            if let label = node as? SKLabelNode { onLabel?(label, shape) }
+            parts.append(node)
+        }
+        flush()
+        if parts.count == 1 { return parts[0] }
+        let container = SKNode()
+        for part in parts { container.addChild(part) }
+        return container
+    }
+
+    /// 그림 데이터(y 아래로 증가)를 노드 안의 좌표(y 위로 증가)로
+    static let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
+
+    /// 굽지 않은 도형 노드 묶음 (매 프레임 바뀌는 움직이는 가구용)
+    static func unbakedNode(for shapes: [ArtShape], colors: CharacterArt.Colors?, transform: @escaping (MapPoint) -> CGPoint) -> SKNode {
         let container = SKNode()
         for shape in shapes {
             container.addChild(node(for: shape, colors: colors, transform: transform))

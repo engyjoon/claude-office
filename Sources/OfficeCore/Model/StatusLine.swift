@@ -128,6 +128,27 @@ public struct StatusLine: Hashable, Sendable {
         lines.contains { $0.segment.since != nil || $0.segment.at != nil || $0.segment.restingSince != nil }
     }
 
+    /// 시간 때문에 화면 글자가 다음에 바뀌는 때 (바뀔 일이 없으면 nil). 화면은 이때만 다시 그립니다 (M6(1), 설계서 §8.3).
+    ///
+    /// "12초째"·"3초 전"처럼 1분 안쪽은 1초마다, "3분째"·"5분 전"·"1시간 2분째"는 1분마다 바뀌고(시작 시각 기준으로 맞춤),
+    /// 쉬는 중은 `napAfter`가 지나는 순간 "잠든 중"으로 바뀝니다. 1초마다 창 전체를 다시 배치하던 것을 줄입니다.
+    public func nextChange(after now: Date) -> Date? {
+        var next: Date?
+        func consider(_ date: Date) {
+            if date > now, next.map({ date < $0 }) ?? true { next = date }
+        }
+        for line in lines {
+            let segment = line.segment
+            if let start = segment.since ?? segment.at {
+                let elapsed = max(now.timeIntervalSince(start), 0)
+                let step: TimeInterval = elapsed < 60 ? 1 : 60
+                consider(start.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step))
+            }
+            if let resting = segment.restingSince { consider(resting.addingTimeInterval(Self.napAfter)) }
+        }
+        return next
+    }
+
     /// 화면에 그릴 글자 그대로, 줄마다 (테스트·로그)
     public func texts(now: Date) -> [String] { lines.map { $0.text(now: now) } }
 

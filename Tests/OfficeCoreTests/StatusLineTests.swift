@@ -448,4 +448,35 @@ struct StatusLineTests {
         }
         #expect(office.engine.journal.entries.count == ActivityJournal.capacity)
     }
+
+    @Test("다음에 글자가 바뀌는 때: 1분 안쪽은 1초 단위, 그 뒤는 1분 단위, 쉬는 중은 잠드는 순간 (M6(1))")
+    func nextChange() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        func line(_ segment: StatusLine.Segment) -> StatusLine {
+            StatusLine(mode: .office, lines: [StatusLine.Line(segment: segment)])
+        }
+        #expect(line(StatusLine.Segment(text: "생각 중")).nextChange(after: t0) == nil)
+        #expect(StatusLine.empty.nextChange(after: t0) == nil)
+
+        let working = line(StatusLine.Segment(text: "Bash", since: t0))
+        #expect(working.nextChange(after: t0.addingTimeInterval(12.3)) == t0.addingTimeInterval(13))
+        #expect(working.nextChange(after: t0.addingTimeInterval(59.5)) == t0.addingTimeInterval(60))
+        #expect(working.nextChange(after: t0.addingTimeInterval(61)) == t0.addingTimeInterval(120))
+        #expect(working.nextChange(after: t0.addingTimeInterval(3_700)) == t0.addingTimeInterval(3_720))
+
+        let done = line(StatusLine.Segment(text: "Edit", at: t0))
+        #expect(done.nextChange(after: t0.addingTimeInterval(200)) == t0.addingTimeInterval(240))
+
+        // 쉬는 중: 시간은 없고 잠드는 순간만
+        let resting = line(StatusLine.Segment(text: "쉬는 중", restingSince: t0))
+        #expect(resting.nextChange(after: t0.addingTimeInterval(30)) == t0.addingTimeInterval(StatusLine.napAfter))
+        #expect(resting.nextChange(after: t0.addingTimeInterval(StatusLine.napAfter + 1)) == nil)
+
+        // 여러 줄이면 가장 이른 때
+        let both = StatusLine(mode: .office, lines: [
+            StatusLine.Line(segment: StatusLine.Segment(text: "Edit", at: t0)),
+            StatusLine.Line(segment: StatusLine.Segment(text: "Bash", since: t0.addingTimeInterval(290))),
+        ])
+        #expect(both.nextChange(after: t0.addingTimeInterval(300.5)) == t0.addingTimeInterval(301))
+    }
 }

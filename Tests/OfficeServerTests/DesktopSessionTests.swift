@@ -90,6 +90,31 @@ struct DesktopSessionTests {
         #expect(DesktopSessionDirectory(root: root.appendingPathComponent("없음")).openFolders().isEmpty)
     }
 
+    @Test("모두 다시 읽기: 수정 시각·크기가 그대로인 파일은 다시 파싱하지 않고, 바뀌거나 지운 파일은 반영 (M6(1))")
+    func allRecordsReparsesOnlyChanged() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write(root, "local_a", #"{"cwd":"/w/office","title":"하나"}"#)
+        try write(root, "local_b", #"{"cwd":"/w/blog"}"#)
+        let directory = DesktopSessionDirectory(root: root)
+        #expect(directory.allRecords().count == 2)
+        #expect(directory.lastParsedCount == 2)
+
+        #expect(directory.allRecords().count == 2)
+        #expect(directory.lastParsedCount == 0)
+
+        try write(root, "local_a", #"{"cwd":"/w/office","title":"둘로 바꿈"}"#)
+        let file = root.appendingPathComponent("acc/org/local_a.json")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: file.path)
+        let records = directory.allRecords()
+        #expect(directory.lastParsedCount == 1)
+        #expect(records.first { $0.localID == "local_a" }?.title == "둘로 바꿈")
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("acc/org/local_b.json"))
+        #expect(directory.allRecords().map(\.localID) == ["local_a"])
+        #expect(directory.lastParsedCount == 0)
+    }
+
     @Test("정보 파일이 나중에 생기면 잠시 뒤 다시 찾는다")
     func lateFile() throws {
         let root = try temporaryDirectory()

@@ -100,6 +100,15 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
     private let lock = NSLock()
     private var cache: [String: (record: DesktopSessionRecord?, at: Date)] = [:]
     private var folders: (urls: [URL], at: Date)?
+    /// `allRecords`가 읽은 파일 (경로 → 수정 시각·크기·읽은 기록). 바뀌지 않은 파일은 다시 파싱하지 않습니다 (M6(1)).
+    private var parsedFiles: [String: (stamp: FileStamp, record: DesktopSessionRecord?)] = [:]
+    /// 마지막 `allRecords`에서 실제로 파싱한 파일 수 (테스트·계측용)
+    public private(set) var lastParsedCount = 0
+
+    struct FileStamp: Equatable {
+        var modified: Date
+        var size: Int
+    }
 
     public init(
         root: URL = DesktopSessionDirectory.defaultRoot(), ttl: TimeInterval = 10, missTTL: TimeInterval = 2,
@@ -133,18 +142,40 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
     }
 
     /// 세션 정보 파일을 모두 다시 읽습니다 (보관한 세션 포함). 메인 스레드가 아닌 곳에서 가끔(몇 초마다) 부르세요.
+    ///
+    /// 수정 시각과 크기가 지난번과 같은 파일은 다시 파싱하지 않습니다 (M6(1): 파일 30개·1MB를 5초마다 다시 파싱하던 것이
+    /// 대기 중 CPU의 큰 몫이었음). 데스크톱 앱은 파일을 통째로 다시 쓰므로 수정 시각이 바뀝니다.
     public func allRecords() -> [DesktopSessionRecord] {
         let fileManager = FileManager.default
         var records: [DesktopSessionRecord] = []
+        var seen: Set<String> = []
+        var parsed = 0
         for folder in accountFolders(refresh: true, at: now()) {
             let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
             for name in names where name.hasSuffix(".json") {
                 let localID = String(name.dropLast(5))
-                guard HookRequestPolicy.isHostSessionID(localID),
-                      let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
-                      let record = DesktopSessionRecord.parse(data, localID: localID) else { continue }
-                records.append(record)
+                guard HookRequestPolicy.isHostSessionID(localID) else { continue }
+                let path = folder.appendingPathComponent(name).path
+                guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+                      let modified = attributes[.modificationDate] as? Date,
+                      let size = (attributes[.size] as? NSNumber)?.intValue else { continue }
+                seen.insert(path)
+                let stamp = FileStamp(modified: modified, size: size)
+                let cached = lock.withLock { parsedFiles[path] }
+                let record: DesktopSessionRecord?
+                if let cached, cached.stamp == stamp {
+                    record = cached.record
+                } else {
+                    record = (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { DesktopSessionRecord.parse($0, localID: localID) }
+                    parsed += 1
+                    lock.withLock { parsedFiles[path] = (stamp, record) }
+                }
+                if let record { records.append(record) }
             }
+        }
+        lock.withLock {
+            parsedFiles = parsedFiles.filter { seen.contains($0.key) }
+            lastParsedCount = parsed
         }
         return records
     }

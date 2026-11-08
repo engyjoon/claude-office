@@ -9,6 +9,7 @@ import SwiftUI
 /// 점·디렉토리·직함·본문을 칸으로 나눠 세 줄의 왼쪽을 칸마다 맞춥니다. 줄 위치는 고정이고, 바뀔 때 움직임 없이 바로 바꿉니다.
 struct StatusLineView: View {
     let line: StatusLine
+    @Environment(\.liveClock) private var live
 
     /// 한 줄 높이
     static let lineHeight: CGFloat = 18
@@ -18,8 +19,9 @@ struct StatusLineView: View {
     static let height: CGFloat = lineHeight * CGFloat(StatusLine.lineCount) + verticalPadding * 2
 
     var body: some View {
-        // 시간이 붙은 줄이 있으면 1초마다 다시 그립니다 ("12초째", "3초 전", 쉬는 중 → 잠든 중)
-        TimelineView(.periodic(from: .now, by: line.ticks ? 1 : 60)) { context in
+        // 시간 글자가 바뀌는 순간에만 다시 그립니다 (M6(1)): 1분 안쪽 "12초째"·"3초 전"은 1초마다, "3분째"는 1분마다, 쉬는 중 → 잠든 중
+        // 창이 안 보이면 멈춥니다 (`liveClock`)
+        TimelineView(NextChangeSchedule { [line, live] in live ? line.nextChange(after: $0) : nil }) { context in
             // 칸: 점 | 디렉토리 | 직함 | 본문. 칸마다 왼쪽을 맞춰 세 줄의 디렉토리·직함·본문 시작이 같습니다 (M5(9) 화면 확인).
             // 디렉토리를 하나 골라 폴더 이름이 없으면 그 칸을 뺍니다.
             let showsFolder = line.lines.contains { $0.folder != nil }
@@ -128,5 +130,42 @@ struct StatusLineView: View {
             text += suffix
         }
         return text
+    }
+}
+
+/// 글자가 다음에 바뀌는 때에만 다시 그리는 TimelineView 일정 (M6(1), 설계서 §8.3).
+/// `.periodic(by: 1)`은 바뀔 글자가 없어도 1초마다 창 전체를 다시 배치합니다.
+struct NextChangeSchedule: TimelineSchedule {
+    /// 그 시각 다음에 글자가 바뀌는 때 (없으면 nil: 다시 그리지 않음)
+    let next: (Date) -> Date?
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        var upcoming: Date? = startDate
+        return AnyIterator {
+            guard let date = upcoming else { return nil }
+            // 경계 바로 뒤에 그려야 정수로 내린 초가 새 값이 됩니다
+            upcoming = next(date).map { max($0.addingTimeInterval(0.05), date.addingTimeInterval(0.5)) }
+            return date
+        }
+    }
+}
+
+extension NextChangeSchedule {
+    /// `live`일 때만 `step`초마다 (창이 안 보이면 멈춤)
+    static func every(_ step: TimeInterval, live: Bool) -> NextChangeSchedule {
+        NextChangeSchedule { live ? $0.addingTimeInterval(step) : nil }
+    }
+}
+
+/// 시계 글자("12초째", "3분 전")를 다시 그려도 되는지: 창이 화면에 보일 때만 (M6(1)).
+/// SwiftUI는 닫히거나 가려진 창의 TimelineView도 계속 돌려 창 전체를 다시 배치합니다.
+private struct LiveClockKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var liveClock: Bool {
+        get { self[LiveClockKey.self] }
+        set { self[LiveClockKey.self] = newValue }
     }
 }

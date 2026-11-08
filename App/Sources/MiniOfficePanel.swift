@@ -132,6 +132,8 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         let sprite = FirstMouseSKView(frame: NSRect(x: 0, y: 0, width: size.width, height: size.height - header))
         sprite.autoresizingMask = [.width, .height]
         sprite.preferredFramesPerSecond = 30
+        sprite.limitDrawables()
+        sprite.shouldCullNonVisibleNodes = false
         sprite.allowsTransparency = false
         sprite.presentScene(model.miniScene)
         // 머리줄은 보여 주기만 하고 누르기는 아래 컨테이너가 받습니다 (어디든 누르면 사무실 창, 끌면 이동)
@@ -310,7 +312,9 @@ struct MiniHeaderView: View {
         let others = roster.teams.filter { $0.id != current?.id }
             .sorted { Self.rank(focus.tiers[$0.id]) < Self.rank(focus.tiers[$1.id]) }
         HStack(spacing: 5) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            // 글자가 바뀌는 때만 (M6(1)): 답변 대기 "12초째"는 1초마다, "3분 전"은 1분마다
+            // 미니가 숨어 있으면 멈춥니다
+            TimelineView(NextChangeSchedule { [line, live = model.miniVisible] in live ? Self.nextChange(line, after: $0) : nil }) { context in
                 Text(current == nil ? "아직 출근한 직원이 없어요" : statusText(line, waitingCount: waiting.count, now: context.date))
                     .font(.system(size: 10.5, weight: line?.kind == .normal ? .regular : .semibold))
                     .lineLimit(1)
@@ -397,6 +401,19 @@ struct MiniHeaderView: View {
             let prompted = row.status == .thinking && model.promptedAt(row).map { abs($0.timeIntervalSince(row.since)) < 1 } == true
             return "\(name): \(prompted ? "요청 받음" : row.status.label) · \(Self.ago(row.since, now: now))"
         }
+    }
+
+    /// 머리줄 글자가 다음에 바뀌는 때: 답변 대기는 "N초째"라 1초마다, 나머지는 `ago`가 1분 단위라 다음 분 경계
+    static func nextChange(_ line: Line?, after now: Date) -> Date? {
+        guard let line else { return nil }
+        if line.kind == .answer {
+            let elapsed = max(now.timeIntervalSince(line.row.since), 0)
+            let step: TimeInterval = elapsed < 60 ? 1 : 60
+            return line.row.since.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step)
+        }
+        let elapsed = max(now.timeIntervalSince(line.row.since), 0)
+        let step: TimeInterval = elapsed < 3600 ? 60 : 3600
+        return line.row.since.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step)
     }
 
     /// "방금", "3분 전", "2시간 전"

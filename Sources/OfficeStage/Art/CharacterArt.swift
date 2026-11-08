@@ -343,7 +343,8 @@ public struct RigPose: Hashable, Sendable {
 
 /// 직원 상태와 무대 시각으로 리그 자세를 계산합니다 (미리보기의 CSS 애니메이션을 옮긴 것).
 public enum RigAnimator {
-    public static func pose(for actor: StageActor, time: Double) -> RigPose {
+    /// - Parameter blinkDuration: 깜빡임 길이 (초). 그리기 빈도가 낮을 때(잠잠함 3fps) 늘려서 깜빡임이 빠지지 않게 합니다 (M6(1)).
+    public static func pose(for actor: StageActor, time: Double, blinkDuration: Double = 0.14) -> RigPose {
         var pose = RigPose()
         let seed = Double(StableHashLite.value(actor.id.raw) % 997) / 997 * 4.6
         let base = armAngles(actor.pose)
@@ -397,7 +398,7 @@ public enum RigAnimator {
         // 깜빡임 (직원마다 엇갈리게)
         if CharacterArt.blinks(actor.expression) {
             let cycle = (time + seed).truncatingRemainder(dividingBy: 4.6)
-            if cycle > 4.36 && cycle < 4.5 { pose.eyeScale = 0.12 }
+            if cycle > 4.5 - blinkDuration && cycle < 4.5 { pose.eyeScale = 0.12 }
         }
         return pose
     }

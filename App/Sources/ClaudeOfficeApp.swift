@@ -78,12 +78,18 @@ struct OfficeWindowView: View {
                 StaffPanel(model: model)
             }
         }
+        // 창이 안 보이면 현황 줄·인스펙터의 시계 글자를 멈춥니다 (M6(1))
+        .environment(\.liveClock, model.officeVisible)
         // 내용 크기를 못 박아 창 크기를 고정합니다 (`.windowResizability(.contentSize)`)
         .frame(width: office.width + (showStaffPanel ? OfficeWindowSize.panel : 0), height: office.height + StatusLineView.height)
         .background(WindowAccessor { window in
             OfficeWindowSize.lock(window)
             let next = OfficeWindowSize.Screen(window: window)
-            if next != screen { screen = next }
+            if next != screen {
+                // 화면 크기 정보가 바뀐 횟수 (디버그 계측: 창 크기·레이아웃이 되풀이되는지 보려고)
+                PerfProbe.shared?.count("office.screenChanged")
+                screen = next
+            }
         })
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -214,7 +220,10 @@ struct OfficeSpriteView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SKView {
         let view = OfficeSKView()
+        view.limitDrawables()
         view.preferredFramesPerSecond = 30
+        // 사무실은 거의 다 화면 안이라, 매 프레임 노드마다 화면 밖인지 재는 비용이 아낄 것보다 큽니다 (M6(1))
+        view.shouldCullNonVisibleNodes = false
         view.presentScene(scene)
         scene.resumeIfPaused()
         return view
@@ -227,15 +236,31 @@ struct OfficeSpriteView: NSViewRepresentable {
 
     static func dismantleNSView(_ view: SKView, coordinator: ()) {
         view.presentScene(nil)
+        // 장면을 뗀 SKView도 멈추지 않으면 디스플레이 링크가 계속 돌아 아무것도 안 그리면서 vsync마다 메인 스레드를 깨웁니다
+        // (M6(1) 측정: 사무실 창을 닫은 뒤 CPU 4%, 초당 180번 깨움)
+        view.isPaused = true
     }
 }
 
-/// 창에 붙을 때 마우스 이동(말풍선 전체 보기)을 받게 하고 멈춤을 풉니다
+/// 창에 붙을 때 마우스 이동(말풍선 전체 보기)을 받게 하고 멈춤을 풉니다. 창에서 떨어지면 멈춥니다 (디스플레이 링크가 돌지 않게).
 final class OfficeSKView: SKView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.acceptsMouseMovedEvents = true
+        guard let window else {
+            isPaused = true
+            return
+        }
+        window.acceptsMouseMovedEvents = true
+        limitDrawables()
         (scene as? OfficeScene)?.resumeIfPaused()
+    }
+}
+
+extension SKView {
+    /// 화면에 보낼 그림판(drawable)을 3장 → 2장으로 (M6(1)): 사무실 창은 한 장이 2360×1496픽셀(14MB)이라 메모리 목표(150MB)에 걸립니다.
+    /// 30fps 이하로만 그리므로 2장이면 기다리지 않습니다.
+    func limitDrawables() {
+        if let layer = layer as? CAMetalLayer, layer.maximumDrawableCount != 2 { layer.maximumDrawableCount = 2 }
     }
 }
 

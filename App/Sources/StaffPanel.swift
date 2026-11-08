@@ -216,6 +216,7 @@ private struct DirectoryPopUp: NSViewRepresentable {
 }
 
 private struct StaffRow: View {
+    @Environment(\.liveClock) private var liveClock
     let row: RosterRow
     let colorIndex: Int
     let selected: Bool
@@ -229,7 +230,7 @@ private struct StaffRow: View {
                     Spacer(minLength: 4)
                     StatusChip(status: row.status)
                 }
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                TimelineView(NextChangeSchedule.every(30, live: liveClock)) { context in
                     Text(subtitle(now: context.date))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
