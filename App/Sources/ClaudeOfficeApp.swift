@@ -18,7 +18,7 @@ struct ClaudeOfficeApp: App {
         Window(OfficeWindowView.title, id: WindowID.office) {
             OfficeWindowView(model: model)
         }
-        .defaultSize(width: OfficeWindowView.defaultWidth, height: 800)
+        .defaultSize(width: OfficeWindowView.defaultWidth, height: OfficeWindowView.defaultHeight)
 
         Window("Claude Office 이벤트 로그", id: WindowID.eventLog) {
             EventLogView(model: model)
@@ -36,28 +36,34 @@ enum WindowID {
     static let eventLog = "event-log"
 }
 
-/// 사무실 창 (M3). 왼쪽은 사무실, 오른쪽은 디렉토리·세션 패널. 미니 사무실 패널은 M5에서 만듭니다.
+/// 사무실 창 (M3). 왼쪽은 사무실과 그 아래 실시간 현황 줄, 오른쪽은 디렉토리·세션 패널.
 struct OfficeWindowView: View {
     let model: AppModel
     @AppStorage("office.showStaffPanel") private var showStaffPanel = true
     @State private var escapeMonitor: Any?
     /// 창 기본 폭을 넓힌 뒤 한 번만, 예전 크기로 기억된 창을 넓혀 줍니다 (이후에는 사용자가 정한 크기를 따름)
     @AppStorage("office.widenedTo1440") private var widened = false
+    /// 현황 줄을 넣은 뒤 한 번만, 예전 높이로 기억된 창을 줄 높이만큼 늘려 줍니다 (사무실 영역 높이 유지)
+    @AppStorage("office.tallerForStatusLine") private var heightened = false
 
     var body: some View {
         HStack(spacing: 0) {
-            SpriteView(scene: model.officeScene, preferredFramesPerSecond: 30)
-                // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
-                .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
-                .background(Color(red: 0.945, green: 0.902, blue: 0.839))
-                .overlay(alignment: .topTrailing) {
-                    // 캐릭터를 클릭하면 누구인지 보여줍니다. 빈 곳 클릭·✕·Esc로 닫습니다.
-                    if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
-                        AgentCard(row: row, team: team, privacy: model.privacy) { model.select(nil) }
-                            .padding(12)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+            VStack(spacing: 0) {
+                SpriteView(scene: model.officeScene, preferredFramesPerSecond: 30)
+                    // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
+                    .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
+                    .background(Color(red: 0.945, green: 0.902, blue: 0.839))
+                    .overlay(alignment: .topTrailing) {
+                        // 캐릭터를 클릭하면 누구인지 보여줍니다. 빈 곳 클릭·✕·Esc로 닫습니다.
+                        if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
+                            AgentCard(row: row, team: team, privacy: model.privacy) { model.select(nil) }
+                                .padding(12)
+                                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                        }
                     }
-                }
+                // 사무실 바로 아래 한 줄 (사무실 영역은 이 줄을 뺀 높이: 씬 크기와 행 수 계산이 이 줄을 빼고 맞춤)
+                StatusLineView(line: model.statusLine)
+            }
             if showStaffPanel {
                 Divider()
                 StaffPanel(model: model)
@@ -79,6 +85,7 @@ struct OfficeWindowView: View {
         // SpriteKit 뷰가 키 입력을 먼저 받아서 onExitCommand로는 Esc가 오지 않습니다. 창 단위로 가로챕니다.
         .onAppear {
             widenOnceIfNeeded()
+            heightenOnceIfNeeded()
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, model.selectedAgent != nil,
@@ -95,6 +102,23 @@ struct OfficeWindowView: View {
 
     static let title = "Claude Office 사무실"
     static let defaultWidth: CGFloat = 1440
+    /// 사무실 영역 기본 높이(`OfficeLayout.defaultHeight` + 둘레 여백) + 현황 줄 + 제목 막대
+    static let defaultHeight: CGFloat = 800 + StatusLineView.height
+
+    private func heightenOnceIfNeeded() {
+        guard !heightened else { return }
+        heightened = true
+        DispatchQueue.main.async {
+            guard let window = NSApp.windows.first(where: { $0.title == Self.title }),
+                  window.frame.height < Self.defaultHeight else { return }
+            let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+            var frame = window.frame
+            let grow = min(StatusLineView.height, max(0, visible.height - frame.height))
+            frame.size.height += grow
+            frame.origin.y = max(visible.minY, frame.origin.y - grow)  // 위쪽 모서리를 유지하고 아래로 늘림
+            window.setFrame(frame, display: true, animate: true)
+        }
+    }
 
     private func widenOnceIfNeeded() {
         guard !widened else { return }

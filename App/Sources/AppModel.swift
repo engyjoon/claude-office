@@ -47,6 +47,8 @@ final class AppModel {
     private(set) var hiddenOnScreen = 0
     /// Claude 데스크톱 앱에 열려 있는 디렉토리 (몇 초마다 새로 읽음)
     private(set) var directories: [DesktopFolder] = []
+    /// 사무실 아래 실시간 현황 줄 (고른 사람의 흐름, 아니면 고른 디렉토리의 최근 일)
+    private(set) var statusLine: StatusLine = .empty
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -184,11 +186,20 @@ final class AppModel {
         roster = Roster.make(from: engine.state, privacy: privacy)
         // 고른 직원이 퇴근하면 카드를 닫습니다
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
+        refreshStatusLine()
     }
 
     func select(_ id: AgentID?) {
         selectedAgent = id
         officeScene.selectedAgent = id
+        refreshStatusLine()
+    }
+
+    /// 현황 줄을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
+    private func refreshStatusLine() {
+        let line = StatusLine.make(
+            state: engine.state, journal: engine.journal, privacy: privacy, selected: selectedAgent, folder: selectedFolder)
+        if line != statusLine { statusLine = line }
     }
 
     /// 연출 지시를 무대에 넘기고(화면에 보일 사람만, `OfficeFloor`), 로그에도 남깁니다.
@@ -273,6 +284,7 @@ final class AppModel {
         stageStore.floor.setSelection(selection, engine: engine)
         updateHidden()
         if let selectedAgent, visibleRoster.row(for: selectedAgent) == nil { select(nil) }
+        refreshStatusLine()
     }
 
     /// 사무실 영역 크기가 바뀜 (배율 1 유지, 들어가는 수를 다시 셈)
@@ -299,6 +311,7 @@ final class AppModel {
         engine.privacy = level
         UserDefaults.standard.set(level.rawValue, forKey: Self.privacyKey)
         roster = Roster.make(from: engine.state, privacy: level)
+        refreshStatusLine()
     }
 
     func refreshHookStatus() {

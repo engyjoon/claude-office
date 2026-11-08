@@ -73,7 +73,7 @@ public struct OfficeLayout: Hashable, Sendable {
     /// 높이는 3행(`maxRows`)이 최소 간격으로 모두 들어가는 크기입니다 (사무실 창도 이보다 낮아지지 않게 막습니다).
     public static let minWidth = massageArea.maxX - 20 + whiteboardToDoor + doorToPantry + 212
     public static let minHeight = firstDeskY + minRowSpacing * Double(maxRows - 1) + bottomMargin
-    /// 창을 처음 열었을 때의 사무실 크기 (창 1440×800 − 디렉토리·세션 패널 260 − 제목 막대 − 둘레 여백)
+    /// 창을 처음 열었을 때의 사무실 크기 (창 1440×830 − 디렉토리·세션 패널 260 − 제목 막대 − 아래 현황 줄 30 − 둘레 여백)
     public static let defaultWidth = 1140.0
     public static let defaultHeight = 708.0
 
