@@ -296,6 +296,8 @@ public struct Stage: Sendable {
             actors[id]!.facing = .front
             if actors[id]!.pose == .standing { actors[id]!.pose = .sitting }
         case .stand:
+            // 책상에서 쉬기: 쉬러 가거나 자리로 돌아오는 걸음이 제자리면 일어나지 않습니다 (M5(4) 화면 확인: 일어났다 다시 앉음)
+            if config.commonAreasAtDesk, staysPut(id) { break }
             actors[id]!.seated = false
             if actors[id]!.pose == .sitting { actors[id]!.pose = .standing }
         case .pose(let pose):
@@ -571,10 +573,26 @@ public struct Stage: Sendable {
         }
     }
 
+    /// 대기열의 다음 걸음이 지금 서 있는(앉은) 자리 그대로인지 (책상에서 쉬기)
+    private func staysPut(_ id: AgentID) -> Bool {
+        guard let actor = actors[id], !actor.isWalking else { return false }
+        for action in queues[id] ?? [] {
+            if case .walk(let spot) = action { return resolve(spot, for: id).final.distance(to: actor.position) < 1 }
+        }
+        return false
+    }
+
     private mutating func walk(_ id: AgentID, to spot: Spot) {
         guard actors[id] != nil else { return }
         let actor = actors[id]!
         let target = resolve(spot, for: id)
+        if config.commonAreasAtDesk, !actor.isWalking, target.final.distance(to: actor.position) < 1 {
+            // 제자리 걸음: 앉은 채로 자리만 바꿔 기록합니다
+            release(id)
+            reserve(target, for: id)
+            actors[id]!.place = target
+            return
+        }
         var path: [MapPoint] = []
         var position = actor.position
         // 의자·소파처럼 가구와 겹친 자리에 있으면 먼저 그 자리의 입구로 나옵니다

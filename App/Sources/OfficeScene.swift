@@ -38,6 +38,7 @@ final class OfficeScene: SKScene {
     /// 움직이는 가구 (안마 의자 롤러, 긴 명령을 기다리는 모니터). 그림이 바뀔 때만 다시 만듭니다.
     private let liveFurniture = SKNode()
     private var shownLiveLayers: [ArtLayer] = []
+    private var shownLiveHeight = 0.0
     /// 말풍선·상태 칩·아이콘·효과 층 (가구와 직원 모두의 위)
     private let overlayLayer = SKNode()
     private var overlays: [String: OverlayNode] = [:]
@@ -192,10 +193,13 @@ final class OfficeScene: SKScene {
 
     private func rebuildLiveFurnitureIfNeeded(_ stage: Stage) {
         let layers = OfficeArt.liveLayers(stage: stage)
-        guard layers != shownLiveLayers else { return }
-        shownLiveLayers = layers
-        liveFurniture.removeAllChildren()
+        // 지도 높이가 바뀌면(창 크기 조절) 위아래를 뒤집는 기준이 달라지므로 그림이 같아도 다시 만듭니다
+        // (M5(4) 화면 확인: 창을 키우면 안마 의자 롤러가 의자 한참 아래에 남아 있었음)
         let height = stage.layout.height
+        guard layers != shownLiveLayers || height != shownLiveHeight else { return }
+        shownLiveLayers = layers
+        shownLiveHeight = height
+        liveFurniture.removeAllChildren()
         for layer in layers {
             let node = ArtNodes.node(for: layer.shapes, colors: nil) { CGPoint(x: $0.x, y: height - $0.y) }
             node.zPosition = layer.depth

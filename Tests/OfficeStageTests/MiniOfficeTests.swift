@@ -143,6 +143,16 @@ struct MiniOfficeTests {
         #expect(main.loungeSeat == nil)
         let officeMain = try #require(office.stage.actors.values.first)
         #expect(officeMain.position != office.stage.layout.seat(office.team("m"), .main).final)
+        // 쉬러 가거나(소파 → 안마 → 낮잠) 깨어 자리로 돌아올 때도 일어나지 않고 그 자리에 앉아 있음
+        let seat = band.stage.layout.seat(team, .main).final
+        var stoodUp = false
+        for step in 1...2400 {
+            if step == 2000 { band.hook(prompt("m")) }
+            band.run(until: 120 + Double(step) * 0.25)
+            let actor = try #require(band.stage.actors.values.first)
+            if !actor.seated || actor.position != seat { stoodUp = true }
+        }
+        #expect(!stoodUp)
         // 휴게 공간 그림도 그리지 않음
         let names = OfficeArt.layers(layout: band.stage.layout, teams: band.stage.sortedTeams, lounge: false).map(\.name)
         #expect(!names.contains { $0.hasPrefix("sofa") || $0.hasPrefix("massage") })
