@@ -107,6 +107,10 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack {
+            Button("사무실 보기") {
+                NSApp.activate()
+                openWindow(id: WindowID.office)
+            }
             Button("이벤트 로그") {
                 NSApp.activate()
                 openWindow(id: WindowID.eventLog)

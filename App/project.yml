@@ -23,6 +23,9 @@ targets:
         product: OfficeCore
       - package: ClaudeOfficeKit
         product: OfficeServer
+      - package: ClaudeOfficeKit
+        product: OfficeStage
+      - sdk: SpriteKit.framework
     info:
       path: Generated/Info.plist
       properties:

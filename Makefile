@@ -13,7 +13,7 @@ ifeq ($(origin DEVELOPER_DIR),undefined)
   endif
 endif
 
-.PHONY: build test demo sounds serve replay bootstrap app run install uninstall clean
+.PHONY: build test demo sounds snapshot serve replay bootstrap app run install uninstall clean
 
 ## ---- 코어 (macOS·Linux) ----
 
@@ -31,6 +31,10 @@ demo:
 ## 효과음을 build/sounds/*.wav로 렌더링
 sounds:
 	$(SWIFT) run -q office-sim sounds build/sounds
+
+## 위임 시나리오의 사무실 장면을 build/snapshots/*.svg로 (맥 없이 그림 확인)
+snapshot:
+	$(SWIFT) run -q office-sim snapshot Scenarios/delegation.jsonl --at 10,16,52,125 --out build/snapshots
 
 ## 맥 앱 없이 훅 서버+엔진만 실행 (직원 목록만 출력)
 serve:

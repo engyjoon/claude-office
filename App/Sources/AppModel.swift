@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import OfficeCore
 import OfficeServer
+import OfficeStage
 
 /// 앱 전체 상태. 훅 서버 → 엔진 → 로스터를 잇고, 화면은 이 값만 봅니다.
 ///
@@ -43,6 +44,11 @@ final class AppModel {
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     let installer = HookInstaller()
     let endpointURL = EndpointFile.defaultURL()
+    /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
+    let stageStore = StageStore()
+    let officeScene: OfficeScene
+    @ObservationIgnored private var lastFrame = Date()
+    @ObservationIgnored private var tickAccumulator = 0.0
 
     private static let privacyKey = "privacy"
     private static let maxLogEntries = 600
@@ -51,6 +57,7 @@ final class AppModel {
         let saved = UserDefaults.standard.string(forKey: Self.privacyKey).flatMap(PrivacyLevel.init(rawValue:)) ?? .detailed
         privacy = saved
         engine = OfficeEngine(privacy: saved)
+        officeScene = OfficeScene(store: stageStore)
         refreshHookStatus()
         startServer()
         startTicking()
@@ -90,17 +97,28 @@ final class AppModel {
         EndpointFile.remove(at: endpointURL)
     }
 
+    /// 30fps로 무대를 흘리고, 0.25초마다 연출 엔진의 tick을 돌립니다.
     private func startTicking() {
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        lastFrame = Date()
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.frame() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
-    private func tick() {
-        let directives = engine.tick(at: Date())
-        record(directives)
+    private func frame() {
+        let now = Date()
+        let dt = min(max(now.timeIntervalSince(lastFrame), 0), 0.1)
+        lastFrame = now
+        stageStore.stage.update(dt: dt)
+        tickAccumulator += dt
+        if tickAccumulator >= 0.25 {
+            tickAccumulator = 0
+            record(engine.tick(at: now))
+        }
+        // 효과음(M4)과 종이비행기 같은 효과는 이후 단계에서 처리합니다
+        _ = stageStore.stage.drainEvents()
     }
 
     private func receive(_ delivery: HookDelivery) {
@@ -115,9 +133,10 @@ final class AppModel {
         roster = Roster.make(from: engine.state, privacy: privacy)
     }
 
-    /// M3에서 씬이 이 지시를 받아 그립니다. 지금은 로그로만 남깁니다.
+    /// 연출 지시를 무대에 넘기고, 로그에도 남깁니다.
     private func record(_ directives: [Directive]) {
         guard !directives.isEmpty else { return }
+        stageStore.stage.enqueue(directives)
         for directive in directives {
             append(.directive, directive.description)
         }
