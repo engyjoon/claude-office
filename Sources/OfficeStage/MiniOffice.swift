@@ -3,7 +3,7 @@ import OfficeCore
 
 /// 미니 사무실 (설계서 §10.1, M5(4) v2): 화면 구석에 띄우는 작은 패널.
 ///
-/// 사무실은 줄이지 않는다는 원칙(배율 1)에 따라, 메인 한 명과 쉬지 않는 서브 2명만 사무실 그림 그대로 보여 줍니다.
+/// 사무실은 줄이지 않는다는 원칙(배율 1)에 따라, 메인 한 명과 서브 2명(일하는 서브 먼저)만 사무실 그림 그대로 보여 줍니다.
 /// 미니 전용 `OfficeFloor`(한 행 띠, `band: true`)가 그 행을 첫 행 자리에 놓고, 고른 서브를 1·2번 칸에 앉힙니다(`MiniCast`).
 /// 휴게 공간은 보여 주지 않고, 쉬러 가는 동작은 자기 책상에서 합니다(`StageConfig.commonAreasAtDesk`).
 /// 패널은 머리 위 말풍선부터 행 아래까지(지도 y `top`~`bottom`)를 배율 1로 보여 주고, 위에 24pt 머리줄이 붙습니다.
@@ -34,9 +34,10 @@ public enum MiniOffice {
 
 /// 미니 사무실의 서브 칸 고르기 (순수 계산, M5(4) v2).
 ///
-/// - 쉬는 서브(쉬는 중·입력 대기)는 빼고, 답변을 기다리는 서브(승인 대기·질문)를 먼저, 그다음 최근에 일한 서브를 넣습니다.
-/// - 한 번 칸을 받은 서브는 쉬거나 퇴근할 때까지 그 칸을 지킵니다 (서브가 자꾸 바뀌지 않게).
-///   답변을 기다리는 서브가 칸을 못 받았으면, 답변을 기다리지 않는 서브 중 가장 오래 조용한 서브의 칸을 넘겨받습니다.
+/// - 답변을 기다리는 서브(승인 대기·질문) → 일하는 서브(최근에 일한 순) → 쉬는 서브(쉬는 중·입력 대기) 순으로 칸을 채웁니다.
+///   일하는 서브가 모자라 칸이 남으면 쉬는 서브도 보여 줍니다(빈 칸에 "+N"만 남지 않게, M5(4) 화면 확인).
+/// - 한 번 칸을 받은 서브는 그 칸을 지킵니다 (서브가 자꾸 바뀌지 않게). 다만 더 급한 서브가 칸을 못 받았으면
+///   덜 급한 서브(쉬는 서브부터, 같으면 가장 오래 조용한 서브)의 칸을 넘겨받습니다: 답변 대기 > 일하는 중 > 쉬는 중.
 /// - 돌려주는 값: 서브 → 칸(책상 1번부터)
 public enum MiniCast {
     public static func pick(subs: [Agent], previous: [AgentID: Seat], journal: ActivityJournal, slots: Int) -> [AgentID: Seat] {
@@ -46,26 +47,33 @@ public enum MiniCast {
         for entry in journal.entries where lastActive[entry.agent] != nil {
             lastActive[entry.agent] = max(lastActive[entry.agent]!, entry.at, entry.since)
         }
-        let active = subs.filter { !isResting($0) }
-        let byID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
+        let byID = Dictionary(uniqueKeysWithValues: subs.map { ($0.id, $0) })
+        func rank(_ id: AgentID) -> Int { urgency(byID[id]!) }
         var cast = previous.filter { byID[$0.key] != nil && (1...slots).contains($0.value.desk) }
-        let candidates = active.filter { cast[$0.id] == nil }.sorted { a, b in
-            let (wa, wb) = (needsAnswer(a), needsAnswer(b))
-            if wa != wb { return wa }
-            if wa { return (a.activitySince, a.id) < (b.activitySince, b.id) }
+        let candidates = subs.filter { cast[$0.id] == nil }.sorted { a, b in
+            let (ra, rb) = (urgency(a), urgency(b))
+            if ra != rb { return ra < rb }
+            if ra == 0 { return (a.activitySince, a.id) < (b.activitySince, b.id) }
             return (lastActive[a.id]!, b.id) > (lastActive[b.id]!, a.id)
         }
         for agent in candidates {
             let used = Set(cast.values.map(\.desk))
             if let free = (1...slots).first(where: { !used.contains($0) }) {
                 cast[agent.id] = Seat(desk: free)
-            } else if needsAnswer(agent),
-                let victim = cast.keys.filter({ !needsAnswer(byID[$0]!) }).min(by: { (lastActive[$0]!, $0) < (lastActive[$1]!, $1) })
-            {
-                cast[agent.id] = cast.removeValue(forKey: victim)
+                continue
             }
+            // 덜 급한 서브 중 가장 덜 급하고 가장 오래 조용한 서브의 칸을 넘겨받음
+            let mine = urgency(agent)
+            let victim = cast.keys.filter { rank($0) > mine }
+                .min { (-rank($0), lastActive[$0]!, $0) < (-rank($1), lastActive[$1]!, $1) }
+            if let victim { cast[agent.id] = cast.removeValue(forKey: victim) }
         }
         return cast
+    }
+
+    /// 0 = 답변 대기, 1 = 일하는 중, 2 = 쉬는 중
+    static func urgency(_ agent: Agent) -> Int {
+        needsAnswer(agent) ? 0 : isResting(agent) ? 2 : 1
     }
 
     /// 쉬는 중 (응답을 끝냈거나 입력을 기다림)

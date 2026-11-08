@@ -53,7 +53,7 @@ struct MiniOfficeTests {
         #expect(OfficeLayout.columns(width: 1140) == OfficeLayout.capacity(width: 1140, height: 708).columns)
     }
 
-    @Test("서브 2칸: 쉬는 서브는 빼고, 칸은 지키고, 답변을 기다리는 서브가 가장 오래 조용한 칸을 넘겨받음")
+    @Test("서브 2칸: 일하는 서브 먼저, 칸은 지키고, 답변을 기다리는 서브가 가장 오래 조용한 칸을 넘겨받음")
     func castSlots() throws {
         var h = Self.band()
         h.hook(start("m"))
@@ -96,6 +96,31 @@ struct MiniOfficeTests {
         let g1 = try #require(h.stage.actors.values.first { $0.agent.subagentID == "g1" })
         #expect(g1.position == h.stage.layout.seat(team, Seat(desk: 2)).final)
         #expect(h.stage.actors.values.allSatisfy { MiniOffice.extent().contains($0.position) })
+    }
+
+    @Test("칸이 남으면 쉬는 서브도 보여 주고, 일하는 서브가 오면 쉬는 서브가 칸을 내줌")
+    func restingFillsEmptySlots() throws {
+        var h = Self.band()
+        h.hook(start("m"))
+        let team = h.team("m")
+        h.select(.only(team))
+        // 서브 세션 c1: 요청을 받고 끝내서 쉬는 중 → 칸이 남으니 보임 (M5(4) 화면 확인: 메인만 보이고 "+1")
+        h.hook(start("c1").replacingOccurrences(of: "/w/c1", with: "/w/m"), hint: SessionHint(ancestors: [SessionID("m")]), at: 1)
+        h.hook(prompt("c1"), at: 1.5)
+        h.hook(stop("c1"), at: 2)
+        h.run(until: 10)
+        let names = { (map: [AgentID: Seat]) in map.sorted { $0.value < $1.value }.map { h.engine.state.agents[$0.key]!.displayName } }
+        #expect(names(h.floor.plan.seatMap) == ["서브"])
+        #expect(h.stage.actors.count == 2 && h.floor.plan.hiddenCount == 0)
+
+        // 일하는 서브가 오면 빈 칸부터, 칸이 없으면 쉬는 서브의 칸을 넘겨받음
+        for json in delegate("m", "a1", agent: "g1") { h.hook(json, at: 11) }
+        h.run(until: 20)
+        #expect(names(h.floor.plan.seatMap) == ["서브1", "서브2"])
+        for json in delegate("m", "a2", agent: "g2") { h.hook(json, at: 21) }
+        h.run(until: 40)
+        #expect(names(h.floor.plan.seatMap) == ["서브3", "서브2"])
+        #expect(h.floor.plan.hiddenCount == 1)
     }
 
     @Test("미니에서는 쉬러 소파에 가지 않고 자기 책상에서 쉼 (사무실 창은 소파로)")
