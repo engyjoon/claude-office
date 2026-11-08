@@ -74,6 +74,16 @@ struct OfficeWindowView: View {
         .animation(.easeOut(duration: 0.2), value: showStaffPanel)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                // 사무실 창 → 미니 사무실 (M5(4)): 사무실 창을 닫고 화면 구석의 미니로. 미니를 누르면 다시 사무실 창.
+                Button {
+                    model.switchToMini()
+                } label: {
+                    Label("미니 사무실로", systemImage: "pip.enter")
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .help("사무실 창을 닫고 화면 구석의 미니 사무실로 봐요 (⇧⌘M). 미니를 누르면 다시 사무실 창이 열려요.")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showStaffPanel.toggle()
                 } label: {

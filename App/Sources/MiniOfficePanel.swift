@@ -144,7 +144,7 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
             .withSymbolConfiguration(.init(pointSize: 9, weight: .bold))
         close.contentTintColor = NSColor(red: 0.23, green: 0.2, blue: 0.28, alpha: 0.8)
         close.isBordered = false
-        close.toolTip = "미니 사무실 끄기 (메뉴바에서 다시 켤 수 있어요)"
+        close.toolTip = "미니 사무실 끄기 (사무실 창의 \"미니 사무실로\" 버튼이나 메뉴바에서 다시 켜요)"
         close.autoresizingMask = [.minXMargin, .minYMargin]
         close.onPress = { [weak model] in model?.setMiniEnabled(false) }
         container.addSubview(sprite)

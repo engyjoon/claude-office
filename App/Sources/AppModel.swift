@@ -454,6 +454,14 @@ final class AppModel {
         wanted ? miniPanel.show() : miniPanel.hide()
     }
 
+    /// 사무실 창 → 미니 사무실: 미니를 켜고(꺼 두었어도) 사무실 창을 닫습니다
+    func switchToMini() {
+        miniHiddenUntil = .distantPast
+        if !miniSettings.enabled { setMiniEnabled(true) }
+        NSApp?.windows.first { $0.title == OfficeWindowView.title && $0.isVisible }?.close()
+        syncMiniPanel()
+    }
+
     /// 미니를 누르면(어디든) 미니를 숨기고 사무실 창을 엽니다. 캐릭터를 눌렀으면 그 사람을 고르고,
     /// 완료를 보여 주던 중이면 확인한 것으로 쳐서 사무실 창을 닫은 뒤에는 다음 순위를 보여 줍니다.
     func openOfficeFromMini(_ id: AgentID?) {
