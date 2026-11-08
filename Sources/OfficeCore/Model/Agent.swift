@@ -174,7 +174,8 @@ public struct Agent: Identifiable, Hashable, Sendable {
     /// 행(메인 하나와 그 서브들). 코드에서는 예전 이름 그대로 팀이라고 부릅니다.
     /// 늦게 온 데스크톱 정보로 다른 메인의 서브로 밝혀지면 그 행으로 옮깁니다.
     public internal(set) var teamID: TeamID
-    public let session: SessionID
+    /// 세션 (데스크톱 앱이 같은 세션의 CLI 세션 id를 바꾸면 따라 바뀜, M5(5))
+    public internal(set) var session: SessionID
     /// 0 = 메인, 1… = 그 행의 서브 번호 (출근 때 정해 고정, 빈 번호 재사용)
     public internal(set) var number: Int
     /// 직함 ("메인", "메인2", "서브", "서브3"). 승진하거나 메인·서브 수가 1 ↔ 여럿으로 바뀌면 달라집니다.
@@ -248,7 +249,7 @@ public struct Team: Identifiable, Hashable, Sendable {
 
 /// 세션 하나의 기록 (메인 세션 또는 서브 세션). 서브에이전트는 자기를 부른 세션에 딸립니다.
 public struct Part: Hashable, Sendable {
-    public let session: SessionID
+    public internal(set) var session: SessionID
     public internal(set) var teamID: TeamID
     /// 사무실에 들어온 순서. 메인이 퇴근하면 그 행에서 가장 먼저 온 서브 세션이 메인으로 승진합니다.
     public let order: Int

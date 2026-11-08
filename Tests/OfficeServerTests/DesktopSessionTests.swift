@@ -112,3 +112,58 @@ final class Clock: @unchecked Sendable {
         set { lock.withLock { value = newValue } }
     }
 }
+
+@Suite("데스크톱 세션 미리 출근 대상 (M5(5))")
+struct DesktopResidentTests {
+    func record(
+        _ id: String, cli: String?, cwd: String = "/w/office", parent: String? = nil, archived: Bool = false, activity: Double,
+        created: Double = 0
+    ) -> DesktopSessionRecord {
+        DesktopSessionRecord(
+            localID: id, cliSessionID: cli, cwd: cwd, originCwd: nil, parentLocalID: parent, title: "제목 \(id)", isArchived: archived,
+            lastActivity: Date(timeIntervalSince1970: activity), createdAt: Date(timeIntervalSince1970: created))
+    }
+
+    @Test("보관하지 않았고 CLI 세션 id가 있는 세션만, 오래 쉰 세션도 앉힌다")
+    func filters() {
+        let readAt = Date(timeIntervalSince1970: 2_000_000_000)
+        let roll = DesktopResidents.roll(from: [
+            record("local_open", cli: "c-open", activity: 1_000_000_000),  // 아주 오래 쉼
+            record("local_archived", cli: "c-arch", archived: true, activity: 1_999_999_999),
+            record("local_fresh", cli: nil, activity: 1_999_999_999),  // 아직 CLI 세션 없음
+        ], readAt: readAt)
+        #expect(roll.residents.map(\.session) == [SessionID("c-open")])
+        #expect(roll.residents[0].hostSession == "local_open" && roll.residents[0].title == "제목 local_open")
+        #expect(roll.residents[0].lastActivity == Date(timeIntervalSince1970: 1_000_000_000))
+        #expect(roll.openHostSessions == ["local_open", "local_fresh"])
+        #expect(roll.isReliable && roll.readAt == readAt)
+        #expect(!DesktopResidents.roll(from: [], readAt: readAt).isReliable)
+    }
+
+    @Test("부모를 따라 조상과 최상위 폴더를 정하고, 최근에 활동한 행 → 부모 → 만든 순으로 놓는다")
+    func ordering() {
+        let roll = DesktopResidents.roll(from: [
+            record("local_old", cli: "old", cwd: "/w/old", activity: 100),
+            record("local_main", cli: "main", activity: 200, created: 1),
+            record("local_side2", cli: "side2", cwd: "/w/office/.claude/worktrees/x", parent: "local_main", activity: 900, created: 3),
+            record("local_side1", cli: "side1", parent: "local_main", activity: 300, created: 2),
+            record("local_grand", cli: "grand", cwd: "/elsewhere", parent: "local_side1", activity: 250, created: 0),
+            // 보관한 부모의 자식: 사무실에 부모가 없으니 혼자 행을 열지만, 조상과 최상위 폴더는 그대로 알려 줌
+            record("local_gone", cli: "gone", cwd: "/w/gone", archived: true, activity: 50),
+            record("local_orphan", cli: "orphan", cwd: "/w/gone/sub", parent: "local_gone", activity: 500),
+        ], readAt: Date())
+        #expect(roll.residents.map(\.session.raw) == ["main", "side1", "side2", "grand", "orphan", "old"])
+        let byID = Dictionary(uniqueKeysWithValues: roll.residents.map { ($0.session.raw, $0) })
+        #expect(byID["main"]?.ancestors == [])
+        #expect(byID["grand"]?.ancestors == [SessionID("side1"), SessionID("main")])
+        #expect(byID["grand"]?.rootCwd == "/w/office")
+        #expect(byID["orphan"]?.ancestors == [SessionID("gone")] && byID["orphan"]?.rootCwd == "/w/gone")
+    }
+
+    @Test("정보 파일에서 만든 시각을 읽는다")
+    func parsesCreatedAt() throws {
+        let data = Data(#"{"cliSessionId":"c","cwd":"/w","createdAt":1794138247307,"lastActivityAt":1794138947335}"#.utf8)
+        let record = try #require(DesktopSessionRecord.parse(data, localID: "local_x"))
+        #expect(record.createdAt == Date(timeIntervalSince1970: 1_794_138_247.307))
+    }
+}

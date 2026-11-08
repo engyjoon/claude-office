@@ -288,12 +288,34 @@ final class AppModel {
         loadingDirectories = true
         let directory = desktopSessions
         Task.detached(priority: .utility) {
-            let folders = directory.openFolders()
+            let readAt = Date()
+            let records = directory.allRecords()
+            let folders = DesktopSessionDirectory.openFolders(in: records)
+            let roll = DesktopResidents.roll(from: records, readAt: readAt)
             await MainActor.run {
                 self.loadingDirectories = false
                 if folders != self.directories { self.directories = folders }
+                self.syncResidents(roll)
             }
         }
+    }
+
+    /// 데스크톱 앱에 열려 있는 세션을 사무실에 맞춥니다 (M5(5)): 새로 앉는 사람은 쉬는 중으로 조용히, 닫힌 세션은 퇴근.
+    private func syncResidents(_ roll: ResidentRoll) {
+        let now = Date()
+        let before = Set(engine.state.agents.keys)
+        let directives = engine.syncResidents(roll, at: now)
+        guard !directives.isEmpty || roster != Roster.make(from: engine.state, privacy: privacy) else { return }
+        let after = Set(engine.state.agents.keys)
+        let arrived = after.subtracting(before).count, left = before.subtracting(after).count
+        if arrived > 0 { append(.system, "데스크톱 앱에 열려 있는 세션 \(arrived)개를 쉬는 중으로 앉혔어요") }
+        if left > 0 { append(.system, "데스크톱 앱에서 닫은 세션 \(left)명이 퇴근했어요") }
+        record(directives)
+        notifier.apply(engine.drainNotices())
+        roster = Roster.make(from: engine.state, privacy: privacy)
+        refreshMiniFocus(now: now)
+        if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
+        refreshStatusLine()
     }
 
     /// 패널 "세션" 목록에 보여 줄 것 (고른 디렉토리의 메인과 그 서브만)

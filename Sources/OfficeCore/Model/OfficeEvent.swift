@@ -46,11 +46,15 @@ public struct SessionHint: Hashable, Sendable {
     public var rootHostSession: String?
     public var rootTitle: String?
     public var rootIsOpen: Bool
+    /// 데스크톱 정보 파일이 지금 이 데스크톱 세션의 CLI 세션이라고 적은 id (`cliSessionId`).
+    /// 훅의 `session_id`와 같으면, 같은 데스크톱 세션으로 앉아 있던 사람을 이 id로 이어 갑니다 (M5(5)).
+    public var hostCliSession: SessionID?
 
     public init(
         hostSession: String? = nil, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil,
-        rootHostSession: String? = nil, rootTitle: String? = nil, rootIsOpen: Bool = false
+        rootHostSession: String? = nil, rootTitle: String? = nil, rootIsOpen: Bool = false, hostCliSession: SessionID? = nil
     ) {
+        self.hostCliSession = hostCliSession
         self.hostSession = hostSession
         self.ancestors = ancestors
         self.rootCwd = rootCwd

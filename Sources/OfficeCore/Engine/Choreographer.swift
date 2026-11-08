@@ -157,6 +157,9 @@ public struct Choreographer: Sendable {
                 $0.idleSince = now
             }
 
+        case .settled(let agent):
+            settle(agent, at: now, into: &out)
+
         case .promptArrived(let agent):
             touch(agent)
             resolveWaiting(agent.id, into: &out)
@@ -642,6 +645,36 @@ public struct Choreographer: Sendable {
         }
         move(agent.id, to: seatSpot(agent), into: &out)
         out.append(Directive(agent.id, .express(.neutral)))
+    }
+
+    /// 조용히 출근 (M5(5)): 출입문에서 걸어 들어오지 않고, 인사·효과음도 없이 지난 활동 시각에 맞는 쉼 단계의 자리에 바로 놓습니다.
+    /// 10분 넘게 쉬었으면 자기 책상에서 잠든 채, 3분 넘게 쉬었으면 안마 의자(비었으면), 1분 넘게 쉬었으면 소파, 아니면 자기 책상.
+    /// 그 뒤의 쉼 단계는 평소처럼 `tick`이 이어 갑니다.
+    private mutating func settle(_ agent: Agent, at now: Date, into out: inout [Directive]) {
+        let since = agent.activitySince
+        let elapsed = max(0, now.timeIntervalSince(since))
+        var presence = Presence(agent: agent, spot: seatSpot(agent), shownAt: now)
+        presence.seated = true
+        presence.idleSince = since
+        if elapsed >= config.napAfter {
+            presence.rest = .nap
+            presence.emote = .zzz
+        } else if elapsed >= config.massageAfter,
+            presences.values.filter({ $0.spot == .massageChair }).count < config.massageChairs
+        {
+            presence.spot = .massageChair
+            presence.seated = false
+            presence.rest = .massage
+            presence.emote = .note
+        } else if elapsed >= config.loungeAfter {
+            presence.spot = .lounge
+            presence.seated = false
+            presence.rest = .lounge
+            presence.emote = .note
+            presence.breaks = 1
+        }
+        presences[agent.id] = presence
+        out += restoreDirectives(for: agent, entering: false)
     }
 
     /// 자리(책상·행)가 바뀐 직원을 새 자리로 옮깁니다. 자기 책상에 있으면 바로, 다른 곳에 있으면 돌아올 때 새 자리로 갑니다.

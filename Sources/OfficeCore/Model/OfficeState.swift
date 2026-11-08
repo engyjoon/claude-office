@@ -7,6 +7,9 @@ public enum Beat: Hashable, Sendable {
     /// 사람이 모두 떠난 행 (또는 다른 메인의 행으로 합쳐진 행). 메인 번호는 다음 행이 다시 씁니다.
     case teamClosed(Team)
     case arrived(Agent)
+    /// 조용히 출근 (M5(5)): 데스크톱 앱에 열려 있던 세션을 출입문·인사·효과음 없이 "쉬는 중"으로 바로 앉힘.
+    /// `activitySince`가 데스크톱 앱의 마지막 활동 시각이라 연출은 그때부터 쉼 단계를 셉니다.
+    case settled(Agent)
     /// 서브 세션이 메인이 됨 (메인이 퇴근했거나, 늦게 밝혀진 부모 관계로 자리를 맞바꿈). 자리도 메인 책상으로 바뀝니다.
     case promoted(Agent)
     /// 직함이 바뀜 ("서브" → "서브1", "메인" → "메인1", 메인 → 서브). 자리·행이 함께 바뀔 수 있습니다.
@@ -238,6 +241,7 @@ public struct OfficeState: Sendable {
     // MARK: - 행과 세션 직원
 
     private mutating func ensureLead(for event: OfficeEvent, beats: inout [Beat]) -> AgentID {
+        continueHostSession(for: event)
         summonRoot(for: event, beats: &beats)
         if let part = parts[event.session], agents[part.lead] != nil {
             if let hint = event.hint { absorb(hint, for: event.session, beats: &beats) }
@@ -291,6 +295,83 @@ public struct OfficeState: Sendable {
         let id = ensureLead(for: arrival, beats: &beats)
         update(id) { $0.setActivity(.waitingForInput, at: event.at) }
         beats.append(.waitingForInput(agents[id]!))
+    }
+
+    /// 데스크톱 앱이 같은 데스크톱 세션의 CLI 세션 id를 바꿨으면(정보 파일의 `cliSessionId`가 이 훅의 `session_id`),
+    /// 그 데스크톱 세션으로 앉아 있던 사람을 새 id로 이어 갑니다 (캐릭터가 둘이 되지 않게, M5(5)).
+    /// 정보 파일이 확인해 줄 때만 이어 갑니다: 세션 안에서 띄운 `claude` 명령도 같은 데스크톱 세션 id를 물려받기 때문입니다.
+    private mutating func continueHostSession(for event: OfficeEvent) {
+        guard parts[event.session] == nil, let hint = event.hint, let host = hint.hostSession, hint.hostCliSession == event.session,
+            let old = parts.values.filter({ $0.hostSession == host && agents[$0.lead] != nil }).min(by: { $0.order < $1.order })
+        else { return }
+        rekey(old.session, to: event.session)
+    }
+
+    /// 세션 id만 바꿉니다 (사람·자리·행·직함은 그대로).
+    private mutating func rekey(_ old: SessionID, to new: SessionID) {
+        guard old != new, parts[new] == nil, var part = parts.removeValue(forKey: old) else { return }
+        part.session = new
+        parts[new] = part
+        for (id, agent) in agents where agent.session == old {
+            agents[id]!.session = new
+            if let subagentID = agent.subagentID {
+                memberBySubagent[Self.subagentKey(old, subagentID)] = nil
+                memberBySubagent[Self.subagentKey(new, subagentID)] = id
+            }
+        }
+        for key in parts.keys where parts[key]!.ancestors.contains(old) {
+            parts[key]!.ancestors = parts[key]!.ancestors.map { $0 == old ? new : $0 }
+        }
+    }
+
+    // MARK: - 데스크톱 앱에 열려 있는 세션 (M5(5))
+
+    /// 데스크톱 앱 세션 정보를 사무실에 맞춥니다 (앱이 몇 초마다 부름).
+    ///
+    /// - 열려 있지만 사무실에 없는 세션은 "쉬는 중"으로 조용히 앉힙니다(`settled`). 부모가 사무실에 있으면 그 행의 서브.
+    /// - 이미 있는 세션은 제목·데스크톱 id·부모만 맞춥니다. 같은 데스크톱 세션이 CLI 세션 id만 바뀌었으면 같은 사람으로 이어 갑니다.
+    /// - 보관했거나 목록에서 사라진 데스크톱 세션은 퇴근시킵니다. 다만 파일을 읽기 시작한 뒤에 훅이 왔거나,
+    ///   지금 일하는 중(마지막 활동이 `busyGrace` 안)이면 그대로 둡니다. 터미널 CLI 세션과 `office-sim`의 가짜 세션은
+    ///   데스크톱 id가 없어서 건드리지 않습니다.
+    public mutating func syncResidents(_ roll: ResidentRoll, at now: Date, busyGrace: TimeInterval = 10 * 60) -> [Beat] {
+        var beats: [Beat] = []
+        if roll.isReliable {
+            let gone = parts.values
+                .filter { part in
+                    guard let host = part.hostSession, !roll.openHostSessions.contains(host), let lead = agents[part.lead] else { return false }
+                    guard lead.activitySince < roll.readAt else { return false }
+                    return lead.isResting || now.timeIntervalSince(lead.activitySince) >= busyGrace
+                }
+                .sorted { $0.order > $1.order }  // 서브 세션부터 (메인이 먼저 나가 서브가 승진했다가 바로 나가지 않게)
+            for part in gone where parts[part.session] != nil {
+                endSession(part.session, beats: &beats)
+            }
+        }
+        for resident in roll.residents {
+            let hint = SessionHint(
+                hostSession: resident.hostSession, ancestors: resident.ancestors, rootCwd: resident.rootCwd, title: resident.title)
+            if parts[resident.session] == nil,
+                let old = parts.values.filter({ $0.hostSession == resident.hostSession && agents[$0.lead]?.isResting == true })
+                    .min(by: { $0.order < $1.order })
+            {
+                rekey(old.session, to: resident.session)
+            }
+            if let part = parts[resident.session], agents[part.lead] != nil {
+                absorb(hint, for: resident.session, beats: &beats)
+                continue
+            }
+            let arrival = OfficeEvent(
+                session: resident.session, cwd: resident.rootCwd, term: nil, at: now, kind: .sessionStarted(source: nil), hint: hint)
+            var local: [Beat] = []
+            let id = ensureLead(for: arrival, beats: &local)
+            update(id) { $0.setActivity(.idle, at: min(resident.lastActivity ?? now, now)) }
+            let settled = agents[id]!
+            beats += local.map { beat in
+                if case .arrived(let agent) = beat, agent.id == id { return .settled(settled) }
+                return beat
+            }
+        }
+        return beats
     }
 
     private mutating func openTeam(folder: String, beats: inout [Beat]) -> TeamID {
@@ -567,6 +648,14 @@ public struct OfficeState: Sendable {
 }
 
 extension Agent {
+    /// 쉬는 중 (응답을 끝냈거나 입력을 기다림, 막 들어옴)
+    var isResting: Bool {
+        switch activity {
+        case .idle, .waitingForInput, .arriving: true
+        default: false
+        }
+    }
+
     mutating func setActivity(_ activity: Activity, at now: Date) {
         self.activity = activity
         activitySince = now

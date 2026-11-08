@@ -19,11 +19,14 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     public var isArchived: Bool
     /// 마지막 활동 시각 (`lastActivityAt`, 밀리초)
     public var lastActivity: Date?
+    /// 만든 시각 (`createdAt`, 밀리초). 같은 행의 서브를 앉히는 순서에 씀.
+    public var createdAt: Date?
 
     public init(
         localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?,
-        isArchived: Bool = false, lastActivity: Date? = nil
+        isArchived: Bool = false, lastActivity: Date? = nil, createdAt: Date? = nil
     ) {
+        self.createdAt = createdAt
         self.localID = localID
         self.cliSessionID = cliSessionID
         self.cwd = cwd
@@ -49,7 +52,8 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             parentLocalID: parent,
             title: text(json["title"]),
             isArchived: json["isArchived"]?.boolValue ?? false,
-            lastActivity: json["lastActivityAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) }
+            lastActivity: json["lastActivityAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) },
+            createdAt: json["createdAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }
 
@@ -124,15 +128,14 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
         return SessionHint(
             hostSession: record.localID, ancestors: ancestors, rootCwd: rootRecord.folder, title: record.title,
             rootHostSession: hasRoot ? rootRecord.localID : nil, rootTitle: hasRoot ? rootRecord.title : nil,
-            rootIsOpen: hasRoot && !rootRecord.isArchived && rootRecord.cliSessionID == ancestors.last?.raw)
+            rootIsOpen: hasRoot && !rootRecord.isArchived && rootRecord.cliSessionID == ancestors.last?.raw,
+            hostCliSession: record.cliSessionID.map(SessionID.init))
     }
 
-    /// 데스크톱 앱에 열려 있는(보관하지 않은) 세션들의 디렉토리 목록. 폴더 이름순.
-    /// 띄운 세션은 사무실에서 띄운 쪽 행에 앉으므로 최상위 세션의 폴더로 셉니다.
-    /// 세션 정보 파일을 모두 다시 읽으므로 메인 스레드가 아닌 곳에서 가끔(몇 초마다) 부르세요.
-    public func openFolders() -> [DesktopFolder] {
+    /// 세션 정보 파일을 모두 다시 읽습니다 (보관한 세션 포함). 메인 스레드가 아닌 곳에서 가끔(몇 초마다) 부르세요.
+    public func allRecords() -> [DesktopSessionRecord] {
         let fileManager = FileManager.default
-        var records: [String: DesktopSessionRecord] = [:]
+        var records: [DesktopSessionRecord] = []
         for folder in accountFolders(refresh: true, at: now()) {
             let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
             for name in names where name.hasSuffix(".json") {
@@ -140,9 +143,22 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
                 guard HookRequestPolicy.isHostSessionID(localID),
                       let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
                       let record = DesktopSessionRecord.parse(data, localID: localID) else { continue }
-                records[localID] = record
+                records.append(record)
             }
         }
+        return records
+    }
+
+    /// 데스크톱 앱에 열려 있는(보관하지 않은) 세션들의 디렉토리 목록. 폴더 이름순.
+    public func openFolders() -> [DesktopFolder] {
+        Self.openFolders(in: allRecords())
+    }
+
+    /// 열려 있는 세션들의 디렉토리 목록 (폴더 이름순).
+    /// 띄운 세션은 사무실에서 띄운 쪽 행에 앉으므로 최상위 세션의 폴더로 셉니다.
+    public static func openFolders(in list: [DesktopSessionRecord]) -> [DesktopFolder] {
+        var records: [String: DesktopSessionRecord] = [:]
+        for record in list { records[record.localID] = record }
         var folders: [String: DesktopFolder] = [:]
         for record in records.values where !record.isArchived {
             var root = record
@@ -224,5 +240,67 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
         folders = (urls, current)
         lock.unlock()
         return urls
+    }
+}
+
+/// 데스크톱 앱에 열려 있는 세션 중 사무실에 미리 "쉬는 중"으로 앉힐 사람을 고릅니다 (설계서 §5.2, M5(5)). 순수 계산.
+///
+/// - 대상: 보관하지 않았고(`!isArchived`) 훅과 이어 줄 CLI 세션 id(`cliSessionId`)가 있는 세션. 활동 기간은 따지지 않습니다:
+///   데스크톱 앱 사이드바와 디렉토리 드롭다운이 보여 주는 세션과 같게 (2026-11-08 실제 목록: 열린 디렉토리 4개 중 3개가 3~11일 전 활동).
+/// - 관계: 부모(`spawnedFrom`)를 따라 올라가며 조상의 CLI 세션 id를 모읍니다 (보관한 부모 포함, 사무실에 없는 부모는 리듀서가 건너뜀).
+/// - 순서: 최근에 활동한 행이 먼저(위 행, 작은 메인 번호), 행 안에서는 부모가 먼저, 그다음 만든 순서.
+/// - 서브에이전트는 훅으로만 알 수 있어 앉히지 않습니다.
+public enum DesktopResidents {
+    public static func roll(from list: [DesktopSessionRecord], readAt: Date) -> ResidentRoll {
+        var records: [String: DesktopSessionRecord] = [:]
+        for record in list { records[record.localID] = record }
+        let open = records.values.filter { !$0.isArchived }
+
+        struct Entry {
+            var record: DesktopSessionRecord
+            var resident: ResidentSession
+            /// 열려 있는 가장 위 조상 (같은 행이 될 묶음)
+            var group: String
+            var depth: Int
+        }
+        var entries: [Entry] = []
+        for record in open {
+            guard let cli = record.cliSessionID else { continue }
+            var ancestors: [SessionID] = []
+            var root = record
+            var group = record.localID
+            var visited: Set<String> = [record.localID]
+            var parentID = record.parentLocalID
+            while let id = parentID, visited.count <= DesktopSessionDirectory.maxDepth, visited.insert(id).inserted,
+                  let parent = records[id] {
+                if let parentCli = parent.cliSessionID { ancestors.append(SessionID(parentCli)) }
+                if !parent.isArchived, parent.cliSessionID != nil { group = parent.localID }
+                root = parent
+                parentID = parent.parentLocalID
+            }
+            let resident = ResidentSession(
+                session: SessionID(cli), hostSession: record.localID, ancestors: ancestors, rootCwd: root.folder ?? record.folder,
+                title: record.title, lastActivity: record.lastActivity)
+            entries.append(Entry(record: record, resident: resident, group: group, depth: ancestors.count))
+        }
+
+        // 행(묶음)의 최근 활동 = 묶음 안에서 가장 최근
+        var groupActivity: [String: Date] = [:]
+        for entry in entries {
+            let activity = entry.record.lastActivity ?? .distantPast
+            groupActivity[entry.group] = max(groupActivity[entry.group] ?? .distantPast, activity)
+        }
+        entries.sort { a, b in
+            if a.group != b.group {
+                let (x, y) = (groupActivity[a.group]!, groupActivity[b.group]!)
+                return x != y ? x > y : a.group < b.group
+            }
+            if a.depth != b.depth { return a.depth < b.depth }
+            let (x, y) = (a.record.createdAt ?? .distantPast, b.record.createdAt ?? .distantPast)
+            return x != y ? x < y : a.record.localID < b.record.localID
+        }
+        return ResidentRoll(
+            residents: entries.map(\.resident), openHostSessions: Set(open.map(\.localID)), isReliable: !records.isEmpty,
+            readAt: readAt)
     }
 }

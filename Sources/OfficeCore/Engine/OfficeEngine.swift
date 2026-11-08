@@ -34,6 +34,16 @@ public struct OfficeEngine: Sendable {
         return choreographer.handle(beats, at: event.at)
     }
 
+    /// 데스크톱 앱에 열려 있는 세션을 사무실에 맞춥니다 (설계서 §5.2, M5(5)). 새로 앉는 사람은 조용히(출입문·효과음·알림 없이)
+    /// 쉬는 중으로 앉고, 보관했거나 사라진 데스크톱 세션은 퇴근합니다.
+    public mutating func syncResidents(_ roll: ResidentRoll, at now: Date) -> [Directive] {
+        let beats = state.syncResidents(roll, at: now)
+        guard !beats.isEmpty else { return [] }
+        journal.record(beats, in: state, at: now)
+        pendingNotices += notices.plan(beats, state: state, privacy: privacy)
+        return choreographer.handle(beats, at: now)
+    }
+
     public var notificationSettings: NotificationSettings {
         get { notices.settings }
         set { notices.settings = newValue }
