@@ -27,6 +27,18 @@ struct SettingsTests {
         #expect(PrivacyLevel(store: store) == .summary)
     }
 
+    @Test("M5(9): 1단계를 마친 맥에서 예전 창 보정 표시만 지운다")
+    func removesWindowFlags() {
+        let store = MemoryStore([
+            SettingsMigration.versionKey: 1, "office.widenedTo1440": true, "office.tallerForStatusLine": true, "display.privacy": "summary",
+        ])
+        #expect(SettingsMigration.migrate(store).isEmpty)
+        #expect(store.values["office.widenedTo1440"] == nil)
+        #expect(store.values["office.tallerForStatusLine"] == nil)
+        #expect(store.values["display.privacy"] as? String == "summary")
+        #expect(store.values[SettingsMigration.versionKey] as? Int == 2)
+    }
+
     @Test("새 키에 이미 값이 있으면 새 값을 지킨다")
     func keepsNewValue() {
         let store = MemoryStore(["privacy": "hidden", "display.privacy": "summary"])

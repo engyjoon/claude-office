@@ -8,6 +8,8 @@ import SwiftUI
 /// 줄을 누르면 사무실에서 그 캐릭터를 고른 것과 같고(발밑 고리 + 인스펙터), 더블클릭하면 그 세션의 앱·터미널로 갑니다 (M5(7)).
 struct StaffPanel: View {
     let model: AppModel
+    /// 패널 폭 (사무실 창 크기 계산에도 씀)
+    static let width: CGFloat = 260
 
     var body: some View {
         let roster = model.visibleRoster
@@ -67,7 +69,7 @@ struct StaffPanel: View {
                 }
             }
         }
-        .frame(width: 260)
+        .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background(.background)
     }

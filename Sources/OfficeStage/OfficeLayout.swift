@@ -43,7 +43,8 @@ public struct Place: Hashable, Sendable {
 /// - 행 하나 = 메인 하나: 가장 왼쪽 책상이 메인, 오른쪽으로 그 메인의 서브 책상이 사람 수만큼 (빈 책상 없음).
 /// - 행은 메인이 온 순서대로 위에서 아래로 쌓고, 최대 3행까지 보여 줍니다. 화면에 들어가지 않는 행·서브는 그리지 않고
 ///   행 끝에 "+N"을 답니다 (판단은 `FloorPlan`).
-/// - 행 간격은 화면 높이를 따라 3행이 아래 빈 공간까지 고르게 쓰도록 벌어집니다 (최소 `minRowSpacing`).
+/// - 행 간격은 화면 높이에서 3행이 아래 빈 공간까지 고르게 쓰도록 정합니다 (최소 `minRowSpacing`). 사무실 창은 크기가 고정이라(M5(9))
+///   기본 높이에서 153이고, 화면이 작아 사무실을 축소할 때는 최솟값입니다.
 /// - 공용 공간(휴게 공간: 3인용 소파 둘 · 빈 공간 · 안마 의자 둘, 화이트보드, 출입문, 탕비 코너)은 모두 위쪽 뒷벽 앞에 모았습니다.
 ///   책장은 없앴습니다 (파일 읽기는 자기 책상에서).
 public struct OfficeLayout: Hashable, Sendable {
@@ -73,7 +74,8 @@ public struct OfficeLayout: Hashable, Sendable {
     /// 높이는 3행(`maxRows`)이 최소 간격으로 모두 들어가는 크기입니다 (사무실 창도 이보다 낮아지지 않게 막습니다).
     public static let minWidth = massageArea.maxX - 20 + whiteboardToDoor + doorToPantry + 212
     public static let minHeight = firstDeskY + minRowSpacing * Double(maxRows - 1) + bottomMargin
-    /// 창을 처음 열었을 때의 사무실 크기 (창 1440×830 − 디렉토리·세션 패널 260 − 제목 막대 − 아래 현황 줄 30 − 둘레 여백)
+    /// 사무실 창의 사무실 크기 (M5(9)부터 창 크기 고정: 사무실 영역 = 이 크기 + 둘레 여백, 그 아래 현황 줄과 오른쪽 패널을 더함).
+    /// 높이가 고정이라 행 간격도 이 높이에서 정해집니다 (`rowSpacing(height: 708)` = 153).
     public static let defaultWidth = 1140.0
     public static let defaultHeight = 708.0
 

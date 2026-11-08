@@ -32,6 +32,8 @@ public struct ActivityEntry: Hashable, Sendable {
     public let title: String
     /// 기록할 때의 행 폴더 (디렉토리 필터용, 퇴근한 사람)
     public let folder: String?
+    /// 기록할 때의 행 (현황 줄의 행별 줄, M5(9): 퇴근한 서브의 일도 그 행에 남김)
+    public let team: TeamID
     public let kind: Kind
     public let at: Date
     public internal(set) var state: State
@@ -126,7 +128,7 @@ public struct ActivityJournal: Hashable, Sendable {
         serial += 1
         let folder = state.teams[agent.teamID]?.folder
         entries.append(ActivityEntry(
-            serial: serial, agent: agent.id, title: agent.displayName, folder: folder, kind: kind, at: now, state: entryState, since: now))
+            serial: serial, agent: agent.id, title: agent.displayName, folder: folder, team: agent.teamID, kind: kind, at: now, state: entryState, since: now))
         if entries.count > Self.capacity {
             entries.removeFirst(entries.count - Self.capacity)
         }

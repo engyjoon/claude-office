@@ -279,8 +279,11 @@ final class AppModel {
 
     /// 현황 줄과 인스펙터 타임라인을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
     private func refreshStatusLine() {
+        // 행 순서는 사무실 화면과 같은 출처(보이는 행·숨긴 행)에서 가져옵니다 (M5(9))
+        let plan = stageStore.floor.plan
         let line = StatusLine.make(
-            state: engine.state, journal: engine.journal, privacy: privacy, selected: selectedAgent, folder: selectedFolder)
+            state: engine.state, journal: engine.journal, privacy: privacy, selected: selectedAgent, folder: selectedFolder,
+            rows: plan.rows.map(\.team), hiddenRows: plan.hiddenTeams)
         if line != statusLine { statusLine = line }
         let timeline = selectedAgent.map {
             AgentTimeline.make(agent: $0, state: engine.state, journal: engine.journal, privacy: privacy)
@@ -400,6 +403,7 @@ final class AppModel {
     private func setViewport(_ size: CGSize) {
         stageStore.floor.setViewport(width: Double(size.width), height: Double(size.height), engine: engine)
         updateHidden()
+        refreshStatusLine()
     }
 
     // MARK: - 알림 (M5(3))

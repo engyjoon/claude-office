@@ -18,7 +18,9 @@ struct ClaudeOfficeApp: App {
         Window(OfficeWindowView.title, id: WindowID.office) {
             OfficeWindowView(model: model)
         }
-        .defaultSize(width: OfficeWindowView.defaultWidth, height: OfficeWindowView.defaultHeight)
+        // 크기 고정 (M5(9)): 창은 내용 크기 그대로라 가장자리로 늘리거나 줄일 수 없고, 예전에 늘려 둔 크기도 이 크기로 돌아옵니다.
+        // 세션 패널을 숨기거나 보일 때만 너비가 패널 폭만큼 바뀝니다.
+        .windowResizability(.contentSize)
 
         Window("Claude Office 이벤트 로그", id: WindowID.eventLog) {
             EventLogView(model: model)
@@ -36,22 +38,23 @@ enum WindowID {
     static let eventLog = "event-log"
 }
 
-/// 사무실 창 (M3). 왼쪽은 사무실과 그 아래 실시간 현황 줄, 오른쪽은 디렉토리·세션 패널.
+/// 사무실 창 (M3). 왼쪽은 사무실과 그 아래 세 줄 실시간 현황, 오른쪽은 디렉토리·세션 패널.
+///
+/// 크기는 고정입니다 (M5(9)): 사무실 영역은 배율 1에서 3행이 다 들어가는 기본 크기(`OfficeWindowSize`), 그 아래 현황 줄,
+/// 오른쪽 패널. 화면이 이보다 작으면 화면 안에 들어가게 사무실 영역만 줄이고(사무실은 축소해 그림), 넘치는 행·서브는 "+N".
 struct OfficeWindowView: View {
     let model: AppModel
     @AppStorage("office.showStaffPanel") private var showStaffPanel = true
     @State private var escapeMonitor: Any?
-    /// 창 기본 폭을 넓힌 뒤 한 번만, 예전 크기로 기억된 창을 넓혀 줍니다 (이후에는 사용자가 정한 크기를 따름)
-    @AppStorage("office.widenedTo1440") private var widened = false
-    /// 현황 줄을 넣은 뒤 한 번만, 예전 높이로 기억된 창을 줄 높이만큼 늘려 줍니다 (사무실 영역 높이 유지)
-    @AppStorage("office.tallerForStatusLine") private var heightened = false
+    /// 창이 놓인 화면의 쓸 수 있는 크기와 제목 막대 높이 (화면이 작을 때 줄이려고)
+    @State private var screen = OfficeWindowSize.Screen.unknown
 
     var body: some View {
+        let office = OfficeWindowSize.office(screen: screen, panel: showStaffPanel)
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 OfficeSpriteView(scene: model.officeScene)
-                    // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
-                    .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
+                    .frame(width: office.width, height: office.height)
                     .background(Color(red: 0.945, green: 0.902, blue: 0.839))
                     .overlay(alignment: .topTrailing) {
                         // 캐릭터(또는 세션 패널의 줄)를 고르면 인스펙터를 보여줍니다 (M5(7)). 빈 곳 클릭·✕·Esc로 닫습니다.
@@ -65,17 +68,23 @@ struct OfficeWindowView: View {
                                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
                         }
                     }
-                // 사무실 바로 아래 한 줄 (사무실 영역은 이 줄을 뺀 높이: 씬 크기와 행 수 계산이 이 줄을 빼고 맞춤)
+                    .animation(.easeOut(duration: 0.15), value: model.selectedAgent)
+                // 사무실 바로 아래 세 줄 (사무실 영역은 줄어들지 않고, 창 높이에 이만큼 더합니다)
                 StatusLineView(line: model.statusLine)
+                    .frame(width: office.width)
             }
             if showStaffPanel {
                 Divider()
                 StaffPanel(model: model)
-                    .transition(.move(edge: .trailing))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: model.selectedAgent)
-        .animation(.easeOut(duration: 0.2), value: showStaffPanel)
+        // 내용 크기를 못 박아 창 크기를 고정합니다 (`.windowResizability(.contentSize)`)
+        .frame(width: office.width + (showStaffPanel ? OfficeWindowSize.panel : 0), height: office.height + StatusLineView.height)
+        .background(WindowAccessor { window in
+            OfficeWindowSize.lock(window)
+            let next = OfficeWindowSize.Screen(window: window)
+            if next != screen { screen = next }
+        })
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 // 사무실 창 → 미니 사무실 (M5(4)): 사무실 창을 닫고 화면 구석의 미니로. 미니를 누르면 다시 사무실 창.
@@ -98,8 +107,6 @@ struct OfficeWindowView: View {
         }
         // SpriteKit 뷰가 키 입력을 먼저 받아서 onExitCommand로는 Esc가 오지 않습니다. 창 단위로 가로챕니다.
         .onAppear {
-            widenOnceIfNeeded()
-            heightenOnceIfNeeded()
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, model.selectedAgent != nil,
@@ -115,37 +122,87 @@ struct OfficeWindowView: View {
     }
 
     static let title = "Claude Office 사무실"
-    static let defaultWidth: CGFloat = 1440
-    /// 사무실 영역 기본 높이(`OfficeLayout.defaultHeight` + 둘레 여백) + 현황 줄 + 제목 막대
-    static let defaultHeight: CGFloat = 800 + StatusLineView.height
+}
 
-    private func heightenOnceIfNeeded() {
-        guard !heightened else { return }
-        heightened = true
-        DispatchQueue.main.async {
-            guard let window = NSApp.windows.first(where: { $0.title == Self.title }),
-                  window.frame.height < Self.defaultHeight else { return }
-            let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-            var frame = window.frame
-            let grow = min(StatusLineView.height, max(0, visible.height - frame.height))
-            frame.size.height += grow
-            frame.origin.y = max(visible.minY, frame.origin.y - grow)  // 위쪽 모서리를 유지하고 아래로 늘림
-            window.setFrame(frame, display: true, animate: true)
+/// 사무실 창의 고정 크기 (M5(9))
+enum OfficeWindowSize {
+    /// 사무실 영역 기본 크기: 배율 1에서 3행이 다 들어가는 사무실(`OfficeLayout.defaultWidth`×`defaultHeight`) + 둘레 여백
+    static let office = CGSize(
+        width: OfficeLayout.defaultWidth + OfficeLayout.padding * 2, height: OfficeLayout.defaultHeight + OfficeLayout.padding * 2)
+    /// 오른쪽 패널 폭 (구분선 포함)
+    static let panel: CGFloat = StaffPanel.width + 1
+    /// 화면이 아주 작아도 이보다는 줄이지 않습니다
+    static let minimumOffice = CGSize(width: 480, height: 300)
+
+    /// 창이 놓인 화면
+    struct Screen: Equatable {
+        /// 메뉴 막대·Dock을 뺀 크기 (모르면 nil: 기본 크기 그대로)
+        var visible: CGSize?
+        /// 제목 막대 + 도구 막대 높이
+        var chrome: CGFloat
+
+        static let unknown = Screen(visible: nil, chrome: 52)
+
+        @MainActor init(window: NSWindow) {
+            visible = (window.screen ?? NSScreen.main)?.visibleFrame.size
+            let measured = window.frame.height - window.contentLayoutRect.height
+            chrome = measured > 0 ? measured.rounded() : Self.unknown.chrome
+        }
+
+        init(visible: CGSize?, chrome: CGFloat) {
+            self.visible = visible
+            self.chrome = chrome
         }
     }
 
-    private func widenOnceIfNeeded() {
-        guard !widened else { return }
-        widened = true
-        DispatchQueue.main.async {
-            guard let window = NSApp.windows.first(where: { $0.title == Self.title }),
-                  window.frame.width < Self.defaultWidth else { return }
-            let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-            var frame = window.frame
-            let center = frame.midX  // 가운데를 유지한 채 넓히고, 화면 밖으로 나가지 않게 합니다
-            frame.size.width = min(Self.defaultWidth, visible.width)
-            frame.origin.x = max(visible.minX, min(center - frame.width / 2, visible.maxX - frame.width))
-            window.setFrame(frame, display: true, animate: true)
+    /// 사무실 영역 크기: 기본 크기, 화면이 작으면 화면 안에 들어가게 줄인 크기
+    static func office(screen: Screen, panel showsPanel: Bool) -> CGSize {
+        guard let visible = screen.visible else { return office }
+        let width = min(office.width, visible.width - (showsPanel ? panel : 0))
+        let height = min(office.height, visible.height - screen.chrome - StatusLineView.height)
+        return CGSize(width: max(minimumOffice.width, width.rounded(.down)), height: max(minimumOffice.height, height.rounded(.down)))
+    }
+
+    /// 가장자리 크기 조절 외에 초록 버튼(최대화·전체 화면)도 막습니다
+    @MainActor static func lock(_ window: NSWindow) {
+        if !window.collectionBehavior.contains(.fullScreenNone) {
+            window.collectionBehavior.remove(.fullScreenPrimary)
+            window.collectionBehavior.insert(.fullScreenNone)
+        }
+        if let zoom = window.standardWindowButton(.zoomButton), zoom.isEnabled { zoom.isEnabled = false }
+    }
+}
+
+/// 뷰가 붙은 창을 알려 줍니다 (붙을 때, 화면을 옮길 때, 다시 그릴 때)
+struct WindowAccessor: NSViewRepresentable {
+    let onWindow: @MainActor (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> WindowAccessorView {
+        let view = WindowAccessorView()
+        view.onWindow = onWindow
+        return view
+    }
+
+    func updateNSView(_ view: WindowAccessorView, context: Context) {
+        view.onWindow = onWindow
+        if let window = view.window { DispatchQueue.main.async { onWindow(window) } }
+    }
+}
+
+final class WindowAccessorView: NSView {
+    var onWindow: (@MainActor (NSWindow) -> Void)?
+    private var screenObserver: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
+        guard let window else { return }
+        DispatchQueue.main.async { [weak self] in self?.onWindow?(window) }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onWindow?(window) }
         }
     }
 }

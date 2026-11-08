@@ -131,7 +131,45 @@ public enum ToolCatalog {
     static func commandSummary(_ command: String) -> String {
         let firstLine = command.split(whereSeparator: \.isNewline).first.map(String.init) ?? command
         let collapsed = firstLine.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return truncate(collapsed, 40)
+        return truncate(shortenPaths(collapsed), 40)
+    }
+
+    /// 명령 안의 절대 경로를 마지막 폴더·파일 이름으로 줄입니다 (M5(9)):
+    /// `cd /Users/me/work/claude-office` → `cd claude-office`, `open "/Applications/Claude Office.app"` → `open "Claude Office.app"`.
+    /// URL(`https://…`)과 상대 경로는 그대로 둡니다.
+    public static func shortenPaths(_ command: String) -> String {
+        var result = command
+        // 따옴표로 감싼 경로 (공백이 있을 수 있음)
+        result = replace(quotedPath, in: result) { match, text in
+            let quote = text[Range(match.range(at: 1), in: text)!]
+            return quote + lastComponent(String(text[Range(match.range(at: 2), in: text)!])) + quote
+        }
+        // 맨 앞이나 공백·기호 뒤에서 시작하는 경로
+        result = replace(barePath, in: result) { match, text in
+            let path = String(text[Range(match.range, in: text)!])
+            return path.hasPrefix("/dev/") ? path : lastComponent(path)  // 2>/dev/null은 그대로
+        }
+        return result
+    }
+
+    private static let quotedPath = try! NSRegularExpression(pattern: #"(["'])(~?/[^"'\n]*)\1"#)
+    private static let barePath = try! NSRegularExpression(pattern: #"(?<![\w.:/~@$\-"'])~?/[^\s"'`;|&<>()]+"#)
+
+    private static func replace(
+        _ regex: NSRegularExpression, in text: String, with make: (NSTextCheckingResult, String) -> String
+    ) -> String {
+        var result = text
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: make(match, text))
+        }
+        return result
+    }
+
+    /// "/Users/me/work/claude-office/" → "claude-office". "/"나 "~"처럼 이름이 없으면 그대로.
+    private static func lastComponent(_ path: String) -> String {
+        let name = fileName(path)
+        return name.isEmpty || name == "~" ? path : name
     }
 
     static func host(_ url: String) -> String {
@@ -141,5 +179,72 @@ public enum ToolCatalog {
 
     public static func truncate(_ text: String, _ limit: Int) -> String {
         text.count <= limit ? text : String(text.prefix(limit - 1)) + "…"
+    }
+}
+
+/// MCP 도구 이름을 사람이 읽는 말로 (M5(9)). `mcp__ccd_turn__update_plan` → "할 일 목록 정리".
+///
+/// - 알려진 도구는 그 도구의 말, 알려진 서버는 서버의 말("브라우저") + 상세면 도구 이름("브라우저 navigate").
+/// - 모르는 것은 도구 이름만 ("create_issue"). 요약·비공개에서는 모르는 도구의 이름 대신 "MCP".
+public enum MCPNames {
+    /// 알려진 도구 ("서버__도구")
+    static let tools: [String: String] = [
+        "ccd_turn__update_plan": "할 일 목록 정리",
+        "ccd_turn__wrap_up": "마무리 요약",
+        "ccd_session__start_session": "새 세션 시작",
+        "ccd_session__hand_off_to_session": "세션 넘기기",
+        "ccd_session__mark_chapter": "단원 나누기",
+        "ccd_session__dismiss_task": "제안 거두기",
+        "ccd_session__read_widget_context": "위젯 읽기",
+        "visualize__show_widget": "그림 그리기",
+        "visualize__read_me": "그림 안내 읽기",
+    ]
+
+    /// 알려진 서버
+    static let servers: [String: String] = [
+        "ccd_session": "세션",
+        "ccd_session_mgmt": "세션 관리",
+        "ccd_view": "화면 패널",
+        "ccd_pr": "PR",
+        "ccd_settings": "설정",
+        "ccd_sidebar": "사이드바",
+        "ccd_window": "창 배치",
+        "ccd_host": "호스트",
+        "ccd_directory": "폴더",
+        "ccd_connectors": "커넥터",
+        "Claude_Browser": "브라우저",
+        "claude-in-chrome": "Chrome",
+        "computer-use": "화면 조작",
+        "terminal": "터미널",
+        "visualize": "그림",
+        "Claude_Code_iOS_Simulator": "iOS 시뮬레이터",
+        "scheduled-tasks": "예약 작업",
+        "mcp-registry": "커넥터 찾기",
+        "github": "GitHub",
+        "slack": "Slack",
+        "linear": "Linear",
+        "notion": "Notion",
+    ]
+
+    /// "mcp__server__tool" → ("server", "tool"). 서버 이름 다음 첫 "__"에서 나눕니다.
+    public static func split(_ name: String) -> (server: String, tool: String)? {
+        guard name.hasPrefix("mcp__") else { return nil }
+        let rest = name.dropFirst("mcp__".count)
+        guard let range = rest.range(of: "__") else { return (String(rest), "") }
+        return (String(rest[..<range.lowerBound]), String(rest[range.upperBound...]))
+    }
+
+    /// 도구 종류 이름 (묶는 기준): "할 일 목록 정리", "브라우저", "create_issue" / 모르는 도구는 요약·비공개면 "MCP"
+    public static func label(_ name: String, detailed: Bool) -> String {
+        guard let (server, tool) = split(name) else { return name }
+        if let known = tools["\(server)__\(tool)"] { return known }
+        if let known = servers[server] { return known }
+        return detailed && !tool.isEmpty ? tool : "MCP"
+    }
+
+    /// 상세일 때 종류 이름 뒤에 붙일 말: 서버만 아는 도구의 이름 ("브라우저" + "navigate")
+    public static func detail(_ name: String) -> String? {
+        guard let (server, tool) = split(name), tools["\(server)__\(tool)"] == nil, servers[server] != nil, !tool.isEmpty else { return nil }
+        return tool
     }
 }

@@ -26,6 +26,8 @@ public enum SettingsMigration {
     public static let steps: [Step] = [
         // M5(8): 표시 탭의 키를 `display.`로 모으고, 창 폭을 1400으로 넓히던 때의 한 번짜리 표시를 지웁니다 (지금은 1440)
         Step(version: 1, renames: [("privacy", PrivacyLevel.settingsKey)], removals: ["office.widenedTo1400"]),
+        // M5(9): 사무실 창 크기를 고정해 예전 창을 한 번 넓히고 높이던 표시가 필요 없습니다
+        Step(version: 2, renames: [], removals: ["office.widenedTo1440", "office.tallerForStatusLine"]),
     ]
 
     public static var currentVersion: Int { steps.map(\.version).max() ?? 0 }

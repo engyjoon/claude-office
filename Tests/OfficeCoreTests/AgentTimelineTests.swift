@@ -68,7 +68,8 @@ struct AgentTimelineTests {
         let office = working()
         let line = StatusLine.make(
             state: office.engine.state, journal: office.engine.journal, privacy: .detailed, selected: office.main, folder: nil)
-        #expect(office.timeline(office.main).items.map(\.text) == line.segments.map(\.text))
+        // 현황 줄은 최근 세 개 (최신이 아래), 타임라인도 같은 순서
+        #expect(office.timeline(office.main).items.suffix(3).map(\.text) == line.lines.map(\.segment.text))
     }
 
     @Test("최근 것만 남기고 더 오래된 일이 있으면 잘렸다고 알림")
