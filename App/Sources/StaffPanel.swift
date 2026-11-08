@@ -1,3 +1,4 @@
+import AppKit
 import OfficeCore
 import OfficeServer
 import SwiftUI
@@ -105,19 +106,14 @@ private struct DirectoryList: View {
                     Text("열린 \(model.directories.count)개").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
-            Picker(selection: Binding(get: { model.selectedFolder }, set: { model.selectFolder($0) })) {
-                Text(label(nil)).tag(String?.none)
-                if !options.isEmpty { Divider() }
-                ForEach(options) { folder in
-                    Text(label(folder)).tag(Optional(folder.path))
-                }
-            } label: {
-                EmptyView()
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity)
-            .help(model.selectedFolder ?? "Claude 데스크톱 앱에 열린 모든 디렉토리 (새로 연 디렉토리도 자동으로 보여요)")
+            // SwiftUI .menu Picker는 내용 폭만큼만 그려져 가운데에 놓이므로, 행 폭을 그대로 받는 NSPopUpButton을 씁니다.
+            DirectoryPopUp(
+                items: [DirectoryPopUp.Item(title: label(nil), path: nil)]
+                    + options.map { DirectoryPopUp.Item(title: label($0), path: $0.path) },
+                selection: model.selectedFolder,
+                tooltip: model.selectedFolder ?? "Claude 데스크톱 앱에 열린 모든 디렉토리 (새로 연 디렉토리도 자동으로 보여요)",
+                onSelect: { model.selectFolder($0) })
+                .frame(maxWidth: .infinity)
             if model.directories.isEmpty {
                 Text("Claude 데스크톱 앱에 열려 있는 디렉토리가 없어요")
                     .font(.system(size: 11))
@@ -140,6 +136,71 @@ private struct DirectoryList: View {
         if !model.directories.contains(where: { $0.path == folder.path }) { text += " (닫힘)" }
         if count.people > 0 { text += count.mains > 1 ? " · 메인 \(count.mains) · \(count.people)명" : " · \(count.people)명" }
         return text
+    }
+}
+
+/// 디렉토리 드롭다운 (2026-11-08): 받은 폭을 가득 채우는 팝업 버튼.
+/// 글자는 왼쪽 정렬, 위아래 화살표는 오른쪽 끝, 긴 이름은 가운데를 줄여(…) 보여 줍니다.
+/// 첫 항목("모두")과 디렉토리 항목 사이에는 구분선을 넣습니다.
+private struct DirectoryPopUp: NSViewRepresentable {
+    struct Item: Equatable {
+        let title: String
+        /// nil이면 "모두"
+        let path: String?
+    }
+
+    let items: [Item]
+    let selection: String?
+    let tooltip: String
+    let onSelect: (String?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.changed(_:))
+        button.alignment = .left
+        (button.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingMiddle
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.onSelect = onSelect
+        if context.coordinator.items != items {
+            context.coordinator.items = items
+            // addItem(withTitle:)은 같은 제목을 지우므로 메뉴 항목을 직접 넣습니다.
+            let menu = NSMenu()
+            for (index, item) in items.enumerated() {
+                if index == 1 { menu.addItem(.separator()) }
+                let menuItem = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
+                menuItem.representedObject = item.path
+                menu.addItem(menuItem)
+            }
+            button.menu = menu
+        }
+        let selected = button.menu?.items.first { !$0.isSeparatorItem && ($0.representedObject as? String) == selection }
+        if let selected, button.selectedItem !== selected { button.select(selected) }
+        button.toolTip = tooltip
+    }
+
+    /// 높이는 버튼 고유 높이, 폭은 받은 폭 그대로 (내용 폭으로 줄지 않게)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView button: NSPopUpButton, context: Context) -> CGSize? {
+        let intrinsic = button.intrinsicContentSize
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? intrinsic.width
+        return CGSize(width: width, height: intrinsic.height)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var items: [Item] = []
+        var onSelect: (String?) -> Void = { _ in }
+
+        @objc func changed(_ sender: NSPopUpButton) {
+            onSelect(sender.selectedItem?.representedObject as? String)
+        }
     }
 }
 
