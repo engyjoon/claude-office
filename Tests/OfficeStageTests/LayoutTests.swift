@@ -45,7 +45,7 @@ struct LayoutTests {
         #expect(secondSub.final.x - firstSub.final.x == OfficeLayout.deskSpacing)
         // 메인 책상과 첫 서브 책상 사이는 조금 더 띄웁니다
         #expect(firstSub.final.x - mainDesk.final.x == OfficeLayout.deskSpacing + OfficeLayout.mainGap)
-        #expect(layout.seat(other, .main).final.y - mainDesk.final.y == OfficeLayout.rowSpacing)
+        #expect(layout.seat(other, .main).final.y - mainDesk.final.y == layout.rowSpacing)
         // 의자 자리는 책상 뒤 통로에서 들어갑니다
         #expect(mainDesk.approach == mainDesk.final + MapPoint(0, -OfficeLayout.approachOffset))
         #expect(mainDesk.team == main && mainDesk.seat == .main)
@@ -68,12 +68,15 @@ struct LayoutTests {
             for rect in OfficeLayout.sofas + OfficeLayout.massageSeats.map(OfficeLayout.massageChair) {
                 #expect(rect.maxY < firstRowTop)
             }
-            // 휴게 공간(소파 구역 → 큰 화분 → 안마 구역)은 책장 앞을 막지 않습니다
-            #expect(OfficeLayout.massageArea.maxX < OfficeLayout.bookshelfX)
-            #expect(layout.slots(.lounge).count == 4 && layout.slots(.massageChair).count == 2)
+            // 휴게 공간: 소파 구역(3인용 둘) → 빈 공간 → 안마 구역(의자 둘), 화이트보드 앞을 막지 않습니다
+            #expect(OfficeLayout.sofaArea.maxX + 40 < OfficeLayout.massageArea.x)
+            #expect(OfficeLayout.massageArea.maxX < layout.whiteboardX)
+            #expect(layout.slots(.lounge).count == 6 && layout.slots(.massageChair).count == 2)
             #expect(layout.doorPoint.y < firstRowTop)
             // 뒷벽 가구는 서로 겹치지 않고 화면 안에 있습니다
-            let walls: [(Double, Double)] = [(OfficeLayout.bookshelfX, 132)] + layout.windowXs.map { ($0, 104) }
+            let garden = layout.gardenFrame
+            #expect(garden.x > OfficeLayout.clockCenter.x + 18 && garden.width >= 160)
+            let walls: [(Double, Double)] = [(garden.x, garden.width)]
                 + [(layout.whiteboardX, 128), (layout.doorX, 72), (layout.pantryX, 202)]
             for (index, a) in walls.enumerated() {
                 #expect(a.0 + a.1 <= layout.width)
@@ -84,37 +87,52 @@ struct LayoutTests {
 
     @Test("화면 크기별 수용 수: 배율 1로 들어가는 책상 수·행 수, 행은 최대 3개")
     func capacity() {
-        // 기본 창 (1400×700 − 직원 현황 260): 한 행에 11명(메인 + 서브 10), 3행
-        #expect(OfficeLayout.capacity(width: 1140, height: 648) == .init(columns: 11, rows: 3))
-        // 직원 현황을 숨기면 더 넓게
-        #expect(OfficeLayout.capacity(width: 1400, height: 648).columns == 14)
+        // 기본 창 (1400×760 − 패널 260): 한 행에 11명(메인 + 서브 10), 3행
+        #expect(OfficeLayout.capacity(width: 1140, height: 708) == .init(columns: 11, rows: 3))
+        // 패널을 숨기면 더 넓게
+        #expect(OfficeLayout.capacity(width: 1400, height: 708).columns == 14)
         // 언제나 3행 (사무실 창이 3행 높이보다 낮아지지 않고, 더 낮은 화면은 줄여서 보여 줌). 아무리 커도 3행까지
-        #expect(OfficeLayout.minHeight == 638)
+        #expect(OfficeLayout.minHeight == 342 + 150 * 2 + 36)
         #expect(OfficeLayout.capacity(width: 1140, height: 520).rows == 3)
-        #expect(OfficeLayout.capacity(width: 1140, height: 400).rows == 3)
         #expect(OfficeLayout.capacity(width: 2400, height: 1600).rows == 3)
-        #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 574) < 1)
+        #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 600) < 1)
         // 들어간다고 센 마지막 책상과 "+N"은 화면 안에 있습니다
         for width in [OfficeLayout.minWidth, 1140, 1400, 2000] {
-            let capacity = OfficeLayout.capacity(width: width, height: 648)
-            let layout = OfficeLayout(width: width, height: 648, rooms: [.init(team: main, desks: capacity.columns, hidden: 3)])
+            let capacity = OfficeLayout.capacity(width: width, height: 708)
+            let layout = OfficeLayout(width: width, height: 708, rooms: [.init(team: main, desks: capacity.columns, hidden: 3)])
             #expect(layout.rows[0].endX + OfficeLayout.moreBadgeWidth <= width)
-            let more = OfficeLayout(width: width, height: 648, rooms: [.init(team: main, desks: capacity.columns + 1)])
+            let more = OfficeLayout(width: width, height: 708, rooms: [.init(team: main, desks: capacity.columns + 1)])
             #expect(more.rows[0].endX + OfficeLayout.moreBadgeWidth > width - 8)
             // 3행이 화면 높이 안에 들어갑니다
-            let full = OfficeLayout(width: width, height: 648, rooms: (0..<3).map { .init(team: TeamID("t\($0)"), desks: 1) })
-            #expect(full.height == 648)
+            let full = OfficeLayout(width: width, height: 708, rooms: (0..<3).map { .init(team: TeamID("t\($0)"), desks: 1) })
+            #expect(full.height == 708)
+        }
+    }
+
+    @Test("행 간격은 최소 150이고, 화면이 높으면 3행이 아래 빈 공간까지 고르게 쓰도록 벌어진다")
+    func rowSpacingFollowsHeight() {
+        #expect(OfficeLayout.rowSpacing(height: 500) == 150)
+        #expect(OfficeLayout.rowSpacing(height: 708) == 165)
+        #expect(OfficeLayout.rowSpacing(height: 1000) == 311)
+        for height in [708.0, 900, 1200] {
+            let layout = OfficeLayout(width: 1140, height: height, rooms: (0..<3).map { .init(team: TeamID("t\($0)"), desks: 1) })
+            // 마지막 행 아래에는 여백만 남습니다
+            #expect(abs(layout.rows[2].deskY + OfficeLayout.bottomMargin - height) <= 2)
+            #expect(layout.rows[1].deskY - layout.rows[0].deskY == layout.rowSpacing)
+            // 행 하나뿐이어도 자리는 같은 간격 기준 (행이 늘어도 위 행은 움직이지 않음)
+            let one = OfficeLayout(width: 1140, height: height, rooms: [.init(team: TeamID("t0"), desks: 1)])
+            #expect(one.rows[0].deskY == layout.rows[0].deskY && one.height == height)
         }
     }
 
     @Test("배율은 1로 고정 (사무실이 화면 크기를 따라감). 최소 크기보다 작은 화면에서만 줄인다")
     func displayScale() {
-        #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 648) == 1)
+        #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 708) == 1)
         #expect(OfficeLayout.displayScale(viewWidth: 1400, viewHeight: 900) == 1)
         #expect(OfficeLayout.displayScale(viewWidth: 2560, viewHeight: 1400) == 1)
-        #expect(OfficeLayout.displayScale(viewWidth: 565, viewHeight: 648) == 0.5)
-        let layout = OfficeLayout(width: 1300, height: 700)
-        #expect(layout.width == 1300 && layout.height == 700)
+        #expect(OfficeLayout.displayScale(viewWidth: OfficeLayout.minWidth / 2, viewHeight: 708) == 0.5)
+        let layout = OfficeLayout(width: 1300, height: 760)
+        #expect(layout.width == 1300 && layout.height == 760)
         #expect(OfficeLayout(width: 500, height: 200).width == OfficeLayout.minWidth)
     }
 
@@ -182,7 +200,7 @@ struct PathfinderTests {
         let layout = self.layout
         let finder = Pathfinder(layout: layout)
         let start = OfficeLayout.seat(layout.rows[1], Seat(desk: 2)).approach
-        let goal = layout.slots(.bookshelf)[0].approach
+        let goal = layout.slots(.whiteboard)[0].approach
         let path = finder.route(from: start, to: goal)
         #expect(path.count >= 2)
         check(path, from: start, finder: finder)

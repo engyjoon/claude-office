@@ -11,7 +11,7 @@ import OfficeStage
 //       모든 효과음을 WAV(44.1kHz, 16비트, 모노)로 저장합니다.
 //   office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
 //       맥 앱 없이 훅 서버와 엔진만 돌립니다 (헤드리스). 받은 훅의 연출 지시와 직원 목록을 출력합니다.
-//   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1140x648]
+//   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
 //       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
 //       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
@@ -32,7 +32,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1140x648]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
@@ -287,8 +287,10 @@ func snapshot(_ arguments: [String]) throws {
     var engine = OfficeEngine(seed: option("--seed", in: arguments).flatMap(UInt64.init) ?? 1)
     // 사무실 창 크기 (기본: 창 1400×700에서 직원 현황 패널을 뺀 영역). 배율 1로 그립니다.
     let size = (option("--size", in: arguments) ?? "").split(separator: "x").compactMap { Double($0) }
+    // --size는 사무실 영역(둘레 여백 포함) 크기입니다. 사무실은 여백 안쪽 크기를 따릅니다 (앱과 같음).
+    let pad = OfficeLayout.padding * 2
     var floor = OfficeFloor(
-        width: size.count == 2 ? size[0] : OfficeLayout.defaultWidth, height: size.count == 2 ? size[1] : OfficeLayout.defaultHeight)
+        width: size.count == 2 ? size[0] - pad : OfficeLayout.defaultWidth, height: size.count == 2 ? size[1] - pad : OfficeLayout.defaultHeight)
     let epoch = Date(timeIntervalSince1970: 1_800_000_000)
     let frame = 1.0 / 30
     var now = 0.0

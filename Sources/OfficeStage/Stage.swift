@@ -113,7 +113,7 @@ public struct StageConfig: Hashable, Sendable {
 /// - 직원마다 대기열이 있고 지시를 순서대로 실행합니다.
 /// - `walk`는 도착할 때까지, `wait`는 그 시간만큼, `await`는 신호가 오거나 시간이 다 될 때까지 다음 지시를 막습니다.
 /// - `clearQueue`는 아직 실행하지 않은 지시를 버리고 막힘을 풉니다. 걷던 중이면 목적지까지 걸으면서 새 지시를 바로 실행합니다.
-/// - 같은 구역(책장, 휴게 공간 …)에는 자리를 예약해서 겹쳐 서지 않게 하고, 자리가 넘치면 구역 가까이 흩어 섭니다.
+/// - 같은 구역(화이트보드, 휴게 공간 …)에는 자리를 예약해서 겹쳐 서지 않게 하고, 자리가 넘치면 구역 가까이 흩어 섭니다.
 ///
 /// 순수 값 타입이라 Linux에서 시간을 직접 흘려가며 테스트할 수 있습니다.
 public struct Stage: Sendable {
@@ -746,7 +746,7 @@ public struct Stage: Sendable {
             return candidates.first { layout.isWalkable($0.final) && isFree($0) }
                 ?? candidates.first { layout.isWalkable($0.final) }.map { Place(final: $0.final) }
                 ?? Place(final: anchor)
-        case .bookshelf, .whiteboard, .lounge, .massageChair, .pantry:
+        case .whiteboard, .lounge, .massageChair, .pantry:
             let zone = OfficeLayout.zone(for: spot)!
             // 정해진 자리가 다 차면 구역 가까이 흩어 섭니다 (한 점에 겹치지 않게)
             if let free = layout.slots(zone).first(where: isFree) { return free }

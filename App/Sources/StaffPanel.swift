@@ -2,8 +2,8 @@ import OfficeCore
 import OfficeServer
 import SwiftUI
 
-/// 사무실 창 오른쪽 패널 (2026-11-08): 위는 Claude 데스크톱 앱에 열려 있는 디렉토리 목록(여럿 고르기),
-/// 아래는 고른 디렉토리의 메인과 그 서브들이 무엇을 하는지 보여 주는 직원 현황.
+/// 사무실 창 오른쪽 패널 (2026-11-08): 위는 Claude 데스크톱 앱에 열려 있는 디렉토리 드롭다운(하나만 고르기),
+/// 아래 "세션"은 고른 디렉토리의 메인과 그 서브들이 무엇을 하는지 보여 줍니다.
 /// 줄을 누르면 사무실에서 그 캐릭터를 고른 것과 같습니다 (발밑 고리 + 신원 카드).
 struct StaffPanel: View {
     let model: AppModel
@@ -16,7 +16,7 @@ struct StaffPanel: View {
             Divider()
 
             HStack(alignment: .firstTextBaseline) {
-                Text("직원 현황").font(.system(size: 13, weight: .bold))
+                Text("세션").font(.system(size: 13, weight: .bold))
                 Spacer()
                 if roster.agentCount > 0 {
                     Text("\(roster.agentCount)명").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -32,7 +32,7 @@ struct StaffPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
-                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행). 창을 넓히거나 볼 디렉토리를 줄이면 더 보여요.")
+                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행). 창을 넓히면 더 보여요.")
             }
 
             Divider()
@@ -91,78 +91,55 @@ struct StaffPanel: View {
     }
 }
 
-/// Claude 데스크톱 앱에 열려 있는 디렉토리 목록 (체크 목록 + "모두"). 고른 디렉토리에서 연 메인마다 사무실에 한 행이 놓입니다.
+/// Claude 데스크톱 앱에 열려 있는 디렉토리 드롭다운 ("모두" 또는 디렉토리 하나). 고른 디렉토리에서 연 메인마다 사무실에 한 행이 놓입니다.
 private struct DirectoryList: View {
     let model: AppModel
 
-    /// 목록이 길면 이 높이까지만 늘리고 스크롤합니다
-    private static let maxListHeight: CGFloat = 200
-    private static let rowHeight: CGFloat = 24
-
     var body: some View {
-        let directories = model.directories
-        VStack(alignment: .leading, spacing: 0) {
+        let options = model.directoryOptions
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text("디렉토리").font(.system(size: 13, weight: .bold))
                 Spacer()
-                if !directories.isEmpty {
-                    Text("\(directories.count)개").font(.system(size: 11)).foregroundStyle(.secondary)
+                if !model.directories.isEmpty {
+                    Text("열린 \(model.directories.count)개").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-
-            if directories.isEmpty {
+            Picker(selection: Binding(get: { model.selectedFolder }, set: { model.selectFolder($0) })) {
+                Text(label(nil)).tag(String?.none)
+                if !options.isEmpty { Divider() }
+                ForEach(options) { folder in
+                    Text(label(folder)).tag(Optional(folder.path))
+                }
+            } label: {
+                EmptyView()
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity)
+            .help(model.selectedFolder ?? "Claude 데스크톱 앱에 열린 모든 디렉토리 (새로 연 디렉토리도 자동으로 보여요)")
+            if model.directories.isEmpty {
                 Text("Claude 데스크톱 앱에 열려 있는 디렉토리가 없어요")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Toggle(isOn: Binding(
-                            get: { model.selection.all },
-                            set: { $0 ? model.selectAllFolders() : model.selectNoFolders() })
-                        ) {
-                            Text("모두").font(.system(size: 12, weight: .medium))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(height: Self.rowHeight)
-                        .help("새로 연 디렉토리도 자동으로 보여요")
-                        ForEach(directories) { folder in
-                            row(folder)
-                        }
-                    }
-                    .toggleStyle(.checkbox)
-                    .padding(.horizontal, 14)
-                }
-                .frame(height: min(CGFloat(directories.count + 1) * Self.rowHeight + 4, Self.maxListHeight))
-                .padding(.bottom, 6)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
     }
 
-    private func row(_ folder: DesktopFolder) -> some View {
-        let count = model.headcount(folder: folder.path)
-        return Toggle(isOn: Binding(
-            get: { model.isSelected(folder: folder.path) },
-            set: { model.setFolder(folder.path, selected: $0) })
-        ) {
-            HStack(spacing: 5) {
-                Image(systemName: "folder").font(.system(size: 11)).foregroundStyle(.secondary)
-                Text(folder.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 4)
-                if count.people > 0 {
-                    Text(count.mains > 1 ? "메인 \(count.mains) · \(count.people)명" : "\(count.people)명")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    /// "claude-office · 메인 2 · 7명"
+    private func label(_ folder: DesktopFolder?) -> String {
+        guard let folder else {
+            let people = model.roster.agentCount
+            return people > 0 ? "모두 · \(people)명" : "모두"
         }
-        .frame(height: Self.rowHeight)
-        .help("\(folder.path)\n열린 세션 \(folder.sessions)개")
+        let count = model.headcount(folder: folder.path)
+        var text = folder.name
+        if !model.directories.contains(where: { $0.path == folder.path }) { text += " (닫힘)" }
+        if count.people > 0 { text += count.mains > 1 ? " · 메인 \(count.mains) · \(count.people)명" : " · \(count.people)명" }
+        return text
     }
 }
 

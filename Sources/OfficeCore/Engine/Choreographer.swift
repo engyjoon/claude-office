@@ -4,9 +4,6 @@ import Foundation
 public struct ChoreographyConfig: Hashable, Sendable {
     /// 한 활동을 최소로 보여주는 시간(초)
     public var dwell: Double = 2.5
-    /// 이 시간 안에 읽기가 이만큼 이어지면 책장으로 갑니다
-    public var readBurstCount = 5
-    public var readBurstWindow: Double = 10
     /// 셸 명령이 이보다 오래 걸리면 자기 책상에서 모니터를 보며 기다립니다 (⏳, M4.5b: 서버랙 대신)
     public var shellWatchDelay: Double = 2
     /// 다른 구역에서 일이 끝난 뒤 자리로 돌아가기 전에 머무는 시간
@@ -76,7 +73,6 @@ public struct Choreographer: Sendable {
         var pending: Shown?
         var pill: StatusPill?
         var emote: Emote?
-        var readStarts: [Date] = []
         var shellWatch: ShellWatch?
         var returnAt: Date?
         var waiting = false
@@ -529,11 +525,6 @@ public struct Choreographer: Sendable {
     /// 깜빡임 방지 규칙을 거쳐 활동을 반영합니다.
     private mutating func offer(_ id: AgentID, _ target: Shown, at now: Date, into out: inout [Directive]) {
         guard let presence = presences[id] else { return }
-        if case .working(let call) = target, call.category == .read {
-            // 읽기 횟수는 화면에 반영되는지와 상관없이 이벤트가 올 때마다 셉니다
-            let window = config.readBurstWindow
-            modify(id) { $0.readStarts = $0.readStarts.filter { now.timeIntervalSince($0) < window } + [now] }
-        }
         if presence.waiting {
             // 승인 대기 중 다른 활동이 왔다 = 승인됨. 고개를 끄덕이고, 손 든 자세를 풀도록 자세·소품·표정을 다시 정합니다.
             resolveWaiting(id, into: &out)
@@ -579,11 +570,7 @@ public struct Choreographer: Sendable {
             var prop: Prop?
             switch call.category {
             case .read:
-                let recent = previous.readStarts.filter { now.timeIntervalSince($0) < config.readBurstWindow }
-                // 이미 책장에 있으면 읽기가 이어지는 동안 머뭅니다
-                if recent.count >= config.readBurstCount || previous.spot == .bookshelf {
-                    zone = .bookshelf
-                }
+                // 파일 읽기는 자기 책상에서 책을 펴 읽습니다 (2026-11-08: 책장을 없앰)
                 pose = .reading
                 prop = .book
             case .web:
@@ -836,7 +823,6 @@ public struct Choreographer: Sendable {
         case .massageChair: return presence.rest == .nap ? .sleeping : .massage
         case .lounge: return presence.waiting ? .raisingHand : .holdingCup
         case .pantry: return presence.waiting ? .raisingHand : .holdingCup
-        case .bookshelf where !presence.waiting: return .reading
         case .whiteboard where !presence.waiting: return .writingBoard
         default:
             let pose = currentPose(presence, atDesk: presence.seated && isDesk(presence.spot))
@@ -848,7 +834,6 @@ public struct Choreographer: Sendable {
         if presence.waiting { return nil }
         switch presence.spot {
         case .lounge, .pantry: return .cup
-        case .bookshelf: return .book
         case .whiteboard: return .marker
         default: break
         }

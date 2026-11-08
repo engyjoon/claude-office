@@ -7,10 +7,13 @@ public enum SVGRenderer {
     /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
     public static func render(stage: Stage, overlay: OverlayOptions? = .init()) -> String {
         let layout = stage.layout
-        let width = layout.width
-        let height = layout.height
+        // 사무실 둘레에 여백을 두고(앱과 같음), 여백에는 벽·바닥만 이어 그립니다
+        let pad = OfficeLayout.padding
+        let width = layout.width + pad * 2
+        let height = layout.height + pad * 2
+        let extent = MapRect(-pad, -pad, width, height)
         var body = ""
-        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates)
+        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent)
             + OfficeArt.liveLayers(stage: stage)
 
         for layer in layers where layer.depth == -.infinity {
@@ -42,7 +45,7 @@ public enum SVGRenderer {
             }
         }
         return """
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \(f(width)) \(f(height))" width="\(f(width))" height="\(f(height))" \
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="\(f(-pad)) \(f(-pad)) \(f(width)) \(f(height))" width="\(f(width))" height="\(f(height))" \
             font-family="Apple SD Gothic Neo, Noto Sans CJK KR, Noto Sans KR, WenQuanYi Zen Hei, sans-serif">\(body)</svg>
             """
     }

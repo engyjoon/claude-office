@@ -225,24 +225,24 @@ struct FloorTests {
 
     @Test("창 크기가 바뀌면 들어가는 수를 다시 센다 (사무실은 줄이지 않음)")
     func viewportChanges() {
-        var h = FloorHarness(width: 1500, height: 648)
+        var h = FloorHarness(width: 1500, height: 708)
         h.hook(hook("SessionStart", session: "m"))
         for index in 1...14 { h.hook(delegateHook("m", "a\(index)"), at: Double(index) * 0.3) }
         h.run(until: 40)
         #expect(h.stage.actors.count == 15)
         // 좁히면 오른쪽 서브가 숨고
-        h.resize(1140, 648)
-        let narrow = OfficeLayout.capacity(width: 1140, height: 648).columns
+        h.resize(1140, 708)
+        let narrow = OfficeLayout.capacity(width: 1140, height: 708).columns
         #expect(narrow == 11)
         #expect(h.stage.actors.count == narrow)
         #expect(h.floor.plan.hiddenCount == 15 - narrow)
         #expect(h.stage.layout.width == 1140)
         // 넓히면 모두 보이고 바로 자기 책상에 있습니다
-        h.resize(1500, 648)
+        h.resize(1500, 708)
         #expect(h.stage.actors.count == 15)
         #expect(h.floor.plan.hiddenCount == 0)
         #expect(h.stage.actors.values.allSatisfy { !$0.isWalking })
-        #expect(OfficeLayout.displayScale(viewWidth: 1500, viewHeight: 648) == 1)
+        #expect(OfficeLayout.displayScale(viewWidth: 1500, viewHeight: 708) == 1)
     }
 
     @Test("메인이 퇴근하면 가장 먼저 온 서브 세션이 메인 책상으로 걸어가 앉고, 명패가 '★ 메인'이 된다")
@@ -277,7 +277,7 @@ struct FloorTests {
         #expect(h.stage.layout.rows.map(\.team.raw) == ["/w/b#2", "/w/c#3"])
         #expect(h.events.contains(.teamClosed(TeamID("/w/a#1"))))
         #expect(h.actor("lead-2")?.position == MapPoint(OfficeLayout.deskX(0), OfficeLayout.firstDeskY))
-        #expect(h.actor("lead-3")?.position == MapPoint(OfficeLayout.deskX(0), OfficeLayout.firstDeskY + OfficeLayout.rowSpacing))
+        #expect(h.actor("lead-3")?.position == MapPoint(OfficeLayout.deskX(0), OfficeLayout.firstDeskY + h.stage.layout.rowSpacing))
     }
 
     @Test("웹 검색은 자기 책상에서 한다 (리서치 데스크 없음)")
@@ -291,7 +291,7 @@ struct FloorTests {
         #expect(h.actor("lead-1")?.pill?.category == .web)
     }
 
-    @Test("공용 구역 자리가 넘치면 한 점에 겹치지 않게 흩어 서고, 칩은 '책장 · N명 읽는 중' 하나로 묶는다")
+    @Test("공용 구역 자리가 넘치면 한 점에 겹치지 않게 흩어 서고, 칩은 '화이트보드 · N명 계획 중' 하나로 묶는다")
     func crowdedZoneSpreads() throws {
         var h = StageHarness()
         let sessions = (1...6).map { "s\($0)" }
@@ -299,11 +299,11 @@ struct FloorTests {
         h.run(until: 15)
         for round in 0..<6 {
             for session in sessions {
-                h.hook(hook("PreToolUse", #""tool_name":"Read","tool_use_id":"\#(session)-r\#(round)","tool_input":{"file_path":"/x/F\#(round).swift"}"#, session: session), at: 15 + Double(round) * 1.2)
+                h.hook(hook("PreToolUse", #""tool_name":"TodoWrite","tool_use_id":"\#(session)-r\#(round)","tool_input":{"todos":[]}"#, session: session), at: 15 + Double(round) * 1.2)
             }
         }
         h.run(until: 40)
-        let readers = h.stage.actors.values.filter { OfficeLayout.zone(ofKey: $0.place?.key) == .bookshelf }
+        let readers = h.stage.actors.values.filter { OfficeLayout.zone(ofKey: $0.place?.key) == .whiteboard }
         #expect(readers.count == 6)
         let points = readers.map(\.position)
         for (index, point) in points.enumerated() {
@@ -311,8 +311,8 @@ struct FloorTests {
         }
         let items = Overlay.items(for: h.stage)
         let pills = items.filter { $0.kind == .pill }
-        let group = try #require(pills.first { $0.text?.hasPrefix("책장 · ") == true })
-        #expect(group.text == "책장 · 6명 읽는 중")
+        let group = try #require(pills.first { $0.text?.hasPrefix("화이트보드 · ") == true })
+        #expect(group.text == "화이트보드 · 6명 계획 중")
         #expect(pills.count == 1)
         // 묶음 칩은 화면 안에 있습니다
         #expect((group.frame?.y ?? -1) >= 0)

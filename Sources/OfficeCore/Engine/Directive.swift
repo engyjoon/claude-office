@@ -7,11 +7,10 @@ public enum Spot: Hashable, Sendable, CustomStringConvertible {
     case seat(TeamID, Seat)
     /// 특정 직원 바로 옆 (위임·보고 대화용)
     case beside(AgentID)
-    case bookshelf
     case whiteboard
-    /// 휴게 공간 (소파·커피)
+    /// 휴게 공간 (3인용 소파 둘)
     case lounge
-    /// 휴게 공간의 안마 의자 (1개)
+    /// 휴게 공간의 안마 의자 (2개)
     case massageChair
     /// 탕비 코너 (냉장고·정수기)
     case pantry
@@ -26,7 +25,6 @@ public enum Spot: Hashable, Sendable, CustomStringConvertible {
         case .door: "문"
         case .seat(let team, let seat): "자리(\(team.raw.split(separator: "/").last ?? "")#\(seat))"
         case .beside(let agent): "\(agent) 옆"
-        case .bookshelf: "책장"
         case .whiteboard: "화이트보드"
         case .lounge: "휴게 공간"
         case .massageChair: "안마 의자"

@@ -41,7 +41,7 @@ final class AppModel {
     private(set) var selectedAgent: AgentID?
     /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
     private(set) var soundSettings: SoundSettings
-    /// 사무실 창에서 고른 디렉토리 (직원 현황 위 디렉토리 목록). 처음엔 모두.
+    /// 사무실 창에서 고른 디렉토리 (패널 위 디렉토리 드롭다운, 하나만). 처음엔 모두.
     private(set) var selection: FloorSelection
     /// 고른 디렉토리의 사람 중 사무실 화면에 다 못 보여 준 수
     private(set) var hiddenOnScreen = 0
@@ -83,8 +83,10 @@ final class AppModel {
         // 고른 디렉토리는 기억해 둡니다 (앱을 다시 켜도 이어짐)
         let defaults = UserDefaults.standard
         let all = defaults.object(forKey: Self.selectAllKey) as? Bool ?? true
-        let savedFolders = Set(defaults.stringArray(forKey: Self.selectedFoldersKey) ?? [])
-        let selection = FloorSelection(all: all, folders: savedFolders)
+        // 디렉토리는 하나만 고릅니다 (예전에 여럿 골라 두었으면 첫 번째만)
+        let savedFolder = (defaults.stringArray(forKey: Self.selectedFoldersKey) ?? []).sorted().first
+        let selection = savedFolder.map { all ? FloorSelection.everyone : FloorSelection(all: false, folders: [$0]) }
+            ?? .everyone
         self.selection = selection
         stageStore.floor = OfficeFloor(selection: selection)
         officeScene = OfficeScene(store: stageStore)
@@ -229,13 +231,23 @@ final class AppModel {
         }
     }
 
-    /// 직원 현황 패널에 보여 줄 목록 (고른 디렉토리의 메인과 그 서브만)
+    /// 패널 "세션" 목록에 보여 줄 것 (고른 디렉토리의 메인과 그 서브만)
     var visibleRoster: Roster {
         selection.all ? roster : roster.filtered(folders: selection.folders)
     }
 
-    func isSelected(folder: String) -> Bool {
-        selection.contains(folder: folder)
+    /// 고른 디렉토리 (nil이면 모두)
+    var selectedFolder: String? {
+        selection.all ? nil : selection.folders.sorted().first
+    }
+
+    /// 드롭다운에 보여 줄 디렉토리: 데스크톱 앱에 열린 디렉토리 + (닫혔지만) 지금 고른 디렉토리
+    var directoryOptions: [DesktopFolder] {
+        var options = directories
+        if let selected = selectedFolder, !options.contains(where: { $0.path == selected }) {
+            options.append(DesktopFolder(path: selected, sessions: 0))
+        }
+        return options
     }
 
     /// 그 디렉토리에서 지금 사무실에 있는 메인 수와 사람 수
@@ -245,19 +257,12 @@ final class AppModel {
     }
 
     func selectAllFolders() {
-        setSelection(FloorSelection(all: true, folders: []))
+        selectFolder(nil)
     }
 
-    /// "모두"를 끄면 아무 디렉토리도 고르지 않은 상태가 됩니다 (하나씩 골라 켜기)
-    func selectNoFolders() {
-        setSelection(FloorSelection(all: false, folders: []))
-    }
-
-    /// 디렉토리 하나를 켜고 끕니다. "모두"였으면 지금 열린 디렉토리 중 그 하나만 뺀 선택으로 바뀝니다.
-    func setFolder(_ folder: String, selected: Bool) {
-        var folders = selection.all ? Set(directories.map(\.path)) : selection.folders
-        if selected { folders.insert(folder) } else { folders.remove(folder) }
-        setSelection(FloorSelection(all: false, folders: folders))
+    /// 디렉토리 하나만 고릅니다 (nil이면 모두: 새로 연 디렉토리도 자동으로 보임)
+    func selectFolder(_ folder: String?) {
+        setSelection(folder.map { FloorSelection(all: false, folders: [$0]) } ?? FloorSelection(all: true, folders: []))
     }
 
     private func setSelection(_ selection: FloorSelection) {

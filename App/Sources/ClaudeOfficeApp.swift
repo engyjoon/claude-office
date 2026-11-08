@@ -18,7 +18,7 @@ struct ClaudeOfficeApp: App {
         Window(OfficeWindowView.title, id: WindowID.office) {
             OfficeWindowView(model: model)
         }
-        .defaultSize(width: OfficeWindowView.defaultWidth, height: 700)
+        .defaultSize(width: OfficeWindowView.defaultWidth, height: 800)
 
         Window("Claude Office 이벤트 로그", id: WindowID.eventLog) {
             EventLogView(model: model)
@@ -36,19 +36,19 @@ enum WindowID {
     static let eventLog = "event-log"
 }
 
-/// 사무실 창 (M3). 왼쪽은 사무실, 오른쪽은 직원 현황 패널. 미니 사무실 패널은 M5에서 만듭니다.
+/// 사무실 창 (M3). 왼쪽은 사무실, 오른쪽은 디렉토리·세션 패널. 미니 사무실 패널은 M5에서 만듭니다.
 struct OfficeWindowView: View {
     let model: AppModel
     @AppStorage("office.showStaffPanel") private var showStaffPanel = true
     @State private var escapeMonitor: Any?
     /// 창 기본 폭을 넓힌 뒤 한 번만, 예전 크기로 기억된 창을 넓혀 줍니다 (이후에는 사용자가 정한 크기를 따름)
-    @AppStorage("office.widenedTo1400") private var widened = false
+    @AppStorage("office.widenedTo1440") private var widened = false
 
     var body: some View {
         HStack(spacing: 0) {
             SpriteView(scene: model.officeScene, preferredFramesPerSecond: 30)
                 // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
-                .frame(minWidth: 480, minHeight: OfficeLayout.minHeight)
+                .frame(minWidth: 480, minHeight: OfficeLayout.minHeight + OfficeLayout.padding * 2)
                 .background(Color(red: 0.945, green: 0.902, blue: 0.839))
                 .overlay(alignment: .topTrailing) {
                     // 캐릭터를 클릭하면 누구인지 보여줍니다. 빈 곳 클릭·✕·Esc로 닫습니다.
@@ -71,9 +71,9 @@ struct OfficeWindowView: View {
                 Button {
                     showStaffPanel.toggle()
                 } label: {
-                    Label("직원 현황", systemImage: "sidebar.right")
+                    Label("세션 패널", systemImage: "sidebar.right")
                 }
-                .help(showStaffPanel ? "직원 현황 숨기기" : "직원 현황 보기")
+                .help(showStaffPanel ? "디렉토리·세션 패널 숨기기" : "디렉토리·세션 패널 보기")
             }
         }
         // SpriteKit 뷰가 키 입력을 먼저 받아서 onExitCommand로는 Esc가 오지 않습니다. 창 단위로 가로챕니다.
@@ -94,7 +94,7 @@ struct OfficeWindowView: View {
     }
 
     static let title = "Claude Office 사무실"
-    static let defaultWidth: CGFloat = 1400
+    static let defaultWidth: CGFloat = 1440
 
     private func widenOnceIfNeeded() {
         guard !widened else { return }

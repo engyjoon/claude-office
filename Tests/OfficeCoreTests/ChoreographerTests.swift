@@ -50,7 +50,7 @@ struct ChoreographerTests {
         #expect(directives.contains(Directive(lead, .status(StatusPill(category: .shell, text: "Bash · ls")))))
     }
 
-    @Test("읽기가 10초 안에 5번 이어지면 책장으로 간다")
+    @Test("파일 읽기는 이어져도 자기 책상에서 책을 펴 읽는다 (책장 없음)")
     func readBurst() {
         var h = EngineHarness()
         started(&h)
@@ -60,7 +60,9 @@ struct ChoreographerTests {
             h.send(hook.tool("PostToolUse", "Read", id: "r\(index)", input: [:]), at: t + 0.1)
         }
         h.advance(to: 12)
-        #expect(h.actions(of: lead).walks.contains(.bookshelf))
+        #expect(h.actions(of: lead).walks.allSatisfy { $0.isSeat })
+        #expect(h.actions(of: lead).contains(.pose(.reading)))
+        #expect(h.actions(of: lead).contains(.prop(.book)))
     }
 
     @Test("셸 명령이 2초를 넘기면 자기 책상에서 모니터를 보며 기다리고(⏳), 성공하면 반가운 표정을 짓는다")
@@ -238,15 +240,13 @@ struct ChoreographerDetailTests {
     let hook = Hook()
     let lead = AgentID("lead-1")
 
-    @Test("책장에 있다가 위임하면 팀장이 먼저 자리로 돌아오고, 팀원은 팀장 자리로 찾아온다")
+    @Test("화이트보드에 있다가 위임하면 메인이 먼저 자리로 돌아오고, 서브는 메인 자리로 찾아온다")
     func delegateFromDesk() {
         var h = EngineHarness()
         h.send(hook.make("SessionStart"))
-        for index in 0..<5 {
-            h.send(hook.tool("PreToolUse", "Read", id: "r\(index)", input: [:]), at: 1 + Double(index))
-        }
+        h.send(hook.tool("PreToolUse", "TodoWrite", id: "p", input: [:]), at: 1)
         h.advance(to: 7)
-        #expect(h.engine.choreographer.spot(of: lead) == .bookshelf)
+        #expect(h.engine.choreographer.spot(of: lead) == .whiteboard)
         h.send(hook.tool("PreToolUse", "Agent", id: "a", input: ["description": "리뷰", "subagent_type": "code-reviewer"]), at: 8)
         #expect(h.engine.choreographer.spot(of: lead) == .seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main))
         #expect(h.actions(of: lead).bubbles.last?.text.contains("리뷰") == true)

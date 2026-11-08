@@ -90,7 +90,9 @@ final class OfficeScene: SKScene {
     private func sync() {
         if reportedSize != size, size.width > 1, size.height > 1 {
             reportedSize = size
-            onViewportChange?(size)
+            // 사무실은 둘레 여백 안쪽 크기를 따릅니다
+            let pad = OfficeLayout.padding * 2
+            onViewportChange?(CGSize(width: max(size.width - pad, 1), height: max(size.height - pad, 1)))
         }
         let stage = store.stage
         let height = stage.layout.height
@@ -181,16 +183,18 @@ final class OfficeScene: SKScene {
             .key
     }
 
-    /// 사무실을 배율 1로 왼쪽 위에 둡니다. 창이 사무실 최소 크기보다 작을 때만 줄입니다.
-    /// 돌려주는 값은 화면에 보이는 영역(지도 좌표)으로, 배경을 그 크기까지 이어 그립니다.
+    /// 사무실을 배율 1로 둘레 여백(`OfficeLayout.padding`) 안쪽 왼쪽 위에 둡니다. 창이 사무실 최소 크기보다 작을 때만 줄입니다.
+    /// 돌려주는 값은 화면에 보이는 영역(지도 좌표)으로, 배경(벽·바닥)을 여백까지 이어 그립니다.
     private func fitWorld(officeHeight: Double) -> MapRect {
         let view = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         let officeWidth = store.stage.layout.width
-        let scale = OfficeLayout.displayScale(viewWidth: view.width, viewHeight: view.height)
-        let offsetX = max(0, (view.width - officeWidth * scale) / 2)
+        let pad = OfficeLayout.padding
+        let scale = OfficeLayout.displayScale(viewWidth: view.width - pad * 2, viewHeight: view.height - pad * 2)
+        let left = max(pad * scale, (view.width - officeWidth * scale) / 2)
+        let top = pad * scale
         world.setScale(scale)
-        world.position = CGPoint(x: offsetX, y: view.height - officeHeight * scale)
-        return MapRect(-offsetX / scale, 0, view.width / scale, view.height / scale)
+        world.position = CGPoint(x: left, y: view.height - top - officeHeight * scale)
+        return MapRect(-left / scale, -top / scale, view.width / scale, view.height / scale)
     }
 
     private func rebuildFurnitureIfNeeded(_ stage: Stage, extent: MapRect) {
