@@ -106,7 +106,7 @@ struct DisplaySettings: View {
             }
             Section("미니 사무실") {
                 Toggle("미니 사무실 보기", isOn: mini(\.enabled))
-                Toggle("승인 대기가 생기면 그 메인의 행으로 바꾸기", isOn: mini(\.autoSwitch))
+                Toggle("내 답변이 필요하면(승인·질문·계획) 그 메인으로 바꾸기", isOn: mini(\.autoSwitch))
                 Slider(value: mini(\.opacity), in: 0.5...1) {
                     Text("투명도")
                 } minimumValueLabel: {
@@ -116,7 +116,7 @@ struct DisplaySettings: View {
                 }
                 Button("기본 위치로 (화면 오른쪽 아래)") { model.resetMiniPosition() }
                     .disabled(!model.miniSettings.enabled)
-                Text("화면 구석에 메인 한 명의 행을 사무실 그대로(줄이지 않고) 보여 줘요. 머리줄에서 보여 줄 메인을 고르면 고정되고, 자동이면 승인 대기 → 최근에 일한 메인 순으로 보여 줘요. 폭만 늘리고 줄일 수 있어요.")
+                Text("화면 구석에 메인 한 명과 일하는 서브 2명을 사무실 그대로(줄이지 않고) 보여 줘요. 자동이면 내 답변이 필요한 메인 → 응답을 끝낸 메인(10분 동안, [앱으로]를 누르면 확인) → 가장 마지막에 요청한 메인 순이에요. 머리줄에서 메인을 고르면 고정돼요.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

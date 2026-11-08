@@ -9,16 +9,17 @@ public enum OfficeArt {
     ///   - nameplates: 책상 명패 (행 → 책상 → 이름)
     ///   - extent: 화면에 보이는 영역(지도 좌표). 사무실보다 넓으면 남는 곳까지 벽과 바닥을 이어 그립니다.
     ///     nil이면 사무실 크기(0, 0, width, height)만 그립니다.
+    ///   - lounge: 휴게 공간(소파·안마 의자와 그 러그)을 그릴지. 미니 사무실은 그리지 않습니다 (M5(4) v2).
     public static func layers(
-        layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil
+        layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil, lounge: Bool = true
     ) -> [ArtLayer] {
-        var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent))]
+        var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent, lounge: lounge))]
         layers += wallFurniture(layout)
         for row in layout.rows {
             let team = teams.first { $0.id == row.team }
             layers += self.row(row, team: team, plates: nameplates[row.team] ?? [:])
         }
-        layers += lounge()
+        if lounge { layers += self.lounge() }
         return layers
     }
 
@@ -27,7 +28,7 @@ public enum OfficeArt {
     public static func liveLayers(stage: Stage) -> [ArtLayer] {
         let time = stage.time
         var layers: [ArtLayer] = []
-        for (index, seat) in OfficeLayout.massageSeats.enumerated() {
+        for (index, seat) in OfficeLayout.massageSeats.enumerated() where !stage.config.commonAreasAtDesk {
             let massaged = stage.actors.values.contains { actor in
                 actor.place?.key == "massageChair:\(index)" && !actor.isWalking && actor.position.distance(to: seat) < 1
             }
@@ -42,7 +43,7 @@ public enum OfficeArt {
 
     // MARK: - 바닥과 벽
 
-    static func background(layout: OfficeLayout, teams: [Team] = [], extent: MapRect? = nil) -> [ArtShape] {
+    static func background(layout: OfficeLayout, teams: [Team] = [], extent: MapRect? = nil, lounge: Bool = true) -> [ArtShape] {
         let area = extent ?? MapRect(0, 0, layout.width, layout.height)
         let left = min(area.x, 0)
         let right = max(area.maxX, layout.width)
@@ -77,10 +78,12 @@ public enum OfficeArt {
             shapes.append(.rect(from, row.deskY - 84, to - from, 112, r: 26, fill: .swatch(Swatch.teamRugs[color % 4]), outline: false, opacity: 0.5))
         }
         // 휴게 공간 러그(소파 구역), 안마 구역 러그, 현관 매트
-        let sofas = OfficeLayout.sofaArea
-        shapes.append(.rect(sofas.x, sofas.y, sofas.width, sofas.height, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
-        let m = OfficeLayout.massageArea
-        shapes.append(.rect(m.x, m.y + 4, m.width, m.height - 6, r: 22, fill: .color(ArtColor(0xD4E2F2)), outline: false, opacity: 0.85))
+        if lounge {
+            let sofas = OfficeLayout.sofaArea
+            shapes.append(.rect(sofas.x, sofas.y, sofas.width, sofas.height, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
+            let m = OfficeLayout.massageArea
+            shapes.append(.rect(m.x, m.y + 4, m.width, m.height - 6, r: 22, fill: .color(ArtColor(0xD4E2F2)), outline: false, opacity: 0.85))
+        }
         shapes.append(.rect(layout.doorX + 4, 162, 64, 10, r: 5, fill: .swatch(.rugC)))
         return shapes
     }

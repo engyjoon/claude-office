@@ -35,11 +35,11 @@ sounds:
 ## 사무실 장면을 build/snapshots/*.svg로 (맥 없이 그림 확인, 사무실 1140×708·둘레 여백 20·배율 1)
 ##   위임: 2.6초 종이비행기 · 11초 자기 책상에서 읽기 · 20초 외침 풍선 · 52.2초 보고 · 61.5초 응답 완료 · 128초 휴게 공간
 ##   혼잡(행 배치): 30초 넘친 서브 +2 · 52초 가운데 서브 퇴근 후 끝 서브가 들어옴(+1) · 80초 셋째 행이 넷째 메인으로
-##   미니 사무실(폭 620 띠): 12초 메인1 · 20초 승인 대기로 메인2 · 45초 대기 풀림 · 75초 다시 메인1
+##   미니 사무실(390 띠, 메인 + 서브 2명): 8초 최근 요청 메인3 · 12초 완료 메인3 · 20초 답변 필요 메인2 · 45초 다시 완료 메인3 · 65초 최근 요청 메인1
 snapshot:
 	$(SWIFT) run -q office-sim snapshot Scenarios/delegation.jsonl --at 2.6,11,20,52.2,61.5,128 --out build/snapshots
 	$(SWIFT) run -q office-sim snapshot Scenarios/floor.jsonl --at 30,52,80 --out build/snapshots
-	$(SWIFT) run -q office-sim snapshot Scenarios/mini.jsonl --at 12,20,45,75 --mini 620 --out build/snapshots
+	$(SWIFT) run -q office-sim snapshot Scenarios/mini.jsonl --at 8,12,20,45,65 --mini 390 --out build/snapshots
 
 ## 맥 앱 없이 훅 서버+엔진만 실행 (직원 목록만 출력)
 serve:

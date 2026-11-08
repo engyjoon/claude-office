@@ -51,8 +51,27 @@ public struct FloorPlan: Hashable, Sendable {
     public var visible: Set<AgentID>
     /// 고른 메인의 사람 중 화면에 다 못 보여 준 수 (넘친 서브 + 숨긴 행의 모든 사람)
     public var hiddenCount: Int
+    /// 실제 책상 대신 앉힐 책상 (한 행 띠에서 고른 서브 → 1·2번 칸)
+    public var seatMap: [AgentID: Seat] = [:]
 
     public static let empty = FloorPlan(rows: [], hiddenTeams: [], visible: [], hiddenCount: 0)
+
+    /// 한 행 띠 (미니 사무실 v2, M5(4)): 고른 행의 메인과 쉬지 않는 서브 `slots`명만 1번 칸부터 앉힙니다 (`MiniCast`).
+    public static func band(
+        state: OfficeState, selection: FloorSelection, journal: ActivityJournal, previous: [AgentID: Seat], slots: Int
+    ) -> FloorPlan {
+        var plan = FloorPlan.empty
+        guard let team = state.sortedTeams.first(where: { selection.contains($0) && !state.agents(in: $0.id).isEmpty }) else { return plan }
+        let people = state.agents(in: team.id)
+        let main = people.filter(\.isMain)
+        let cast = MiniCast.pick(subs: people.filter { !$0.isMain }, previous: previous, journal: journal, slots: slots)
+        let shown = main.map(\.id) + cast.sorted { $0.value < $1.value }.map(\.key)
+        plan.rows = [Row(team: team.id, visible: shown, hidden: people.count - shown.count)]
+        plan.visible = Set(shown)
+        plan.hiddenCount = people.count - shown.count
+        plan.seatMap = cast
+        return plan
+    }
 
     public static func make(state: OfficeState, selection: FloorSelection, capacity: OfficeLayout.Capacity) -> FloorPlan {
         var plan = FloorPlan.empty
@@ -85,30 +104,41 @@ public struct OfficeFloor: Sendable {
     public private(set) var selection: FloorSelection
     public private(set) var plan = FloorPlan.empty
     public private(set) var viewport: (width: Double, height: Double)
-    /// 한 행 띠 (미니 사무실, M5(4)): 첫 행 하나만 보여 주고, 책상 수는 보이는 폭(`viewport.width`, 지도 x 0부터)으로 셉니다.
-    /// 무대 배치는 사무실과 같아서(최소 크기로 올려 잡음) 휴게 공간·화이트보드·출입문 자리가 그대로입니다.
+    /// 한 행 띠 (미니 사무실, M5(4)): 고른 행의 메인과 쉬지 않는 서브 `subSlots`명만 첫 행 자리에 앉힙니다.
+    /// 무대 배치는 사무실과 같고(출입문은 오른쪽 밖), 공용 구역에 가는 대신 자기 책상에서 쉽니다(`StageConfig.commonAreasAtDesk`).
     public let isBand: Bool
+    public let subSlots: Int
 
     public init(config: StageConfig = .init(), selection: FloorSelection = .everyone,
-                width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight, band: Bool = false) {
+                width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight, band: Bool = false,
+                subSlots: Int = MiniOffice.subSlots) {
+        var config = config
+        if band { config.commonAreasAtDesk = true }
         stage = Stage(config: config)
         self.selection = selection
         isBand = band
+        self.subSlots = subSlots
         viewport = (width, height)
         stage.setViewport(width: width, height: height)
     }
 
     public var capacity: OfficeLayout.Capacity {
         isBand
-            ? OfficeLayout.Capacity(columns: OfficeLayout.columns(width: viewport.width), rows: 1)
+            ? OfficeLayout.Capacity(columns: 1 + subSlots, rows: 1)
             : OfficeLayout.capacity(width: viewport.width, height: viewport.height)
+    }
+
+    private func makePlan(_ engine: OfficeEngine) -> FloorPlan {
+        isBand
+            ? FloorPlan.band(state: engine.state, selection: selection, journal: engine.journal, previous: plan.seatMap, slots: subSlots)
+            : FloorPlan.make(state: engine.state, selection: selection, capacity: capacity)
     }
 
     // MARK: - 지시 흘리기
 
     /// 엔진이 낸 지시를 넘깁니다. `engine`은 지시를 낸 뒤의 상태입니다.
     public mutating func apply(_ directives: [Directive], engine: OfficeEngine) {
-        let next = FloorPlan.make(state: engine.state, selection: selection, capacity: capacity)
+        let next = makePlan(engine)
         let previous = plan
         plan = next
         let state = engine.state
@@ -118,6 +148,7 @@ public struct OfficeFloor: Sendable {
             stage.remove(id)
         }
         syncTeams(state)
+        stage.setSeatMap(next.seatMap)
 
         var spawned = Set<AgentID>()
         for directive in directives {
@@ -185,7 +216,7 @@ public struct OfficeFloor: Sendable {
     }
 
     private mutating func resync(engine: OfficeEngine) {
-        let next = FloorPlan.make(state: engine.state, selection: selection, capacity: capacity)
+        let next = makePlan(engine)
         let previous = plan
         plan = next
         for id in previous.visible.subtracting(next.visible).sorted() {
@@ -196,6 +227,7 @@ public struct OfficeFloor: Sendable {
             stage.remove(actor.id)
         }
         syncTeams(engine.state)
+        stage.setSeatMap(next.seatMap)
         var placed: [Directive] = []
         for id in next.visible.sorted() where !stage.knows(id) {
             if let agent = engine.state.agents[id] {

@@ -37,6 +37,29 @@ public struct ToolCall: Hashable, Sendable {
         self.subject = subject
         self.runsInBackground = runsInBackground
     }
+
+    /// 내 답을 기다리는 툴 (M5(4) 미니 사무실 v2): 질문(AskUserQuestion)과 계획 승인(ExitPlanMode).
+    /// 시작하는 순간부터 끝날 때까지 승인 대기와 같은 "답변 필요" 상태로 봅니다.
+    public static let answerTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+    public var asksUser: Bool { Self.answerTools.contains(name) }
+
+    /// 기다리는 까닭: "질문 답 대기", "계획 승인 대기", 그 밖에는 "승인 대기"
+    public var waitLabel: String {
+        switch name {
+        case "AskUserQuestion": "질문 답 대기"
+        case "ExitPlanMode": "계획 승인 대기"
+        default: "승인 대기"
+        }
+    }
+
+    /// 알림 본문·말 끝: "질문에 답해 주세요", "계획을 확인해 주세요", "승인이 필요해요"
+    public var waitRequest: String {
+        switch name {
+        case "AskUserQuestion": "질문에 답해 주세요"
+        case "ExitPlanMode": "계획을 확인해 주세요"
+        default: "승인이 필요해요"
+        }
+    }
 }
 
 /// 툴 이름으로 분류하고, 입력에서 보여줄 대상을 뽑아냅니다.

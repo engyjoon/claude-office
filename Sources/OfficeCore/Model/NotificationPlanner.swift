@@ -126,6 +126,12 @@ public struct NotificationPlanner: Sendable {
         id: String, agent: Agent, call: ToolCall?, state: OfficeState, privacy: PrivacyLevel, isUpdate: Bool
     ) -> OfficeNotice {
         let words = StatusLine.Words(state: state, privacy: privacy)
+        if let call, call.asksUser {
+            // 질문·계획 승인 (M5(4)): "메인1 질문 답 대기" / "질문에 답해 주세요"
+            return notice(
+                id: id, kind: .permission, title: "\(agent.title.label) \(call.waitLabel)", body: call.waitRequest, agent: agent, state: state,
+                isUpdate: isUpdate)
+        }
         let body = call.map { "\(words.toolText($0)) · 승인이 필요해요" } ?? "승인이 필요해요"
         return notice(id: id, kind: .permission, title: "\(agent.title.label) 승인 대기", body: body, agent: agent, state: state, isUpdate: isUpdate)
     }

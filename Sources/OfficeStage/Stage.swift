@@ -122,6 +122,9 @@ public struct StageConfig: Hashable, Sendable {
     /// 발소리·타이핑 소리 간격 (둘 다 기본으로 꺼져 있는 장식 소리, 설계서 §11.2)
     public var footstepInterval = 0.42
     public var typingInterval = 1.4
+    /// 공용 구역(소파·안마 의자·탕비 코너·화이트보드)에 가는 대신 자기 책상에서 합니다. 미니 사무실은 휴게 공간을 보여 주지 않으므로 켭니다 (M5(4) v2).
+    /// 안마는 졸기로, 화이트보드에 쓰기는 타이핑으로 바꿉니다.
+    public var commonAreasAtDesk = false
 
     public init() {}
 }
@@ -142,6 +145,8 @@ public struct Stage: Sendable {
     public private(set) var time: Double = 0
     /// 행 끝 "+N": 화면에 다 못 보여 줘서 숨긴 사람 수 (`OfficeFloor`가 정함)
     public private(set) var hiddenCounts: [TeamID: Int] = [:]
+    /// 실제 책상 대신 앉힐 책상 (미니 사무실: 고른 서브를 1·2번 칸에, `OfficeFloor`가 정함)
+    public private(set) var seatMap: [AgentID: Seat] = [:]
     /// 지금 그리는 효과
     public private(set) var effects: [StageEffect] = []
     private var nextEffectID = 0
@@ -294,7 +299,14 @@ public struct Stage: Sendable {
             actors[id]!.seated = false
             if actors[id]!.pose == .sitting { actors[id]!.pose = .standing }
         case .pose(let pose):
-            actors[id]!.pose = pose
+            // 책상에서 쉬기: 안마 → 졸기, 화이트보드에 쓰기 → 타이핑
+            if config.commonAreasAtDesk, pose == .massage {
+                actors[id]!.pose = .sleeping
+            } else if config.commonAreasAtDesk, pose == .writingBoard {
+                actors[id]!.pose = .typing
+            } else {
+                actors[id]!.pose = pose
+            }
         case .gesture(let gesture):
             actors[id]!.gesture = gesture
             actors[id]!.gestureStartedAt = time
@@ -364,7 +376,7 @@ public struct Stage: Sendable {
 
     private mutating func spawn(_ agent: Agent, at spot: Spot) {
         release(agent.id)
-        let place = resolve(spot, for: agent.id)
+        let place = resolve(spot, for: agent.id, agent: agent)
         actors[agent.id] = StageActor(id: agent.id, agent: agent, position: place.final, place: place)
         reserve(place, for: agent.id)
         blocks[agent.id] = nil
@@ -406,6 +418,32 @@ public struct Stage: Sendable {
         updateLayout()
     }
 
+    /// 앉힐 책상을 바꿉니다. 바뀐 사람이 예전 칸에 있거나 가는 중이면 새 칸으로 옮깁니다 (걷던 중이면 새 칸으로 걷고, 아니면 바로).
+    public mutating func setSeatMap(_ map: [AgentID: Seat]) {
+        guard map != seatMap else { return }
+        let old = seatMap
+        seatMap = map
+        for (id, actor) in actors.sorted(by: { $0.key < $1.key }) {
+            let agent = actor.agent
+            let before = old[id] ?? agent.seat
+            let after = map[id] ?? agent.seat
+            guard before != after, let place = actor.place, place.team == agent.teamID, place.seat == before else { continue }
+            if actor.isWalking {
+                walk(id, to: .seat(agent.teamID, agent.seat))
+            } else {
+                release(id)
+                let target = layout.seat(agent.teamID, after)
+                reserve(target, for: id)
+                actors[id]!.place = target
+                actors[id]!.position = target.final
+            }
+        }
+        updateLayout()
+    }
+
+    /// 이 직원이 앉는 책상 (바꿔 앉힌 책상이 있으면 그것)
+    func desk(of agent: Agent) -> Seat { seatMap[agent.id] ?? agent.seat }
+
     /// 화면(사무실 영역) 크기를 바꿉니다. 사무실은 줄이지 않고(배율 1) 그 크기에 맞게 다시 놓습니다.
     public mutating func setViewport(width: Double, height: Double) {
         guard viewport.width != width || viewport.height != height else { return }
@@ -423,9 +461,10 @@ public struct Stage: Sendable {
             let agent = actor.agent
             guard teams[agent.teamID] != nil else { continue }
             let label = agent.isMain ? "★ " + agent.title.label : agent.title.label
-            let heading = actor.place?.seat == agent.seat && actor.place?.team == agent.teamID
-            if plates[agent.teamID]?[agent.seat] == nil || heading {
-                plates[agent.teamID, default: [:]][agent.seat] = label
+            let seat = desk(of: agent)
+            let heading = actor.place?.seat == seat && actor.place?.team == agent.teamID
+            if plates[agent.teamID]?[seat] == nil || heading {
+                plates[agent.teamID, default: [:]][seat] = label
             }
         }
         return plates
@@ -455,7 +494,7 @@ public struct Stage: Sendable {
         var maxDesk = 0
         let row = layout.row(for: team)
         for actor in actors.values {
-            if actor.agent.teamID == team { maxDesk = max(maxDesk, actor.agent.seat.desk) }
+            if actor.agent.teamID == team { maxDesk = max(maxDesk, desk(of: actor.agent).desk) }
             if let place = actor.place, place.team == team, let seat = place.seat { maxDesk = max(maxDesk, seat.desk) }
             // 자리를 옮기라는 지시를 받았지만 아직 그 책상에 앉아 있거나 막 일어선 사람
             if let row, abs(actor.position.y - row.deskY) < 2 || abs(actor.position.y - (row.deskY - OfficeLayout.approachOffset)) < 2 {
@@ -743,7 +782,7 @@ public struct Stage: Sendable {
 
     // MARK: - 자리 정하기
 
-    private func resolve(_ spot: Spot, for id: AgentID) -> Place {
+    private func resolve(_ spot: Spot, for id: AgentID, agent: Agent? = nil) -> Place {
         func isFree(_ place: Place) -> Bool {
             guard let key = place.key else { return true }
             return reservations[key] == nil || reservations[key] == id
@@ -752,7 +791,8 @@ public struct Stage: Sendable {
         case .door:
             return Place(final: layout.doorPoint)
         case .seat(let teamID, let seat):
-            return layout.seat(teamID, seat)
+            // 자기 책상: 바꿔 앉힌 책상이 있으면 그 칸
+            return layout.seat(teamID, seatMap[id] ?? seat)
         case .beside(let other):
             guard let target = actors[other] else { return Place(final: layout.doorPoint) }
             let anchor = target.place?.approach ?? target.position
@@ -765,6 +805,9 @@ public struct Stage: Sendable {
                 ?? candidates.first { layout.isWalkable($0.final) }.map { Place(final: $0.final) }
                 ?? Place(final: anchor)
         case .whiteboard, .lounge, .massageChair, .pantry:
+            if config.commonAreasAtDesk, let agent = agent ?? actors[id]?.agent {
+                return layout.seat(agent.teamID, desk(of: agent))
+            }
             let zone = OfficeLayout.zone(for: spot)!
             // 정해진 자리가 다 차면 구역 가까이 흩어 섭니다 (한 점에 겹치지 않게)
             if let free = layout.slots(zone).first(where: isFree) { return free }

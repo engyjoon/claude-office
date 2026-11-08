@@ -106,6 +106,8 @@ public struct OfficeState: Sendable {
             break
 
         case .promptSubmitted:
+            parts[event.session]?.lastPromptAt = now
+            parts[event.session]?.completedAt = nil
             update(leadID) {
                 $0.consecutiveErrors = 0
                 $0.runningTools = []
@@ -115,6 +117,15 @@ public struct OfficeState: Sendable {
 
         case .toolStarted(let call):
             if let id = call.id, finishedToolIDSet.contains(id) { break }  // 이미 끝난 툴의 늦은 시작
+            if call.asksUser {
+                // 질문·계획 승인: 내가 답할 때까지(PostToolUse) 승인 대기와 같은 "답변 필요" (M5(4))
+                update(actorID) {
+                    $0.runningTools.append(call)
+                    $0.setActivity(.waitingForPermission(call), at: now)
+                }
+                beats.append(.permissionAsked(agents[actorID]!, call))
+                break
+            }
             update(actorID) {
                 $0.runningTools.append(call)
                 $0.setActivity(.working(call), at: now)
@@ -214,6 +225,7 @@ public struct OfficeState: Sendable {
                 $0.runningTools = []
                 $0.setActivity(.idle, at: now)
             }
+            parts[event.session]?.completedAt = now
             beats.append(.turnEnded(agents[leadID]!, failed: failed))
 
         case .compacting:

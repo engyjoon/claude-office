@@ -243,7 +243,11 @@ public struct StatusLine: Hashable, Sendable {
             case .tool(let call):
                 text = group.count > 1 ? "\(toolLabel(call)) \(group.count)개" : toolText(call) + Self.suffix(entry.state)
             case .permission(let call):
-                text = (call.map(toolText).map { $0 + " " } ?? "") + (entry.state == .denied ? "거부됨" : "승인 대기")
+                if let call, call.asksUser {
+                    text = entry.state == .denied ? "\(call.name) 거부됨" : call.waitLabel
+                } else {
+                    text = (call.map(toolText).map { $0 + " " } ?? "") + (entry.state == .denied ? "거부됨" : "승인 대기")
+                }
             case .delegated(let member, let title):
                 text = "\(name(member, fallback: title) ?? "서브")에게 위임"
             case .reported(let to, let title):

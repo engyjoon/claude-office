@@ -14,7 +14,7 @@ import OfficeStage
 //   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
 //       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
 //       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
-//       --mini 600 이면 미니 사무실(폭 600 패널의 한 행 띠, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
+//       --mini 390 이면 미니 사무실(폭 390 패널의 한 행 띠: 메인 + 서브 2명, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
 //       --pin <세션>으로 고정할 행을 정할 수 있습니다.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
@@ -34,7 +34,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 600 [--pin 세션]]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390 [--pin 세션]]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
         """)
     exit(2)
@@ -304,7 +304,7 @@ func snapshot(_ arguments: [String]) throws {
         guard miniWidth != nil else { return }
         let pinned = pinSession.flatMap { engine.state.lead(of: $0)?.teamID }
         let next = MiniFocus.next(
-            previous: focus, state: engine.state, journal: engine.journal, pinned: pinned, autoSwitch: true,
+            previous: focus, state: engine.state, pinned: pinned, autoSwitch: true,
             now: epoch.addingTimeInterval(time))
         if next.team != focus.team { floor.setSelection(.only(next.team), engine: engine) }
         focus = next
@@ -346,7 +346,7 @@ func snapshot(_ arguments: [String]) throws {
         if miniWidth != nil {
             let team = focus.team.flatMap { engine.state.teams[$0] }
             let main = focus.team.flatMap { engine.state.main(of: $0) }?.displayName ?? "메인"
-            print("          미니: \(team.map { "\(main) · \($0.name)" } ?? "(아무도 없음)") [\(focus.reason.rawValue)]")
+            print("          미니: \(team.map { "\(main) · \($0.name)" } ?? "(아무도 없음)") [\(focus.reason.rawValue)] 칸: \(floor.plan.seatMap.sorted { $0.value < $1.value }.compactMap { engine.state.agents[$0.key]?.displayName }.joined(separator: ", "))")
         }
         print("          \(summary.isEmpty ? "(아무도 없음)" : summary)")
         if floor.plan.hiddenCount > 0 { print("          화면에 다 못 보여 준 \(floor.plan.hiddenCount)명") }

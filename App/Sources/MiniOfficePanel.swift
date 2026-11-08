@@ -36,11 +36,11 @@ struct MiniOfficeSettings: Equatable {
     }
 }
 
-/// 미니 사무실 패널 (M5(4)): 화면 구석에 떠 있는 작은 창.
+/// 미니 사무실 패널 (M5(4) v2): 화면 구석에 떠 있는 작은 창.
 ///
 /// - 포커스를 빼앗지 않고(nonactivating), 모든 Space와 전체 화면 앱 위에도 보입니다.
-/// - 위 24pt는 머리줄(SwiftUI), 아래는 한 행 띠 사무실(SpriteKit, 배율 1). 높이는 고정이고 폭만 조절합니다.
-/// - 기본 위치는 화면 오른쪽 아래(가장자리에서 16pt). 디스플레이마다 마지막 위치·폭을 기억하고, 가장자리 40pt 안에 놓으면 붙입니다.
+/// - 위 24pt는 머리줄(SwiftUI), 아래는 메인 + 서브 2명 띠 사무실(SpriteKit, 배율 1). 크기는 390×204 고정입니다.
+/// - 기본 위치는 화면 오른쪽 아래(가장자리에서 16pt). 디스플레이마다 마지막 위치를 기억하고, 가장자리 40pt 안에 놓으면 붙입니다.
 @MainActor
 final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     static let title = "Claude Office 미니 사무실"
@@ -69,7 +69,7 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     func show() {
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        if !panel.isVisible { place(panel, frame: initialFrame(width: panel.frame.width)) }
+        if !panel.isVisible { place(panel, frame: initialFrame()) }
         panel.alphaValue = CGFloat(model?.miniSettings.opacity ?? 1)
         panel.orderFrontRegardless()
     }
@@ -82,22 +82,23 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         panel?.alphaValue = CGFloat(opacity)
     }
 
-    /// 설정의 "기본 위치로": 지금 화면의 오른쪽 아래, 기본 폭
+    /// 설정의 "기본 위치로": 지금 화면의 오른쪽 아래
     func resetPosition() {
         guard let panel else { return }
         if let id = Self.displayID(panel.screen) { UserDefaults.standard.removeObject(forKey: Self.frameKey(id)) }
-        place(panel, frame: defaultFrame(on: panel.screen ?? NSScreen.main, width: MiniOffice.defaultWidth))
+        place(panel, frame: defaultFrame(on: panel.screen ?? NSScreen.main))
         save()
     }
+
+    static var size: NSSize { NSSize(width: CGFloat(MiniOffice.panelWidth), height: CGFloat(MiniOffice.panelHeight)) }
 
     // MARK: - 만들기
 
     private func makePanel() -> NSPanel {
-        let height = CGFloat(MiniOffice.panelHeight)
-        let size = NSSize(width: CGFloat(MiniOffice.defaultWidth), height: height)
+        let size = Self.size
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable],
+            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
             backing: .buffered, defer: true)
         panel.title = Self.title
         panel.titleVisibility = .hidden
@@ -111,8 +112,8 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.isReleasedWhenClosed = false
-        panel.contentMinSize = NSSize(width: CGFloat(MiniOffice.minWidth), height: height)
-        panel.contentMaxSize = NSSize(width: 10_000, height: height)
+        panel.contentMinSize = size
+        panel.contentMaxSize = size
         panel.delegate = self
         if let model { panel.contentView = Self.content(model: model, size: size) }
         model?.miniScene.onWindowDragged = { [weak self] in self?.settle(after: 0) }
@@ -144,20 +145,19 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     private static func frameKey(_ id: UInt32) -> String { "mini.frame.\(id)" }
 
     /// 열 때: 지금 화면(메뉴바가 있는 화면)에서 기억해 둔 자리, 없거나 화면 밖이면 오른쪽 아래
-    private func initialFrame(width: CGFloat) -> NSRect {
+    private func initialFrame() -> NSRect {
         let screen = NSScreen.main ?? NSScreen.screens.first
         if let id = Self.displayID(screen), let saved = UserDefaults.standard.string(forKey: Self.frameKey(id)) {
-            var frame = NSRectFromString(saved)
-            frame.size.height = CGFloat(MiniOffice.panelHeight)
+            let frame = NSRect(origin: NSRectFromString(saved).origin, size: Self.size)
             if let visible = screen?.visibleFrame, visible.contains(frame) { return frame }
         }
-        return defaultFrame(on: screen, width: CGFloat(MiniOffice.defaultWidth))
+        return defaultFrame(on: screen)
     }
 
-    private func defaultFrame(on screen: NSScreen?, width: CGFloat) -> NSRect {
+    private func defaultFrame(on screen: NSScreen?) -> NSRect {
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let size = NSSize(width: min(width, visible.width - Self.margin * 2), height: CGFloat(MiniOffice.panelHeight))
-        return NSRect(x: visible.maxX - Self.margin - size.width, y: visible.minY + Self.margin, width: size.width, height: size.height)
+        return NSRect(
+            x: visible.maxX - Self.margin - Self.size.width, y: visible.minY + Self.margin, width: Self.size.width, height: Self.size.height)
     }
 
     private func place(_ panel: NSPanel, frame: NSRect) {
@@ -171,10 +171,10 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         guard let panel, panel.isVisible else { return }
         let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         guard !visible.contains(panel.frame) else { return }
-        place(panel, frame: initialFrame(width: panel.frame.width))
+        place(panel, frame: initialFrame())
     }
 
-    /// 옮기거나 폭을 바꾼 뒤 잠깐 기다렸다가(끄는 중이면 다시 미룸) 가장자리에 붙이고 저장합니다
+    /// 옮긴 뒤 잠깐 기다렸다가(끄는 중이면 다시 미룸) 가장자리에 붙이고 저장합니다
     private func settle(after delay: TimeInterval = 0.3) {
         settleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -222,48 +222,58 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// 미니 사무실 머리줄 (24pt): 지금 행(누르면 고정할 행 고르기), 다른 메인 칩(승인 대기 수), 승인 대기면 노랑 + [앱으로]/[터미널로], ✕
+/// 미니 사무실 머리줄 (24pt, v2): 지금 행(누르면 고정할 행 고르기)과 그 상태, 다른 메인 칩, [앱으로]/[터미널로], ✕
+///
+/// - 답변 필요: 노랑, "서브3 승인 대기 12초째" (질문이면 "질문 답 대기", 계획이면 "계획 승인 대기")
+/// - 완료: 초록, "✓ 응답 완료 · 2분 전". [앱으로]를 누르면 확인한 것으로 쳐서 다음 순위로 넘어갑니다.
+/// - 그 밖: "작업 중 · 요청 5분 전" / "쉬는 중 · 요청 1시간 전"
 struct MiniHeaderView: View {
     let model: AppModel
 
     private static let ink = Color(hex: 0x3A3247)
     private static let paper = Color(hex: 0xFFF8EC)
-    private static let maxChips = 3
+    private static let done = Color(hex: 0xCFEBD9)
+    private static let maxChips = 2
 
     var body: some View {
         let roster = model.roster
-        let current = roster.teams.first { $0.id == model.miniFocus.team }
-        let waitingHere = (current?.rows ?? []).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
+        let focus = model.miniFocus
+        let current = roster.teams.first { $0.id == focus.team }
+        let waiting = (current?.rows ?? []).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
+        let main = current?.rows.first(where: \.isMain)
         let others = roster.teams.filter { $0.id != current?.id }
-        HStack(spacing: 6) {
+            .sorted { Self.rank(focus.tiers[$0.id]) < Self.rank(focus.tiers[$1.id]) }
+        let button: RosterRow? = focus.tier == .answer ? waiting.first : focus.tier == .completed ? main : nil
+        HStack(spacing: 5) {
             teamMenu(current, roster: roster)
-            if let first = waitingHere.first {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(waitingText(first, count: waitingHere.count, now: context.date))
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                }
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(statusText(focus: focus, waiting: waiting, main: main, now: context.date))
+                    .font(.system(size: 10.5, weight: focus.tier == .answer || focus.tier == .completed ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            .layoutPriority(-1)
+            Spacer(minLength: 0)
             ForEach(others.prefix(Self.maxChips)) { team in
-                chip(team)
+                chip(team, tier: focus.tiers[team.id] ?? .none)
             }
             if others.count > Self.maxChips {
                 Text("+\(others.count - Self.maxChips)")
-                    .font(.system(size: 10.5))
-                    .padding(.horizontal, 6)
+                    .font(.system(size: 10))
+                    .padding(.horizontal, 5)
                     .background(Capsule().fill(.white))
                     .overlay(Capsule().stroke(Color(hex: 0xCFC6D9)))
                     .help(others.dropFirst(Self.maxChips).map(\.label).joined(separator: "\n"))
             }
-            Spacer(minLength: 0)
-            if let first = waitingHere.first, first.canFocus {
-                Button(first.hostSession != nil ? "앱으로" : "터미널로") { model.focusSession(of: first) }
+            if let row = button, row.canFocus {
+                Button(row.hostSession != nil ? "앱으로" : "터미널로") { model.openFromMiniHeader(row) }
                     .font(.system(size: 10.5, weight: .semibold))
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 7)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(.white))
-                    .overlay(Capsule().stroke(Color(hex: 0xE2B93B)))
+                    .overlay(Capsule().stroke(Color(hex: focus.tier == .answer ? 0xE2B93B : 0x5DBB7A)))
+                    .fixedSize()
             }
             Button {
                 model.setMiniEnabled(false)
@@ -276,9 +286,19 @@ struct MiniHeaderView: View {
         .foregroundStyle(Self.ink)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(waitingHere.isEmpty ? Self.paper : Palette.attention)
+        .background(focus.tier == .answer ? Palette.attention : focus.tier == .completed ? Self.done : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
+    }
+
+    /// 다른 메인 칩 순서: 답변 필요 → 완료 → 그 밖
+    private static func rank(_ tier: MiniFocus.Tier?) -> Int {
+        switch tier {
+        case .answer: 0
+        case .completed: 1
+        case .requested: 2
+        default: 3
+        }
     }
 
     private func teamMenu(_ current: RosterTeam?, roster: Roster) -> some View {
@@ -286,7 +306,8 @@ struct MiniHeaderView: View {
             Button {
                 model.pinMini(nil)
             } label: {
-                if model.miniPinned == nil { Label("자동 (승인 대기 → 최근 활동)", systemImage: "checkmark") } else { Text("자동 (승인 대기 → 최근 활동)") }
+                let title = "자동 (답변 필요 → 완료 → 최근 요청)"
+                if model.miniPinned == nil { Label(title, systemImage: "checkmark") } else { Text(title) }
             }
             if !roster.teams.isEmpty { Divider() }
             ForEach(roster.teams) { team in
@@ -308,37 +329,66 @@ struct MiniHeaderView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.visible)
         .fixedSize()
-        .help("미니 사무실에 보여 줄 메인 (고르면 고정, 자동이면 승인 대기 → 최근 활동 순)")
+        .help("미니 사무실에 보여 줄 메인 (고르면 고정, 자동이면 답변 필요 → 완료 → 최근 요청 순)")
     }
 
-    private func chip(_ team: RosterTeam) -> some View {
+    private func chip(_ team: RosterTeam, tier: MiniFocus.Tier) -> some View {
         let waiting = team.rows.filter { $0.status == .waitingForPermission }.count
+        let number = team.mainName.replacingOccurrences(of: "메인", with: "")
+        let (icon, fill, stroke): (String, Color, UInt32) = switch tier {
+        case .answer: ("?", Palette.attention, 0xE2B93B)
+        case .completed: ("✓", Self.done, 0x5DBB7A)
+        default: ("", .white, 0xCFC6D9)
+        }
         return Button {
             model.pinMini(team.id)
         } label: {
             HStack(spacing: 3) {
                 Circle().fill(Palette.team(team.colorIndex)).frame(width: 6, height: 6)
-                Text(team.mainName).font(.system(size: 10.5))
-                if waiting > 0 {
-                    Text("\(waiting)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .background(Capsule().fill(Color(hex: 0xE0A21B)))
-                }
+                Text(icon + (number.isEmpty ? "메인" : number)).font(.system(size: 10, weight: tier == .requested || tier == .none ? .regular : .bold))
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Capsule().fill(waiting > 0 ? Palette.attention : .white))
-            .overlay(Capsule().stroke(Color(hex: waiting > 0 ? 0xE2B93B : 0xCFC6D9)))
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().stroke(Color(hex: stroke)))
+            .fixedSize()
         }
         .buttonStyle(.plain)
-        .help("\(team.label) · \(team.rows.count)명\(waiting > 0 ? " · 승인 대기 \(waiting)" : "") (누르면 이 메인으로)")
+        .help("\(team.label) · \(team.rows.count)명\(Self.tierHelp(tier, waiting: waiting)) (누르면 이 메인으로 고정)")
     }
 
-    private func waitingText(_ row: RosterRow, count: Int, now: Date) -> String {
-        let elapsed = StatusLine.elapsed(now.timeIntervalSince(row.since)).map { " \($0)" } ?? ""
-        let more = count > 1 ? " 외 \(count - 1)명" : ""
-        return "\(row.title.label) 승인 대기\(elapsed)\(more)"
+    private static func tierHelp(_ tier: MiniFocus.Tier, waiting: Int) -> String {
+        switch tier {
+        case .answer: " · 답변 필요 \(waiting)명"
+        case .completed: " · 응답 완료"
+        case .requested: " · 작업 중"
+        case .none: ""
+        }
+    }
+
+    private func statusText(focus: MiniFocus, waiting: [RosterRow], main: RosterRow?, now: Date) -> String {
+        switch focus.tier {
+        case .answer:
+            guard let first = waiting.first else { return "답변 필요" }
+            let elapsed = StatusLine.elapsed(now.timeIntervalSince(first.since)).map { " \($0)" } ?? ""
+            let more = waiting.count > 1 ? " 외 \(waiting.count - 1)명" : ""
+            return "\(first.title.label) \(model.waitLabel(of: first.id))\(elapsed)\(more)"
+        case .completed:
+            return "✓ 응답 완료 · \(Self.ago(focus.tierAt, now: now))"
+        case .requested:
+            let resting = main.map { $0.status == .idle || $0.status == .waitingForInput } ?? false
+            return "\(resting ? "쉬는 중" : "작업 중") · 요청 \(Self.ago(focus.tierAt, now: now))"
+        case .none:
+            return ""
+        }
+    }
+
+    /// "방금", "3분 전", "2시간 전"
+    static func ago(_ date: Date?, now: Date) -> String {
+        guard let date else { return "" }
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if seconds < 60 { return "방금" }
+        if seconds < 3600 { return "\(seconds / 60)분 전" }
+        return "\(seconds / 3600)시간 전"
     }
 }

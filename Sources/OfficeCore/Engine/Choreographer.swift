@@ -775,6 +775,8 @@ public struct Choreographer: Sendable {
     }
 
     private func permissionLine(for call: ToolCall?) -> (String, [String: String]) {
+        if call?.name == "AskUserQuestion" { return ("permission.question", [:]) }
+        if call?.name == "ExitPlanMode" { return ("permission.plan", [:]) }
         guard privacy == .detailed, let call else { return ("permission.generic", [:]) }
         if call.category == .shell, let subject = call.subject {
             return ("permission.shell", ["subject": ToolCatalog.truncate(subject, 18)])

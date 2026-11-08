@@ -247,7 +247,8 @@ final class OfficeScene: SKScene {
 
         furniture.removeAllChildren()
         let height = stage.layout.height
-        let layers = OfficeArt.layers(layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent)
+        let layers = OfficeArt.layers(
+            layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk)
 
         // 바닥과 벽은 움직이지 않으므로 한 번 그려서 캐시합니다
         let background = SKEffectNode()

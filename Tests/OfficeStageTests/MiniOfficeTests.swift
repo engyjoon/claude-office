@@ -4,121 +4,186 @@ import Testing
 
 @testable import OfficeStage
 
-/// M5(4): 미니 사무실 — 한 행 띠(배율 1)와 보여 줄 행 고르기
+/// M5(4) v2: 미니 사무실 — 메인 + 쉬지 않는 서브 2명(배율 1, 휴게 공간 없음)과 보여 줄 행의 우선순위
 @Suite("미니 사무실")
 struct MiniOfficeTests {
-    func session(_ event: String, _ extra: String = "", _ session: String) -> String {
+    func on(_ event: String, _ extra: String = "", _ session: String) -> String {
         hook(event, extra, session: session, cwd: "/w/\(session)")
     }
 
-    func start(_ session: String) -> String { self.session("SessionStart", "", session) }
+    func start(_ session: String) -> String { on("SessionStart", "", session) }
+    func prompt(_ session: String) -> String { on("UserPromptSubmit", #""prompt":"x""#, session) }
+    func stop(_ session: String) -> String { on("Stop", "", session) }
 
-    func edit(_ session: String, _ id: String) -> String {
-        self.session("PreToolUse", #""tool_name":"Edit","tool_use_id":"\#(id)","tool_input":{"file_path":"/x/A.swift"}"#, session)
+    func edit(_ session: String, _ id: String, agent: String? = nil) -> String {
+        on("PreToolUse", #""tool_name":"Edit","tool_use_id":"\#(id)","tool_input":{"file_path":"/x/A.swift"}"# + agentField(agent), session)
     }
 
-    func bash(_ event: String, _ session: String, _ id: String) -> String {
-        self.session(event, #""tool_name":"Bash","tool_use_id":"\#(id)","tool_input":{"command":"npm test"}"#, session)
+    func toolHook(_ event: String, _ name: String, _ session: String, _ id: String, agent: String? = nil) -> String {
+        on(event, #""tool_name":"\#(name)","tool_use_id":"\#(id)","tool_input":{"command":"npm test"}"# + agentField(agent), session)
     }
 
-    func next(_ h: FloorHarness, _ previous: MiniFocus, pinned: TeamID? = nil, autoSwitch: Bool = true) -> MiniFocus {
+    func agentField(_ agent: String?) -> String {
+        agent.map { #","agent_id":"\#($0)","agent_type":"general-purpose""# } ?? ""
+    }
+
+    func delegate(_ session: String, _ id: String, agent: String) -> [String] {
+        [on("PreToolUse", #""tool_name":"Agent","tool_use_id":"\#(id)","tool_input":{"description":"일","subagent_type":"general-purpose"}"#, session),
+         on("SubagentStart", #""agent_id":"\#(agent)","agent_type":"general-purpose""#, session)]
+    }
+
+    func next(_ h: FloorHarness, _ previous: MiniFocus, pinned: TeamID? = nil, acknowledged: [SessionID: Date] = [:], autoSwitch: Bool = true,
+              after seconds: Double = 0) -> MiniFocus {
         MiniFocus.next(
-            previous: previous, state: h.engine.state, journal: h.engine.journal, pinned: pinned, autoSwitch: autoSwitch,
-            now: h.epoch.addingTimeInterval(h.now))
+            previous: previous, state: h.engine.state, pinned: pinned, acknowledged: acknowledged, autoSwitch: autoSwitch,
+            now: h.epoch.addingTimeInterval(h.now + seconds))
     }
 
-    @Test("패널 폭으로 책상 수를 센다 (배율 1, 최소 폭으로 올려 잡지 않음)")
-    func columns() {
-        #expect(MiniOffice.columns(panelWidth: MiniOffice.defaultWidth) == 5)
-        #expect(MiniOffice.columns(panelWidth: 700) == 6)
-        #expect(MiniOffice.columns(panelWidth: MiniOffice.minWidth) == 2)
+    static func band() -> FloorHarness {
+        FloorHarness(width: MiniOffice.visibleMapWidth(), height: OfficeLayout.minHeight, band: true)
+    }
+
+    @Test("패널 390×204: 메인 + 서브 2명 + \"+N\"이 배율 1로 들어감, 휴게 공간은 보이지 않음")
+    func size() {
+        let extent = MiniOffice.extent()
+        #expect(MiniOffice.panelWidth == 390 && MiniOffice.panelHeight == 204)
+        #expect(OfficeLayout.columns(width: MiniOffice.visibleMapWidth()) >= 1 + MiniOffice.subSlots)
+        #expect(extent.maxY == OfficeLayout.firstDeskY + 40)
+        #expect(extent.y > OfficeLayout.sofas[0].maxY)
         #expect(OfficeLayout.columns(width: 1140) == OfficeLayout.capacity(width: 1140, height: 708).columns)
-        // 보이는 영역: 휴게 공간부터 첫 행 아래까지, 높이 고정
-        let extent = MiniOffice.extent(panelWidth: 620)
-        #expect(extent.y < OfficeLayout.sofas[0].y && extent.maxY == OfficeLayout.firstDeskY + 40)
-        #expect(MiniOffice.panelHeight == MiniOffice.headerHeight + extent.height)
     }
 
-    @Test("한 행 띠: 고른 행만 첫 행 자리에 놓고, 넘친 서브는 +N")
-    func bandShowsOneRow() throws {
-        var h = FloorHarness(width: MiniOffice.visibleMapWidth(panelWidth: 620), height: OfficeLayout.minHeight, band: true)
-        h.hook(start("m1"))
-        h.hook(start("m2"), at: 0.5)
-        for index in 1...6 { h.hook(delegateHook("m1", "a\(index)").replacingOccurrences(of: "/w/a-sdn-portal", with: "/w/m1"), at: Double(index) * 0.3) }
-        h.hook(delegateHook("m2", "b1").replacingOccurrences(of: "/w/a-sdn-portal", with: "/w/m2"), at: 3)
-        h.run(until: 30)
-        let (m1, m2) = (h.team("m1"), h.team("m2"))
+    @Test("서브 2칸: 쉬는 서브는 빼고, 칸은 지키고, 답변을 기다리는 서브가 가장 오래 조용한 칸을 넘겨받음")
+    func castSlots() throws {
+        var h = Self.band()
+        h.hook(start("m"))
+        let team = h.team("m")
+        h.select(.only(team))
+        h.hook(prompt("m"), at: 0.5)
+        for (index, agent) in ["g1", "g2", "g3"].enumerated() {
+            for json in delegate("m", "a\(index + 1)", agent: agent) { h.hook(json, at: 1 + Double(index)) }
+        }
+        // 서브 세션 c1: 요청을 받고 끝내서 쉬는 중
+        h.hook(start("c1").replacingOccurrences(of: "/w/c1", with: "/w/m"), hint: SessionHint(ancestors: [SessionID("m")]), at: 4)
+        h.hook(prompt("c1"), at: 4.5)
+        h.hook(stop("c1"), at: 5)
+        h.hook(edit("m", "e1", agent: "g1"), at: 6)
+        h.hook(edit("m", "e2", agent: "g2"), at: 7)
+        h.hook(edit("m", "e3", agent: "g3"), at: 8)
+        h.run(until: 20)
 
-        h.select(.only(m2))
-        #expect(h.stage.layout.rows.map(\.team) == [m2])
-        #expect(h.stage.layout.rows[0].deskY == OfficeLayout.firstDeskY)
-        #expect(h.stage.actors.count == 2)
-        #expect(h.floor.plan.hiddenCount == 0)
-
-        h.select(.only(m1))
-        h.run(until: 40)
-        #expect(h.stage.layout.rows.map(\.team) == [m1])
-        #expect(h.stage.actors.count == 5)
+        let names = { (map: [AgentID: Seat]) in map.sorted { $0.value < $1.value }.map { h.engine.state.agents[$0.key]!.displayName } }
+        // 먼저 칸을 받은 서브1·2가 그대로 (서브3은 일해도 숨김, 쉬는 서브4는 숨김)
+        #expect(names(h.floor.plan.seatMap) == ["서브1", "서브2"])
+        #expect(h.stage.actors.count == 3)
         #expect(h.floor.plan.hiddenCount == 2)
-        #expect(h.stage.hiddenCounts[m1] == 2)
-        // 보이는 사람은 모두 패널 안, 출입문은 패널 오른쪽 밖 (사무실과 같은 배치)
-        let extent = MiniOffice.extent(panelWidth: 620)
-        for actor in h.stage.actors.values { #expect(extent.contains(actor.position)) }
-        #expect(h.stage.layout.doorX > extent.maxX)
+        #expect(h.stage.hiddenCounts[team] == 2)
+        #expect(h.stage.layout.rows[0].desks == 3)
+        #expect(h.stage.nameplates[team]?[Seat(desk: 2)] == "서브2")
 
-        h.select(.only(nil))
-        #expect(h.stage.actors.isEmpty)
+        // 숨은 서브3이 승인 대기 → 가장 오래 조용한 서브1(칸 1)의 칸을 넘겨받고 걸어 들어옴
+        h.hook(toolHook("PermissionRequest", "Bash", "m", "b1", agent: "g3"), at: 21)
+        h.run(until: 40)
+        #expect(names(h.floor.plan.seatMap) == ["서브3", "서브2"])
+        let g3 = try #require(h.stage.actors.values.first { $0.agent.subagentID == "g3" })
+        #expect(g3.position == h.stage.layout.seat(team, Seat(desk: 1)).final)
+        #expect(h.stage.nameplates[team]?[Seat(desk: 1)] == "서브3")
+
+        // 서브2가 퇴근하면 빈 칸 2는 일하는 서브1이 받음 (쉬는 서브4는 받지 않음)
+        h.hook(on("SubagentStop", #""agent_id":"g2","agent_type":"general-purpose""#, "m"), at: 41)
+        h.run(until: 70)
+        #expect(names(h.floor.plan.seatMap) == ["서브3", "서브1"])
+        let g1 = try #require(h.stage.actors.values.first { $0.agent.subagentID == "g1" })
+        #expect(g1.position == h.stage.layout.seat(team, Seat(desk: 2)).final)
+        #expect(h.stage.actors.values.allSatisfy { MiniOffice.extent().contains($0.position) })
     }
 
-    @Test("보여 줄 행: 승인 대기 > 고정 > 최근 활동, 조용해질 때까지 바꾸지 않음")
-    func focusRules() throws {
+    @Test("미니에서는 쉬러 소파에 가지 않고 자기 책상에서 쉼 (사무실 창은 소파로)")
+    func restsAtDesk() throws {
+        var band = Self.band()
+        var office = FloorHarness()
+        for h in [0, 1] {
+            func drive(_ harness: inout FloorHarness) {
+                harness.hook(start("m"))
+                harness.hook(prompt("m"), at: 0.5)
+                harness.hook(stop("m"), at: 2)
+                if harness.floor.isBand { harness.select(.only(harness.team("m"))) }
+                harness.run(until: 120)
+            }
+            if h == 0 { drive(&band) } else { drive(&office) }
+        }
+        let team = band.team("m")
+        let main = try #require(band.stage.actors.values.first)
+        #expect(main.position == band.stage.layout.seat(team, .main).final)
+        #expect(main.loungeSeat == nil)
+        let officeMain = try #require(office.stage.actors.values.first)
+        #expect(officeMain.position != office.stage.layout.seat(office.team("m"), .main).final)
+        // 휴게 공간 그림도 그리지 않음
+        let names = OfficeArt.layers(layout: band.stage.layout, teams: band.stage.sortedTeams, lounge: false).map(\.name)
+        #expect(!names.contains { $0.hasPrefix("sofa") || $0.hasPrefix("massage") })
+    }
+
+    @Test("질문(AskUserQuestion)·계획 승인(ExitPlanMode)은 답할 때까지 답변 필요")
+    func questionNeedsAnswer() throws {
+        var h = FloorHarness()
+        h.hook(start("m"))
+        h.hook(prompt("m"), at: 0.5)
+        _ = h.engine.drainNotices()
+        h.hook(toolHook("PreToolUse", "AskUserQuestion", "m", "q1"), at: 1)
+        let main = try #require(h.engine.state.main(of: h.team("m")))
+        #expect(MiniCast.needsAnswer(main))
+        let row = try #require(Roster.make(from: h.engine.state, privacy: .detailed).waiting.first)
+        #expect(row.detail == "질문에 답해 주세요")
+        let titles = h.engine.drainNotices().compactMap { if case .post(let notice) = $0 { notice.title } else { nil } }
+        #expect(titles == ["메인 질문 답 대기"])
+        h.hook(toolHook("PostToolUse", "AskUserQuestion", "m", "q1"), at: 5)
+        #expect(!MiniCast.needsAnswer(h.engine.state.main(of: h.team("m"))!))
+        h.hook(toolHook("PreToolUse", "ExitPlanMode", "m", "p1"), at: 6)
+        #expect(MiniCast.needsAnswer(h.engine.state.main(of: h.team("m"))!))
+    }
+
+    @Test("보여 줄 행: 답변 필요 > 고정 > 완료(10분, 확인 전) > 가장 마지막에 요청")
+    func focusPriority() throws {
         var h = FloorHarness()
         #expect(next(h, .empty).team == nil)
-        h.hook(start("m1"))
-        h.hook(start("m2"), at: 0.5)
-        h.hook(edit("m1", "e1"), at: 1)
-        h.hook(edit("m2", "e2"), at: 5)
-        let (m1, m2) = (h.team("m1"), h.team("m2"))
+        for (index, session) in ["m1", "m2", "m3"].enumerated() {
+            h.hook(start(session), at: Double(index) * 0.1)
+            h.hook(prompt(session), at: 1 + Double(index))
+        }
+        let (m1, m2, m3) = (h.team("m1"), h.team("m2"), h.team("m3"))
 
-        // 최근 활동: 가장 최근에 일한 행
-        h.run(until: 6)
+        // 가장 마지막에 요청한 행
         var focus = next(h, .empty)
-        #expect(focus.team == m2 && focus.reason == .recent)
-        // 다른 행이 일해도 지금 행이 최근 20초 안에 일했으면 그대로
-        h.hook(edit("m1", "e3"), at: 7)
-        h.run(until: 12)
-        focus = next(h, focus)
-        #expect(focus.team == m2)
-        // 지금 행이 20초 넘게 조용하면 최근에 일한 행으로
-        h.run(until: 30)
-        focus = next(h, focus)
-        #expect(focus.team == m1)
-        let switched = focus.since
-        #expect(switched == h.epoch.addingTimeInterval(30))
+        #expect(focus.team == m3 && focus.reason == .requested)
 
-        // 고정한 행이 최근 활동보다 먼저
-        #expect(next(h, focus, pinned: m2).team == m2)
-        #expect(next(h, focus, pinned: m2).reason == .pinned)
+        // 완료한 행이 먼저
+        h.hook(stop("m1"), at: 5)
+        focus = next(h, focus)
+        #expect(focus.team == m1 && focus.reason == .completed)
+        #expect(focus.tierAt == h.epoch.addingTimeInterval(5))
+        #expect(focus.tiers == [m1: .completed, m2: .requested, m3: .requested])
 
-        // 승인 대기는 고정보다 먼저 (자동 전환을 켰을 때만)
-        h.hook(bash("PreToolUse", "m2", "b1"), at: 31)
-        h.hook(bash("PermissionRequest", "m2", "b1"), at: 31.1)
-        focus = next(h, focus, pinned: m1)
-        #expect(focus.team == m2 && focus.reason == .waiting)
-        #expect(next(h, focus, pinned: m1, autoSwitch: false).team == m1)
-        // 다른 행도 대기를 시작해도 지금 보는 행에 대기가 남아 있으면 그대로
-        h.hook(bash("PreToolUse", "m1", "b2"), at: 32)
-        h.hook(bash("PermissionRequest", "m1", "b2"), at: 32.1)
-        focus = next(h, focus, pinned: m1)
-        #expect(focus.team == m2 && focus.reason == .waiting)
-        // 지금 행의 대기가 풀리면 남은 대기의 행으로
-        h.hook(bash("PostToolUse", "m2", "b1"), at: 33)
+        // 답변 필요가 가장 먼저 (고정보다도), 자동 전환을 끄면 고정
+        h.hook(toolHook("PreToolUse", "AskUserQuestion", "m2", "q1"), at: 6)
+        focus = next(h, focus, pinned: m3)
+        #expect(focus.team == m2 && focus.reason == .answer && focus.tiers[m2] == .answer)
+        #expect(next(h, focus, pinned: m3, autoSwitch: false).team == m3)
+        #expect(next(h, focus, pinned: m3, autoSwitch: false).reason == .pinned)
+
+        // 답하면 다시 완료한 행
+        h.hook(toolHook("PostToolUse", "AskUserQuestion", "m2", "q1"), at: 7)
         focus = next(h, focus)
-        #expect(focus.team == m1 && focus.reason == .waiting)
-        // 모두 풀리면 최근 활동 (머무름 시간은 대기에서 돌아올 때 적용하지 않음)
-        h.hook(bash("PostToolUse", "m1", "b2"), at: 34)
-        h.hook(edit("m2", "e4"), at: 35)
+        #expect(focus.team == m1 && focus.reason == .completed)
+
+        // 확인했거나 10분이 지나면 완료로 보지 않음 → 가장 마지막에 요청한 행
+        let done = try #require(h.engine.state.parts[SessionID("m1")]?.completedAt)
+        #expect(next(h, focus, acknowledged: [SessionID("m1"): done]).team == m3)
+        #expect(next(h, focus, after: MiniFocus.completionWindow + 1).team == m3)
+
+        // 완료한 메인에 다음 요청을 보내면 가장 마지막에 요청한 행
+        h.hook(prompt("m1"), at: 8)
+        #expect(h.engine.state.parts[SessionID("m1")]?.completedAt == nil)
         focus = next(h, focus)
-        #expect(focus.team == m2 && focus.reason == .recent)
+        #expect(focus.team == m1 && focus.reason == .requested)
     }
 }

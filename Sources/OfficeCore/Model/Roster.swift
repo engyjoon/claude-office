@@ -209,6 +209,7 @@ public struct Roster: Hashable, Sendable {
             return call.subject ?? call.name
         case .waitingForPermission(let call):
             guard let call else { return "승인이 필요해요" }
+            if call.asksUser { return call.waitRequest }
             return call.subject.map { "\(call.name) · \($0)" } ?? call.name
         default:
             return agent.role == .member ? agent.task : nil

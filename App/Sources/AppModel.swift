@@ -60,6 +60,8 @@ final class AppModel {
     /// 미니 사무실 (M5(4)): 지금 보여 주는 행과 그 까닭, 사용자가 고정한 행, 설정
     private(set) var miniFocus: MiniFocus = .empty
     private(set) var miniPinned: TeamID?
+    /// 미니에서 확인한 완료 (세션 → 확인한 완료 시각). 확인한 완료는 우선순위 ②에서 내려갑니다.
+    private(set) var miniAcknowledged: [SessionID: Date] = [:]
     private(set) var miniSettings: MiniOfficeSettings
 
     @ObservationIgnored private var engine: OfficeEngine
@@ -118,7 +120,7 @@ final class AppModel {
         miniSettings = mini
         miniStore.privacy = saved
         miniStore.floor = OfficeFloor(
-            selection: .nobody, width: MiniOffice.visibleMapWidth(panelWidth: MiniOffice.defaultWidth), height: OfficeLayout.minHeight,
+            selection: .nobody, width: MiniOffice.visibleMapWidth(), height: OfficeLayout.minHeight,
             band: true)
         miniScene = OfficeScene(store: miniStore, framing: .band(top: MiniOffice.top))
         officeScene.onSelect = { [weak self] id in self?.select(id) }
@@ -403,14 +405,30 @@ final class AppModel {
 
     // MARK: - 미니 사무실 (M5(4))
 
-    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 승인 대기 → 고정한 행 → 최근 활동
+    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 답변 필요 → 고정한 행 → 완료 → 가장 마지막에 요청
     private func refreshMiniFocus(now: Date = Date()) {
         if let pinned = miniPinned, engine.state.teams[pinned] == nil { miniPinned = nil }
+        miniAcknowledged = miniAcknowledged.filter { engine.state.parts[$0.key]?.completedAt == $0.value }
         let next = MiniFocus.next(
-            previous: miniFocus, state: engine.state, journal: engine.journal, pinned: miniPinned,
+            previous: miniFocus, state: engine.state, pinned: miniPinned, acknowledged: miniAcknowledged,
             autoSwitch: miniSettings.autoSwitch, now: now)
         if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
         if next != miniFocus { miniFocus = next }
+    }
+
+    /// 미니 머리줄의 [앱으로]/[터미널로]: 그 세션으로 가고, 완료였으면 확인한 것으로 칩니다
+    func openFromMiniHeader(_ row: RosterRow) {
+        focusSession(of: row)
+        if let done = engine.state.parts[row.session]?.completedAt, row.isMain {
+            miniAcknowledged[row.session] = done
+            refreshMiniFocus()
+        }
+    }
+
+    /// 답변을 기다리는 까닭 ("승인 대기", "질문 답 대기", "계획 승인 대기")
+    func waitLabel(of id: AgentID) -> String {
+        if case .waitingForPermission(let call) = engine.state.agents[id]?.activity { return call?.waitLabel ?? "승인 대기" }
+        return "승인 대기"
     }
 
     /// 머리줄에서 행을 고르면 그 행으로 고정 (nil이면 자동)

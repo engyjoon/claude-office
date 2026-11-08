@@ -15,7 +15,8 @@ public enum SVGRenderer {
         var overlay = overlay
         if crop != nil, overlay != nil, overlay?.bounds == nil { overlay?.bounds = extent }
         var body = ""
-        let layers = OfficeArt.layers(layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent)
+        let layers = OfficeArt.layers(
+            layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk)
             + OfficeArt.liveLayers(stage: stage)
 
         for layer in layers where layer.depth == -.infinity {

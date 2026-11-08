@@ -260,4 +260,8 @@ public struct Part: Hashable, Sendable {
     public internal(set) var title: String?
     /// Claude 데스크톱 앱 세션 id (`local_…`). 터미널 CLI 세션은 nil. 알림을 누르면 데스크톱 앱으로 갈지 정합니다 (M5(3)).
     public internal(set) var hostSession: String?
+    /// 마지막으로 요청(UserPromptSubmit)을 받은 때 (미니 사무실 "가장 마지막에 요청한 세션", M5(4))
+    public internal(set) var lastPromptAt: Date?
+    /// 응답을 끝낸 때(Stop). 다음 요청이 오면 지웁니다 (미니 사무실 "완료한 세션", M5(4))
+    public internal(set) var completedAt: Date?
 }

@@ -11,6 +11,8 @@
   "permission.shell": ["{subject} 실행해도 될까요?", "{subject} 해도 돼요?"],
   "permission.tool": ["{tool} 써도 될까요?", "{tool} 해도 돼요?"],
   "permission.generic": ["이거 해도 될까요?", "승인 부탁드려요!"],
+  "permission.question": ["여쭤볼 게 있어요!", "답을 알려 주세요"],
+  "permission.plan": ["계획 봐 주세요!", "이대로 진행할까요?"],
   "permission.denied": ["앗, 알겠어요", "다른 방법을 찾아볼게요"],
   "error.tool": ["어라…?", "앗, 다시 해볼게요", "이상하네요…"],
   "error.repeated": ["으으…", "잘 안 되네요…", "조금만 더 해볼게요"],
