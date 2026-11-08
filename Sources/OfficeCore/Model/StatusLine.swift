@@ -7,6 +7,9 @@ import Foundation
 /// - 아무도 안 골랐으면 고른 디렉토리(모두면 전체) 사람들의 최근 일 ("방금: 서브1이 auth.ts 편집 · 메인이 서브2에게 위임").
 ///   새 일이 왼쪽에 오고 오래된 것은 오른쪽에서 잘립니다.
 /// - 표시 수준이 상세가 아니면 파일명·명령을 숨기고 도구 종류만 씁니다. 에이전트 종류는 쓰지 않고 직함만 씁니다.
+/// - 디렉토리 드롭다운이 "모두"면 어느 디렉토리 일인지 폴더 이름을 붙입니다 (M5(7a), 서브 번호는 메인마다 따로라서):
+///   고른 사람 줄은 맨 앞 "claude-office · 메인1 …", 사무실 줄은 디렉토리가 바뀌는 항목마다 "claude-office · 서브1이 …".
+///   디렉토리를 하나 골랐으면 바로 위 드롭다운에 이미 보이므로 붙이지 않습니다.
 /// 경과 시간은 화면이 `since`로 붙입니다 (이 값은 시간에 따라 바뀌지 않음).
 public struct StatusLine: Hashable, Sendable {
     public enum Mode: Hashable, Sendable {
@@ -31,16 +34,23 @@ public struct StatusLine: Hashable, Sendable {
         public var tone: Tone
         /// 진행 중이면 시작 시각. 화면이 "(12초째)"를 붙입니다.
         public var since: Date?
+        /// 이 항목 앞에 붙일 디렉토리 이름 (사무실 줄, "모두"일 때 디렉토리가 바뀌는 항목에만. 길면 줄인 것)
+        public var folder: String?
+        /// 그 디렉토리 행의 색 (화면의 점, 퇴근한 행이면 nil)
+        public var colorIndex: Int?
 
-        public init(text: String, tone: Tone = .normal, since: Date? = nil) {
+        public init(text: String, tone: Tone = .normal, since: Date? = nil, folder: String? = nil, colorIndex: Int? = nil) {
             self.text = text
             self.tone = tone
             self.since = since
+            self.folder = folder
+            self.colorIndex = colorIndex
         }
 
         public func text(now: Date) -> String {
-            guard let since, let elapsed = StatusLine.elapsed(now.timeIntervalSince(since)) else { return text }
-            return "\(text) (\(elapsed))"
+            let prefix = folder.map { "\($0) · " } ?? ""
+            guard let since, let elapsed = StatusLine.elapsed(now.timeIntervalSince(since)) else { return prefix + text }
+            return "\(prefix)\(text) (\(elapsed))"
         }
     }
 
@@ -49,14 +59,17 @@ public struct StatusLine: Hashable, Sendable {
     public var head: String?
     /// 고른 사람의 행 색 (화면의 점)
     public var colorIndex: Int?
+    /// 고른 사람 줄 맨 앞 디렉토리 이름 ("모두"일 때만, 길면 줄인 것)
+    public var folder: String?
     public var segments: [Segment]
     /// 다 못 보여 준 오래된 동작이 있는지 (에이전트: 앞쪽, 사무실: 뒤쪽)
     public var truncated: Bool
 
-    public init(mode: Mode, head: String?, colorIndex: Int? = nil, segments: [Segment], truncated: Bool = false) {
+    public init(mode: Mode, head: String?, colorIndex: Int? = nil, folder: String? = nil, segments: [Segment], truncated: Bool = false) {
         self.mode = mode
         self.head = head
         self.colorIndex = colorIndex
+        self.folder = folder
         self.segments = segments
         self.truncated = truncated
     }
@@ -70,7 +83,15 @@ public struct StatusLine: Hashable, Sendable {
     public func text(now: Date) -> String {
         var body = segments.map { $0.text(now: now) }.joined(separator: separator)
         if truncated { body = mode == .agent ? "… " + body : body + " …" }
-        return [head.map { mode == .office ? "\($0):" : $0 }, body].compactMap { $0 }.joined(separator: " ")
+        return [folder.map { "\($0) ·" }, head.map { mode == .office ? "\($0):" : $0 }, body].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// 줄에 붙이는 디렉토리 이름의 최대 글자 수 (넘으면 앞쪽을 남기고 "…")
+    public static let maxFolderLength = 16
+
+    /// "claude-office" → 그대로, "very-long-directory-name" → "very-long-direc…"
+    public static func shortFolder(_ name: String) -> String {
+        name.count > maxFolderLength ? String(name.prefix(maxFolderLength - 1)) + "…" : name
     }
 
     public static let empty = StatusLine(mode: .office, head: nil, segments: [])
@@ -99,14 +120,16 @@ public struct StatusLine: Hashable, Sendable {
         state: OfficeState, journal: ActivityJournal, privacy: PrivacyLevel, selected: AgentID?, folder: String?
     ) -> StatusLine {
         if let selected, let agent = state.agents[selected] {
-            return agentLine(agent, state: state, journal: journal, privacy: privacy)
+            return agentLine(agent, state: state, journal: journal, privacy: privacy, showsFolder: folder == nil)
         }
         return officeLine(state: state, journal: journal, privacy: privacy, folder: folder)
     }
 
     // MARK: 고른 사람
 
-    static func agentLine(_ agent: Agent, state: OfficeState, journal: ActivityJournal, privacy: PrivacyLevel) -> StatusLine {
+    static func agentLine(
+        _ agent: Agent, state: OfficeState, journal: ActivityJournal, privacy: PrivacyLevel, showsFolder: Bool = true
+    ) -> StatusLine {
         let words = Words(state: state, privacy: privacy)
         let groups = agentGroups(agent.id, journal: journal, words: words)
         var segments = groups.suffix(maxAgentSegments).map { words.agentSegment($0) }
@@ -115,6 +138,7 @@ public struct StatusLine: Hashable, Sendable {
         }
         return StatusLine(
             mode: .agent, head: agent.displayName, colorIndex: state.teams[agent.teamID]?.colorIndex,
+            folder: showsFolder ? state.teams[agent.teamID].map { shortFolder($0.name) } : nil,
             segments: segments, truncated: groups.count > maxAgentSegments)
     }
 
@@ -160,17 +184,52 @@ public struct StatusLine: Hashable, Sendable {
             }
         }
         if !groups.isEmpty {
+            let segments = groups.prefix(maxOfficeSegments).map { group in
+                labeled(words.officeSegment(group), team: state.agents[group.first.agent].flatMap { state.teams[$0.teamID] },
+                        folder: group.first.folder)
+            }
             return StatusLine(
-                mode: .office, head: "방금", segments: groups.prefix(maxOfficeSegments).map { words.officeSegment($0) },
+                mode: .office, head: "방금", segments: folderLabels(segments, show: folder == nil),
                 truncated: groups.count > maxOfficeSegments)
         }
         // 기록이 없으면 (생각만 하는 중) 지금 상태로
         let busy = people.filter { RosterStatus.from($0.activity).tone != .calm }.sorted { ($0.teamID, $0.seat) < ($1.teamID, $1.seat) }
         let segments = busy.prefix(maxOfficeSegments).map { agent in
             let status = RosterStatus.from(agent.activity)
-            return Segment(text: "\(agent.displayName) \(status.label)", tone: status == .waitingForPermission ? .attention : .normal)
+            return labeled(
+                Segment(text: "\(agent.displayName) \(status.label)", tone: status == .waitingForPermission ? .attention : .normal),
+                team: state.teams[agent.teamID], folder: nil)
         }
-        return StatusLine(mode: .office, head: "지금", segments: Array(segments), truncated: busy.count > maxOfficeSegments)
+        return StatusLine(
+            mode: .office, head: "지금", segments: folderLabels(Array(segments), show: folder == nil),
+            truncated: busy.count > maxOfficeSegments)
+    }
+
+    /// 항목에 그 사람의 디렉토리 이름과 행 색을 달아 둡니다 (퇴근했으면 기록할 때 폴더의 이름, 색 없음)
+    private static func labeled(_ segment: Segment, team: Team?, folder: String?) -> Segment {
+        var segment = segment
+        if let team {
+            segment.folder = shortFolder(team.name)
+            segment.colorIndex = team.colorIndex
+        } else if let folder {
+            segment.folder = shortFolder(URL(fileURLWithPath: folder).lastPathComponent)
+        }
+        return segment
+    }
+
+    /// "모두"면 앞 항목과 디렉토리가 같을 때 이름을 지우고(디렉토리가 바뀌는 항목에만), 디렉토리를 하나 골랐으면 모두 지웁니다
+    private static func folderLabels(_ segments: [Segment], show: Bool) -> [Segment] {
+        var previous: String?
+        return segments.enumerated().map { index, segment in
+            var segment = segment
+            let current = segment.folder
+            if !show || (index > 0 && current == previous) {
+                segment.folder = nil
+                segment.colorIndex = nil
+            }
+            previous = current
+            return segment
+        }
     }
 
     // MARK: - 묶음

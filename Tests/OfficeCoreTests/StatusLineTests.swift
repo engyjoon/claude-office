@@ -53,14 +53,14 @@ struct StatusLineTests {
     @Test("고른 사람: 직함으로 시작하고 같은 도구는 묶고 진행 중인 동작에 경과 시간")
     func agentFlow() {
         let office = working()
-        #expect(office.text(selected: office.main, at: 32) == "메인 Read 3개 → Edit auth.ts → Bash npm test (12초째)")
+        #expect(office.text(selected: office.main, at: 32) == "a-sdn-portal · 메인 Read 3개 → Edit auth.ts → Bash npm test (12초째)")
         let line = office.line(selected: office.main)
         #expect(line.mode == .agent)
         #expect(line.head == "메인")
         #expect(line.hasRunning)
         #expect(line.segments.map(\.tone) == [.normal, .normal, .normal])
         // 1초가 안 되면 경과 시간을 붙이지 않습니다
-        #expect(office.text(selected: office.main, at: 20.5) == "메인 Read 3개 → Edit auth.ts → Bash npm test")
+        #expect(office.text(selected: office.main, at: 20.5) == "a-sdn-portal · 메인 Read 3개 → Edit auth.ts → Bash npm test")
     }
 
     @Test("끝난 동작은 경과 시간이 없고, 같은 도구라도 사이에 다른 도구가 끼면 따로")
@@ -70,7 +70,7 @@ struct StatusLineTests {
         office.send(hook.tool("PreToolUse", "Grep", id: "g1", input: ["pattern": "TODO"]))
         office.send(hook.tool("PostToolUse", "Grep", id: "g1", input: ["pattern": "TODO"], extra: [("tool_response", [:])]))
         for payload in read("r2", "b.ts") + read("r3", "c.ts") { office.send(payload) }
-        #expect(office.text(selected: office.main, at: 100) == "메인 Read a.ts → Grep \"TODO\" → Read 2개")
+        #expect(office.text(selected: office.main, at: 100) == "a-sdn-portal · 메인 Read a.ts → Grep \"TODO\" → Read 2개")
         #expect(!office.line(selected: office.main).hasRunning)
     }
 
@@ -87,7 +87,7 @@ struct StatusLineTests {
         #expect(line.segments.count == StatusLine.maxAgentSegments)
         #expect(line.segments.first?.text == "Glob")
         #expect(line.segments.last?.text == "Write")
-        #expect(office.text(selected: office.main).hasPrefix("메인 … Glob → Edit"))
+        #expect(office.text(selected: office.main).hasPrefix("a-sdn-portal · 메인 … Glob → Edit"))
     }
 
     @Test("승인 대기는 노랑, 실패·거부는 빨강")
@@ -100,7 +100,7 @@ struct StatusLineTests {
         var line = office.line(selected: office.main)
         #expect(line.segments.map(\.text) == ["Bash npm test 실패", "Bash rm -rf build 승인 대기"])
         #expect(line.segments.map(\.tone) == [.error, .attention])
-        #expect(office.text(selected: office.main, at: 15) == "메인 Bash npm test 실패 → Bash rm -rf build 승인 대기 (5초째)")
+        #expect(office.text(selected: office.main, at: 15) == "a-sdn-portal · 메인 Bash npm test 실패 → Bash rm -rf build 승인 대기 (5초째)")
 
         office.send(hook.tool("PermissionDenied", "Bash", id: "b2", input: ["command": "rm -rf build"]))
         line = office.line(selected: office.main)
@@ -122,22 +122,22 @@ struct StatusLineTests {
         office.send(hook.make("SubagentStart", ["agent_id": "r1", "agent_type": "code-reviewer"]))
         office.send(hook.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/w/auth.ts"], agent: reviewer), at: 5)
         let sub = try #require(office.engine.state.member(subagentID: "r1", in: SessionID("s1"))).id
-        #expect(office.text(selected: office.main, at: 6) == "메인 서브에게 위임 (5초째)")
-        #expect(office.text(selected: sub, at: 6) == "서브 Edit auth.ts (1초째)")
+        #expect(office.text(selected: office.main, at: 6) == "a-sdn-portal · 메인 서브에게 위임 (5초째)")
+        #expect(office.text(selected: sub, at: 6) == "a-sdn-portal · 서브 Edit auth.ts (1초째)")
         // 에이전트 종류(code-reviewer)와 맡긴 일은 현황 줄에 쓰지 않습니다
         #expect(!office.text(selected: sub).contains("code-reviewer"))
         #expect(!office.text(selected: office.main).contains("비밀"))
 
         office.send(hook.make("SubagentStop", ["agent_id": "r1", "agent_type": "code-reviewer"]), at: 9)
-        #expect(office.text(selected: office.main, at: 30) == "메인 서브에게 위임")
-        #expect(office.text(at: 30) == "방금: 서브가 메인에게 보고 · 서브가 auth.ts 편집 · 메인이 서브에게 위임")
+        #expect(office.text(selected: office.main, at: 30) == "a-sdn-portal · 메인 서브에게 위임")
+        #expect(office.text(at: 30) == "방금: a-sdn-portal · 서브가 메인에게 보고 · 서브가 auth.ts 편집 · 메인이 서브에게 위임")
     }
 
     @Test("고른 사람이 아직 아무것도 안 했으면 지금 상태")
     func noHistory() {
         var office = Office()
         office.send(hook.make("UserPromptSubmit", ["prompt": "안녕"]))
-        #expect(office.text(selected: office.main) == "메인 생각 중")
+        #expect(office.text(selected: office.main) == "a-sdn-portal · 메인 생각 중")
         #expect(office.line(selected: office.main).segments.first?.tone == .muted)
     }
 
@@ -146,9 +146,9 @@ struct StatusLineTests {
     @Test("요약·비공개면 파일명과 명령을 숨기고 도구 종류만", arguments: [PrivacyLevel.summary, .hidden])
     func privacy(_ level: PrivacyLevel) {
         let office = working()
-        #expect(office.text(level, selected: office.main, at: 32) == "메인 Read 3개 → Edit → Bash (12초째)")
+        #expect(office.text(level, selected: office.main, at: 32) == "a-sdn-portal · 메인 Read 3개 → Edit → Bash (12초째)")
         let feed = office.text(level, at: 32)
-        #expect(feed == "방금: 메인이 명령 실행 (12초째) · 메인이 파일 편집 · 메인이 파일 3개 읽음")
+        #expect(feed == "방금: a-sdn-portal · 메인이 명령 실행 (12초째) · 메인이 파일 편집 · 메인이 파일 3개 읽음")
         for secret in ["auth.ts", "npm", "a.ts"] {
             #expect(!office.text(level, selected: office.main).contains(secret))
             #expect(!feed.contains(secret))
@@ -161,9 +161,9 @@ struct StatusLineTests {
         office.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "deploy.sh --prod"]))
         office.send(hook.tool("PostToolUseFailure", "Bash", id: "b1", input: ["command": "deploy.sh --prod"], extra: [("error", "x")]))
         office.send(hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "deploy.sh --force"]))
-        #expect(office.text(.summary, selected: office.main, at: 3) == "메인 Bash 실패 → Bash 승인 대기")
-        #expect(office.text(.summary, at: 3) == "방금: 메인이 Bash 승인 기다림 · 메인의 Bash 실패")
-        #expect(office.text(.detailed, at: 3) == "방금: 메인이 deploy.sh --force 승인 기다림 · 메인의 deploy.sh --prod 실패")
+        #expect(office.text(.summary, selected: office.main, at: 3) == "a-sdn-portal · 메인 Bash 실패 → Bash 승인 대기")
+        #expect(office.text(.summary, at: 3) == "방금: a-sdn-portal · 메인이 Bash 승인 기다림 · 메인의 Bash 실패")
+        #expect(office.text(.detailed, at: 3) == "방금: a-sdn-portal · 메인이 deploy.sh --force 승인 기다림 · 메인의 deploy.sh --prod 실패")
     }
 
     // MARK: - 아무도 안 골랐을 때
@@ -173,7 +173,7 @@ struct StatusLineTests {
         let office = working()
         let line = office.line()
         #expect(line.mode == .office)
-        #expect(office.text(at: 32) == "방금: 메인이 npm test 실행 (12초째) · 메인이 auth.ts 편집 · 메인이 파일 3개 읽음")
+        #expect(office.text(at: 32) == "방금: a-sdn-portal · 메인이 npm test 실행 (12초째) · 메인이 auth.ts 편집 · 메인이 파일 3개 읽음")
     }
 
     @Test("사무실 줄은 최근 일 몇 개만 보이고 뒤를 자른다")
@@ -206,7 +206,7 @@ struct StatusLineTests {
     func thinkingOnly() {
         var office = Office()
         office.send(hook.make("UserPromptSubmit", ["prompt": "안녕"]))
-        #expect(office.text() == "지금: 메인 생각 중")
+        #expect(office.text() == "지금: a-sdn-portal · 메인 생각 중")
     }
 
     @Test("디렉토리 필터: 고른 디렉토리 사람들의 일만")
@@ -215,7 +215,7 @@ struct StatusLineTests {
         let other = Hook(session: "s2", cwd: "/Users/demo/work/claude-office")
         office.send(hook.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/w/auth.ts"]))
         office.send(other.tool("PreToolUse", "Bash", id: "b1", input: ["command": "make test"]))
-        #expect(office.text(at: 3) == "방금: 메인2가 make test 실행 (1초째) · 메인1이 auth.ts 편집 (2초째)")
+        #expect(office.text(at: 3) == "방금: claude-office · 메인2가 make test 실행 (1초째) · a-sdn-portal · 메인1이 auth.ts 편집 (2초째)")
         #expect(office.text(folder: "/Users/demo/work/a-sdn-portal", at: 3) == "방금: 메인1이 auth.ts 편집 (2초째)")
         #expect(office.text(folder: "/Users/demo/work/claude-office", at: 3) == "방금: 메인2가 make test 실행 (1초째)")
         #expect(office.text(folder: "/Users/demo/work/없는-폴더") == "고른 디렉토리에 출근한 직원이 없어요")
@@ -224,6 +224,70 @@ struct StatusLineTests {
         office.send(hook.make("Stop"))
         #expect(office.text(folder: "/Users/demo/work/a-sdn-portal") == "모두 쉬는 중이에요")
         #expect(office.text(folder: "/Users/demo/work/claude-office", at: 4) == "방금: 메인2가 make test 실행 (2초째)")
+    }
+
+    // MARK: - 디렉토리 표시 (M5(7a))
+
+    @Test("모두: 디렉토리가 바뀌는 항목마다 폴더 이름과 행 색, 같은 디렉토리가 이어지면 한 번만")
+    func folderLabels() {
+        var office = Office()
+        let other = Hook(session: "s2", cwd: "/Users/demo/work/claude-office")
+        office.send(hook.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/w/auth.ts"]))
+        office.send(hook.tool("PostToolUse", "Edit", id: "e1", input: ["file_path": "/w/auth.ts"], extra: [("tool_response", [:])]))
+        office.send(other.tool("PreToolUse", "Grep", id: "g1", input: ["pattern": "TODO"]))
+        office.send(other.tool("PostToolUse", "Grep", id: "g1", input: ["pattern": "TODO"], extra: [("tool_response", [:])]))
+        office.send(other.tool("PreToolUse", "Bash", id: "b1", input: ["command": "make test"]))
+        let line = office.line()
+        #expect(line.segments.map(\.folder) == ["claude-office", nil, "a-sdn-portal"])
+        let teams = office.engine.state.teams.values
+        let color = { (name: String) in teams.first { $0.name == name }?.colorIndex }
+        #expect(line.segments.map(\.colorIndex) == [color("claude-office"), nil, color("a-sdn-portal")])
+        #expect(office.text(at: 6) == "방금: claude-office · 메인2가 make test 실행 (1초째) · 메인2가 \"TODO\" 읽음 · a-sdn-portal · 메인1이 auth.ts 편집")
+        // 디렉토리를 하나 고르면 드롭다운에 이미 보이므로 붙이지 않습니다
+        #expect(office.line(folder: "/Users/demo/work/claude-office").segments.allSatisfy { $0.folder == nil && $0.colorIndex == nil })
+    }
+
+    @Test("고른 사람 줄: 모두면 맨 앞에 디렉토리, 디렉토리를 골랐으면 직함만")
+    func agentFolder() {
+        let office = working()
+        let line = office.line(selected: office.main)
+        #expect(line.folder == "a-sdn-portal")
+        #expect(line.segments.allSatisfy { $0.folder == nil })
+        #expect(office.text(selected: office.main, folder: "/Users/demo/work/a-sdn-portal", at: 32) == "메인 Read 3개 → Edit auth.ts → Bash npm test (12초째)")
+        #expect(office.line(selected: office.main, folder: "/Users/demo/work/a-sdn-portal").folder == nil)
+    }
+
+    @Test("디렉토리 이름은 표시 수준과 상관없이 보인다 (패널·드롭다운과 같음)", arguments: PrivacyLevel.allCases)
+    func folderPrivacy(_ level: PrivacyLevel) {
+        let office = working()
+        #expect(office.text(level, at: 32).hasPrefix("방금: a-sdn-portal · "))
+        #expect(office.line(level, selected: office.main).folder == "a-sdn-portal")
+    }
+
+    @Test("긴 디렉토리 이름은 줄인다")
+    func longFolder() {
+        var office = Office()
+        let long = Hook(session: "s3", cwd: "/Users/demo/work/a-very-long-directory-name-here")
+        office.send(long.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]))
+        #expect(StatusLine.shortFolder("a-very-long-directory-name-here") == "a-very-long-dir…")
+        #expect(StatusLine.shortFolder("a-very-long-dir…").count == StatusLine.maxFolderLength)
+        #expect(StatusLine.shortFolder("claude-office") == "claude-office")
+        #expect(office.line().segments.first?.folder == "a-very-long-dir…")
+        let main = office.engine.state.lead(of: SessionID("s3"))!.id
+        #expect(office.text(selected: main, at: 2) == "a-very-long-dir… · 메인 Bash ls (1초째)")
+    }
+
+    @Test("퇴근한 사람의 일은 기록할 때 폴더 이름으로 (색 없음)")
+    func leftFolder() throws {
+        var office = Office()
+        let other = Hook(session: "s2", cwd: "/Users/demo/work/claude-office")
+        office.send(hook.tool("PreToolUse", "Bash", id: "b0", input: ["command": "make"]))
+        office.send(other.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/w/x.ts"]))
+        office.send(other.tool("PostToolUse", "Edit", id: "e1", input: ["file_path": "/w/x.ts"], extra: [("tool_response", [:])]))
+        office.send(other.make("SessionEnd", ["reason": "exit"]))
+        let line = office.line()
+        let left = try #require(line.segments.first { $0.folder == "claude-office" })
+        #expect(left.colorIndex == nil)
     }
 
     @Test("고른 사람이 퇴근하면 사무실 줄로")

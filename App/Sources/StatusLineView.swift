@@ -5,6 +5,7 @@ import SwiftUI
 ///
 /// 내용은 OfficeCore의 `StatusLine`이 정하고(표시 수준·묶기·자르기), 여기서는 색과 경과 시간만 붙입니다.
 /// 고른 사람의 흐름은 새 동작이 오른쪽이라 넘치면 앞(왼쪽)을, 사무실 줄은 새 일이 왼쪽이라 뒤(오른쪽)를 자릅니다.
+/// 디렉토리 드롭다운이 "모두"면 디렉토리 이름을 흐리게 붙입니다(고른 사람 줄은 머리, 사무실 줄은 디렉토리가 바뀌는 항목마다 행 색 점과 함께).
 struct StatusLineView: View {
     let line: StatusLine
 
@@ -41,6 +42,10 @@ struct StatusLineView: View {
                         .overlay(Circle().stroke(Color.primary.opacity(0.35), lineWidth: 0.8))
                         .frame(width: 8, height: 8)
                 }
+                // "모두"일 때만 디렉토리 이름을 직함 앞에 흐리게 (M5(7a), 길면 코어가 줄여 둠)
+                if let folder = line.folder {
+                    Text("\(folder) ·").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                }
                 if let head = line.head {
                     Text(head).font(.system(size: 12, weight: .bold)).lineLimit(1).fixedSize()
                 }
@@ -62,6 +67,11 @@ struct StatusLineView: View {
         if line.truncated, line.mode == .agent { result += styled("… ", .secondary) }
         for (index, segment) in line.segments.enumerated() {
             if index > 0 { result += styled(line.separator, .secondary) }
+            if let folder = segment.folder {
+                // 디렉토리가 바뀌는 항목 앞: 행 색 점 + 흐린 폴더 이름 (M5(7a))
+                result += styled("● ", segment.colorIndex.map(Palette.team) ?? .secondary)
+                result += styled("\(folder) · ", .secondary)
+            }
             var text = AttributedString(segment.text)
             switch segment.tone {
             case .normal:
