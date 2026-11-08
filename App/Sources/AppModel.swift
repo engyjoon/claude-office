@@ -39,6 +39,8 @@ final class AppModel {
     private(set) var receivedHooks = 0
     /// 사무실 창에서 클릭해 고른 직원 (신원 카드에 보여줍니다)
     private(set) var selectedAgent: AgentID?
+    /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
+    private(set) var soundSettings: SoundSettings
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
@@ -49,6 +51,7 @@ final class AppModel {
     /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
     let stageStore = StageStore()
     let officeScene: OfficeScene
+    @ObservationIgnored private let soundPlayer: SoundPlayer
     @ObservationIgnored private var lastFrame = Date()
     @ObservationIgnored private var tickAccumulator = 0.0
 
@@ -59,6 +62,10 @@ final class AppModel {
         let saved = UserDefaults.standard.string(forKey: Self.privacyKey).flatMap(PrivacyLevel.init(rawValue:)) ?? .detailed
         privacy = saved
         engine = OfficeEngine(privacy: saved)
+        let sound = SoundSettings(defaults: .standard)
+        soundSettings = sound
+        soundPlayer = SoundPlayer(settings: sound)
+        stageStore.privacy = saved
         officeScene = OfficeScene(store: stageStore)
         officeScene.onSelect = { [weak self] id in self?.select(id) }
         refreshHookStatus()
@@ -120,8 +127,20 @@ final class AppModel {
             tickAccumulator = 0
             record(engine.tick(at: now))
         }
-        // 효과음(M4)과 종이비행기 같은 효과는 이후 단계에서 처리합니다
-        _ = stageStore.stage.drainEvents()
+        playSounds(stageStore.stage.drainEvents())
+    }
+
+    /// 무대에서 나온 효과음을 재생기에 넘깁니다. 알림성 소리는 창이 안 보여도, 장식성 소리는 보일 때만 울립니다.
+    private func playSounds(_ events: [StageEvent]) {
+        var context: SoundContext?
+        for event in events {
+            guard case .sound(let cue, _) = event, soundSettings.isEnabled(cue.group) else { continue }
+            if context == nil {
+                // 집중 모드 감지는 알림(M5)과 함께 붙입니다
+                context = SoundContext(officeVisible: officeScene.isVisibleOnScreen, focusModeActive: false)
+            }
+            soundPlayer.play(cue, context: context!)
+        }
     }
 
     private func receive(_ delivery: HookDelivery) {
@@ -154,8 +173,19 @@ final class AppModel {
 
     // MARK: - 설정
 
+    func setSoundSettings(_ settings: SoundSettings) {
+        soundSettings = settings
+        settings.save(to: .standard)
+        soundPlayer.update(settings)
+    }
+
+    func previewSound(_ group: SoundGroup) {
+        soundPlayer.preview(group)
+    }
+
     func setPrivacy(_ level: PrivacyLevel) {
         privacy = level
+        stageStore.privacy = level
         engine.privacy = level
         UserDefaults.standard.set(level.rawValue, forKey: Self.privacyKey)
         roster = Roster.make(from: engine.state, privacy: level)

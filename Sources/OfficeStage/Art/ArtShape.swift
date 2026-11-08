@@ -103,13 +103,16 @@ public struct ArtShape: Hashable, Sendable {
     public var stroke: Paint?
     public var lineWidth: Double
     public var opacity: Double
+    /// 점선 간격 (0이면 실선). 속삭임 풍선의 점선 테두리에 씁니다.
+    public var dash: Double
 
-    public init(_ geometry: Geometry, fill: Paint? = nil, stroke: Paint? = nil, lineWidth: Double = 1.8, opacity: Double = 1) {
+    public init(_ geometry: Geometry, fill: Paint? = nil, stroke: Paint? = nil, lineWidth: Double = 1.8, opacity: Double = 1, dash: Double = 0) {
         self.geometry = geometry
         self.fill = fill
         self.stroke = stroke
         self.lineWidth = lineWidth
         self.opacity = opacity
+        self.dash = dash
     }
 
     // 짧게 쓰기 위한 도우미 (미리보기 SVG의 class="o" = 잉크 외곽선)
@@ -150,7 +153,10 @@ public struct ArtShape: Hashable, Sendable {
         case .text(let s, let at, let size, let bold, let anchor, let baseline):
             copy.geometry = .text(s, at: t(at), size: size * scale, bold: bold, anchor: anchor, baseline: baseline)
         }
-        if scale != 1 { copy.lineWidth *= scale }
+        if scale != 1 {
+            copy.lineWidth *= scale
+            copy.dash *= scale
+        }
         return copy
     }
 }

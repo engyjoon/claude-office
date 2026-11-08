@@ -16,7 +16,8 @@ Claude Code 세션과 서브에이전트가 일하는 모습을 아기자기한 
 | **M1 코어** (`OfficeCore`) | **완료**. 훅 파서, 사무실 상태, 연출 엔진, 대사, 효과음 합성 |
 | M2 앱 뼈대 (메뉴바, 로컬 서버, 훅 설치) | 완료. 맥에서 실제 Claude Code 세션 확인 |
 | M3 사무실 화면 (SpriteKit) | 완료. 맥에서 `make replay`로 출근·업무·퇴근 흐름 확인 ([장면 예시](docs/m3/)) |
-| M4~M6 표현(말풍선·효과음), 미니 사무실·알림, 다듬기 | 예정 |
+| M4 표현 (말풍선 5종, 표정·제스처, 효과음) | 완료. 위임·승인 대기·완료 보고의 말풍선·상태 칩·표정·제스처·소리 ([장면 예시](docs/m4/)) |
+| M5~M6 미니 사무실·알림·인스펙터, 다듬기 | 예정 |
 
 ## 개발
 
@@ -36,7 +37,7 @@ make demo
 make sounds
 ```
 
-`make sounds`는 효과음을 `build/sounds/*.wav`로 저장하고, `make snapshot`은 사무실 장면을 `build/snapshots/*.svg`로 그립니다 (맥 없이 그림 확인).
+`make sounds`는 효과음을 `build/sounds/*.wav`로 저장하고, `make snapshot`은 말풍선까지 포함한 사무실 장면을 `build/snapshots/*.svg`로 그립니다 (맥 없이 그림 확인). 앱에서는 설정 → 효과음에서 항목별로 켜고 끄고 미리 들을 수 있습니다.
 
 맥 앱은 Xcode와 XcodeGen이 필요합니다 ([docs/M2-build.md](docs/M2-build.md)).
 
@@ -51,7 +52,7 @@ make run
 ```
 Sources/OfficeCore/   순수 Swift 코어 (훅 → 이벤트 → 사무실 상태 → 연출 지시, 효과음, 메뉴 목록)
 Sources/OfficeServer/ 로컬 훅 서버(BSD 소켓), 훅 스크립트, 훅 설치기 (macOS·Linux)
-Sources/OfficeStage/  사무실 배치, 길찾기, 무대(연출 지시 실행), 캐릭터·가구 그림 데이터, SVG 렌더러
+Sources/OfficeStage/  사무실 배치, 길찾기, 무대(연출 지시 실행·말풍선 규칙), 말풍선·칩 배치, 그림 데이터, SVG 렌더러
 Sources/office-sim/   개발용 CLI (연출 타임라인, 효과음 WAV, 헤드리스 serve, replay)
 App/                  macOS 메뉴바 앱 (SwiftUI, XcodeGen project.yml)
 Tests/OfficeCoreTests 단위 테스트와 훅 픽스처

@@ -2,7 +2,7 @@ import OfficeCore
 import OfficeServer
 import SwiftUI
 
-/// 설정 창 (설계서 §10). M2에서는 연동과 표시만 있습니다. 효과음·알림·직원 꾸미기는 이후 단계에서 추가합니다.
+/// 설정 창 (설계서 §10). 연동, 표시, 효과음(M4). 알림·직원 꾸미기는 이후 단계에서 추가합니다.
 struct SettingsView: View {
     let model: AppModel
 
@@ -12,8 +12,10 @@ struct SettingsView: View {
                 .tabItem { Label("연동", systemImage: "link") }
             DisplaySettings(model: model)
                 .tabItem { Label("표시", systemImage: "eye") }
+            SoundSettingsView(model: model)
+                .tabItem { Label("효과음", systemImage: "speaker.wave.2") }
         }
-        .frame(width: 520, height: 400)
+        .frame(width: 540, height: 520)
     }
 }
 
@@ -92,5 +94,78 @@ struct DisplaySettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// 효과음 설정 (설계서 §11.2·§11.3): 전체 소리, 전체 음량, 항목별 켜기·끄기와 미리 듣기
+struct SoundSettingsView: View {
+    let model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("효과음 켜기", isOn: binding(\.masterEnabled))
+                LabeledContent("음량") {
+                    HStack {
+                        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                        Slider(value: binding(\.volume), in: 0...1)
+                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                        Text("\(Int((model.soundSettings.volume * 100).rounded()))%")
+                            .monospacedDigit()
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                }
+                .disabled(!model.soundSettings.masterEnabled)
+            } footer: {
+                Text("알림 소리는 사무실 창이 안 보여도 울리고, 장식 소리는 사무실 창이 화면에 보일 때만 울려요.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("알림") {
+                ForEach(SoundGroup.allCases.filter(\.isAlert), id: \.self, content: row)
+            }
+            Section("장식") {
+                ForEach(SoundGroup.allCases.filter { !$0.isAlert }, id: \.self, content: row)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func row(_ group: SoundGroup) -> some View {
+        HStack {
+            Toggle(isOn: Binding(
+                get: { model.soundSettings.enabledGroups.contains(group) },
+                set: { enabled in
+                    var settings = model.soundSettings
+                    settings.set(group, enabled: enabled)
+                    model.setSoundSettings(settings)
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.displayName)
+                    Text(group.detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Button {
+                model.previewSound(group)
+            } label: {
+                Image(systemName: "play.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("미리 듣기")
+        }
+        .disabled(!model.soundSettings.masterEnabled)
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<SoundSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.soundSettings[keyPath: keyPath] },
+            set: { value in
+                var settings = model.soundSettings
+                settings[keyPath: keyPath] = value
+                model.setSoundSettings(settings)
+            }
+        )
     }
 }

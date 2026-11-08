@@ -223,6 +223,7 @@ public struct Choreographer: Sendable {
             touch(agent)
             out.append(Directive(nil, .sound(.inputWaiting)))
             if presences[agent.id]?.rest == 0 {
+                out.append(Directive(agent.id, .gesture(.tilt)))
                 setEmote(agent.id, .question, into: &out)
             }
 
@@ -291,7 +292,9 @@ public struct Choreographer: Sendable {
                 out.append(Directive(lead.id, .express(.proud)))
                 setEmote(lead.id, .sparkle, into: &out)
                 say(lead.id, "report.lead", into: &out)
-                out.append(Directive(lead.id, .wait(2.5)))
+                out.append(Directive(lead.id, .wait(1.3)))
+                out.append(Directive(lead.id, .gesture(.thumbsUp)))
+                out.append(Directive(lead.id, .wait(1.4)))
                 setEmote(lead.id, nil, into: &out)
                 out.append(Directive(lead.id, .express(.neutral)))
             }
@@ -414,8 +417,9 @@ public struct Choreographer: Sendable {
             modify(id) { $0.readStarts = $0.readStarts.filter { now.timeIntervalSince($0) < window } + [now] }
         }
         if presence.waiting {
-            // 승인 대기 중 다른 활동이 왔다 = 승인됨
+            // 승인 대기 중 다른 활동이 왔다 = 승인됨. 고개를 끄덕이고, 손 든 자세를 풀도록 자세·소품·표정을 다시 정합니다.
             resolveWaiting(id, into: &out)
+            out.append(Directive(id, .gesture(.nod)))
             show(id, target, at: now, into: &out)
             return
         }
@@ -439,6 +443,10 @@ public struct Choreographer: Sendable {
         switch target {
         case .working(let call):
             wake(id, into: &out)
+            // 프롬프트의 💡, 입력 대기의 ❓, 오류의 💦는 일을 다시 시작하면 내립니다
+            if let emote = presences[id]?.emote, [.bulb, .question, .sweat].contains(emote) {
+                setEmote(id, nil, into: &out)
+            }
             var zone = seatSpot(previous.agent)
             var pose = Pose.typing
             var prop: Prop?
@@ -562,10 +570,13 @@ public struct Choreographer: Sendable {
         guard let presence = presences[id], presence.waiting else { return }
         out.append(Directive(id, .dismissBubble))
         setEmote(id, nil, into: &out)
+        // 손 든 자세를 풉니다. 이어지는 활동이 자세·소품·표정을 다시 정하도록 보이는 활동도 처음으로 돌립니다.
+        out.append(Directive(id, .pose(presence.spot.isSeat ? .sitting : .standing)))
         if presence.spot.isSeat {
             out.append(Directive(id, .sit))
         }
         modify(id) {
+            $0.shown = .idle
             $0.waiting = false
             $0.knocks = 0
             $0.nextKnockAt = nil

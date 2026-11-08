@@ -120,6 +120,14 @@ struct MenuContentView: View {
                 openSettings()
             }
             Spacer()
+            Button {
+                var settings = model.soundSettings
+                settings.masterEnabled.toggle()
+                model.setSoundSettings(settings)
+            } label: {
+                Image(systemName: model.soundSettings.masterEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+            }
+            .help(model.soundSettings.masterEnabled ? "효과음 끄기" : "효과음 켜기")
             Button("종료") { NSApp.terminate(nil) }
         }
         .buttonStyle(.borderless)

@@ -6,6 +6,8 @@ import SpriteKit
 /// 무대 상태를 담아 두는 상자. AppModel이 매 프레임 갱신하고 씬이 읽습니다 (둘 다 메인 스레드).
 final class StageStore {
     var stage = Stage()
+    /// 말풍선·상태 칩에 보여줄 내용 수준 (설정의 표시 수준)
+    var privacy: PrivacyLevel = .detailed
 }
 
 /// SpriteKit 사무실 화면 (설계서 §8).
@@ -21,7 +23,12 @@ final class OfficeScene: SKScene {
     /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
     private let world = SKNode()
     private let furniture = SKNode()
+    /// 말풍선·상태 칩·아이콘·효과 층 (가구와 직원 모두의 위)
+    private let overlayLayer = SKNode()
+    private var overlays: [String: OverlayNode] = [:]
     private var characters: [AgentID: CharacterNode] = [:]
+    /// 마우스를 올린 직원 (말풍선 전체 문구를 보여줍니다)
+    private var hoveredAgent: AgentID?
     private var furnitureSignature = ""
     /// 클릭으로 고른 직원. 빈 곳을 누르면 nil로 돌아갑니다.
     var onSelect: ((AgentID?) -> Void)?
@@ -41,6 +48,14 @@ final class OfficeScene: SKScene {
         backgroundColor = Swatch.floor.color.skColor
         addChild(world)
         world.addChild(furniture)
+        overlayLayer.zPosition = 1_000_000
+        world.addChild(overlayLayer)
+    }
+
+    /// 사무실 창이 화면에 보이는지 (장식성 효과음은 보일 때만 울립니다, 설계서 §11.3)
+    var isVisibleOnScreen: Bool {
+        guard let window = view?.window else { return false }
+        return window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
 
     required init?(coder: NSCoder) {
@@ -49,6 +64,7 @@ final class OfficeScene: SKScene {
 
     override func didMove(to view: SKView) {
         furnitureSignature = ""
+        view.window?.acceptsMouseMovedEvents = true
         sync()
     }
 
@@ -88,6 +104,30 @@ final class OfficeScene: SKScene {
             characters[id] = nil
             node.run(.sequence([.fadeOut(withDuration: 0.25), .removeFromParent()]))
         }
+        syncOverlays(stage, extent: extent)
+    }
+
+    /// 말풍선·상태 칩·아이콘을 무대에서 계산한 그대로 옮깁니다 (배치와 줄임은 OfficeStage의 Overlay가 정함)
+    private func syncOverlays(_ stage: Stage, extent: MapRect) {
+        let height = stage.layout.height
+        let visible = MapRect(max(extent.x, 0), 0, min(extent.width, OfficeLayout.width), height)
+        let options = OverlayOptions(privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible)
+        var present = Set<String>()
+        for (index, item) in Overlay.items(for: stage, options: options).enumerated() {
+            present.insert(item.id)
+            let node = overlays[item.id] ?? {
+                let node = OverlayNode()
+                overlayLayer.addChild(node)
+                overlays[item.id] = node
+                return node
+            }()
+            node.apply(item, sceneHeight: height)
+            node.zPosition = Double(index)
+        }
+        for (id, node) in overlays where !present.contains(id) {
+            overlays[id] = nil
+            node.removeFromParent()
+        }
     }
 
     // MARK: - 클릭
@@ -95,6 +135,14 @@ final class OfficeScene: SKScene {
     override func mouseDown(with event: NSEvent) {
         let point = event.location(in: world)
         onSelect?(character(at: point))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        hoveredAgent = character(at: event.location(in: world))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredAgent = nil
     }
 
     /// 겹쳐 있으면 앞(화면 아래쪽)에 선 직원을 고릅니다. 몸보다 조금 넓게 잡아 작은 캐릭터도 누르기 쉽게 합니다.
@@ -164,11 +212,13 @@ final class CharacterNode: SKNode {
     private let leftArm: SKNode
     private let rightArm: SKNode
     private let handProp = SKNode()
+    private let handGesture = SKNode()
     private let heldProp = SKNode()
     private let selectionRing: SKShapeNode
     private let appearance: Appearance
     private var shownExpression: FacialExpression?
     private var shownProp: Prop??
+    private var shownHandGesture: BodyGesture?
 
     /// 그림 데이터(y 아래로 증가)를 노드 안의 좌표(y 위로 증가)로
     private static let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
@@ -228,6 +278,7 @@ final class CharacterNode: SKNode {
         leftArm.position = Self.local(CharacterArt.leftShoulder)
         rightArm.position = Self.local(CharacterArt.rightShoulder)
         rightArm.addChild(handProp)
+        rightArm.addChild(handGesture)
         body.addChild(leftArm)
         body.addChild(rightArm)
 
@@ -253,6 +304,13 @@ final class CharacterNode: SKNode {
             handProp.addChild(ArtNodes.node(for: CharacterArt.handProp(actor.prop), colors: colors, transform: Self.local))
             heldProp.removeAllChildren()
             heldProp.addChild(ArtNodes.node(for: CharacterArt.heldProp(actor.prop), colors: colors, transform: Self.local))
+        }
+
+        let handShape: BodyGesture? = CharacterArt.handGesture(actor.gesture).isEmpty ? nil : actor.gesture
+        if shownHandGesture != handShape {
+            shownHandGesture = handShape
+            handGesture.removeAllChildren()
+            handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors, transform: Self.local))
         }
 
         let pose = RigAnimator.pose(for: actor, time: time)
@@ -285,8 +343,43 @@ final class CharacterNode: SKNode {
     }
 }
 
+/// 말풍선·상태 칩·아이콘 하나. 도형이 바뀔 때만 다시 만들고, 매 프레임에는 위치·크기·투명도만 바꿉니다.
+final class OverlayNode: SKNode {
+    private var shownShapes: [ArtShape] = []
+    /// 그림 데이터(y 아래로 증가)를 노드 안의 좌표(y 위로 증가)로
+    private static let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
+
+    func apply(_ item: OverlayItem, sceneHeight: Double) {
+        if item.shapes != shownShapes {
+            shownShapes = item.shapes
+            removeAllChildren()
+            for shape in item.shapes {
+                let node = ArtNodes.node(for: shape, colors: nil, transform: Self.local)
+                if let label = node as? SKLabelNode {
+                    ArtNodes.fit(label, in: item, shape: shape)
+                }
+                addChild(node)
+            }
+        }
+        position = CGPoint(x: item.origin.x, y: sceneHeight - item.origin.y)
+        setScale(item.scale)
+        alpha = item.opacity
+    }
+}
+
 /// 렌더러와 무관한 도형(ArtShape)을 SpriteKit 노드로
 enum ArtNodes {
+    /// 말풍선 글자가 어림한 폭보다 넓게 그려지면 상자 안에 들어오도록 가로로 살짝 줄입니다
+    static func fit(_ label: SKLabelNode, in item: OverlayItem, shape: ArtShape) {
+        guard item.kind == .bubble || item.kind == .pill,
+              case .text(let string, _, let size, let bold, _, _) = shape.geometry else { return }
+        let estimated = TextMetrics.width(string, size: size, bold: bold)
+        let actual = label.frame.width
+        if actual > estimated + 0.5, actual > 0 {
+            label.xScale = estimated / actual
+        }
+    }
+
     static func node(for shapes: [ArtShape], colors: CharacterArt.Colors?, transform: @escaping (MapPoint) -> CGPoint) -> SKNode {
         let container = SKNode()
         for shape in shapes {
@@ -317,7 +410,26 @@ enum ArtNodes {
             label.alpha = shape.opacity
             return label
         }
-        let node = SKShapeNode(path: path(shape.geometry, transform: transform))
+        let shapePath = path(shape.geometry, transform: transform)
+        if shape.dash > 0, let stroke = shape.stroke {
+            // SKShapeNode에는 점선이 없어서, 채우기와 점선 테두리를 따로 그립니다
+            let container = SKNode()
+            let fill = SKShapeNode(path: shapePath)
+            fill.fillColor = shape.fill.map { color($0, colors) } ?? .clear
+            fill.strokeColor = .clear
+            fill.lineWidth = 0
+            container.addChild(fill)
+            let dashed = SKShapeNode(path: shapePath.copy(dashingWithPhase: 0, lengths: [shape.dash, shape.dash]))
+            dashed.fillColor = .clear
+            dashed.strokeColor = color(stroke, colors)
+            dashed.lineWidth = shape.lineWidth
+            dashed.lineCap = .round
+            dashed.isAntialiased = true
+            container.addChild(dashed)
+            container.alpha = shape.opacity
+            return container
+        }
+        let node = SKShapeNode(path: shapePath)
         node.fillColor = shape.fill.map { color($0, colors) } ?? .clear
         if let stroke = shape.stroke {
             node.strokeColor = color(stroke, colors)

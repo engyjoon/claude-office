@@ -74,3 +74,66 @@ public struct SoundPolicy: Sendable {
         return .play(gain: settings.volume)
     }
 }
+
+// MARK: - 저장 (설계서 §11.5: sound.enabled, sound.volume, sound.<항목>.enabled)
+
+extension SoundSettings {
+    public static let enabledKey = "sound.enabled"
+    public static let volumeKey = "sound.volume"
+
+    public static func key(for group: SoundGroup) -> String { "sound.\(group.rawValue).enabled" }
+
+    /// 저장된 값이 없는 항목은 기본값을 씁니다
+    public init(defaults: UserDefaults) {
+        self.init()
+        if defaults.object(forKey: Self.enabledKey) != nil {
+            masterEnabled = defaults.bool(forKey: Self.enabledKey)
+        }
+        if defaults.object(forKey: Self.volumeKey) != nil {
+            volume = min(max(defaults.double(forKey: Self.volumeKey), 0), 1)
+        }
+        for group in SoundGroup.allCases where defaults.object(forKey: Self.key(for: group)) != nil {
+            set(group, enabled: defaults.bool(forKey: Self.key(for: group)))
+        }
+    }
+
+    public func save(to defaults: UserDefaults) {
+        defaults.set(masterEnabled, forKey: Self.enabledKey)
+        defaults.set(volume, forKey: Self.volumeKey)
+        for group in SoundGroup.allCases {
+            defaults.set(enabledGroups.contains(group), forKey: Self.key(for: group))
+        }
+    }
+}
+
+extension SoundGroup {
+    /// 설정 화면의 "미리 듣기"로 들려줄 소리
+    public var sampleCue: SoundCue {
+        switch self {
+        case .approval: .knock
+        case .inputWaiting: .inputWaiting
+        case .completion: .turnComplete
+        case .bubble: .bubble(voice: 2, syllables: 3)
+        case .door: .door
+        case .error: .error
+        case .chatter: .chatter
+        case .footsteps: .footsteps
+        case .typing: .typing
+        }
+    }
+
+    /// 설정 화면의 설명 (설계서 §11.2)
+    public var detail: String {
+        switch self {
+        case .approval: "똑똑 · 권한 승인을 기다릴 때. 30초마다 최대 2번 더"
+        case .inputWaiting: "뾰롱 · 응답을 마치고 내 입력을 기다릴 때"
+        case .completion: "띠리링 · 팀장 응답 완료, 팀원 보고는 짧은 2음"
+        case .bubble: "톡 + 블립 · 말풍선이 뜰 때. 직원마다 목소리 높이가 달라요"
+        case .door: "딸랑 · 출근·퇴근"
+        case .error: "뿅? · 툴 오류"
+        case .chatter: "소곤 · 휴게실 잡담"
+        case .footsteps: "톡톡 · 걸을 때"
+        case .typing: "타닥 · 편집 중"
+        }
+    }
+}

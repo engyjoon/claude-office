@@ -67,6 +67,14 @@ public enum CharacterArt {
         }
     }
 
+    /// 제스처에 딸린 손 모양 (오른팔과 함께 회전). 엄지척은 팔이 옆으로 뻗을 때 위를 향하는 엄지를 그립니다.
+    public static func handGesture(_ gesture: BodyGesture?) -> [ArtShape] {
+        switch gesture {
+        case .thumbsUp: [.rect(2.5, 13.6, 7.5, 4.6, r: 2.3, fill: .skin, width: 1.4)]
+        default: []
+        }
+    }
+
     /// 몸 앞에 드는 소품 (원점: heldPropOrigin)
     public static func heldProp(_ prop: Prop?) -> [ArtShape] {
         switch prop {

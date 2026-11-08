@@ -4,7 +4,8 @@ import OfficeCore
 /// 무대를 SVG로 그립니다. 맥 없이 사무실 장면을 눈으로 확인하는 디버그·문서용 렌더러입니다.
 /// SpriteKit 렌더러와 같은 그림 데이터(OfficeArt, CharacterArt)와 같은 자세 계산(RigAnimator)을 씁니다.
 public enum SVGRenderer {
-    public static func render(stage: Stage) -> String {
+    /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
+    public static func render(stage: Stage, overlay: OverlayOptions? = .init()) -> String {
         let layout = stage.layout
         let width = OfficeLayout.width
         let height = layout.height
@@ -33,10 +34,23 @@ public enum SVGRenderer {
             case .actor(let actor): body += character(actor, time: stage.time)
             }
         }
+        // 말풍선·상태 칩·아이콘은 가구와 직원 모두의 위에 그립니다
+        if let overlay {
+            for item in Overlay.items(for: stage, options: overlay) {
+                body += self.overlay(item)
+            }
+        }
         return """
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \(f(width)) \(f(height))" width="\(f(width))" height="\(f(height))" \
             font-family="Apple SD Gothic Neo, Noto Sans CJK KR, Noto Sans KR, WenQuanYi Zen Hei, sans-serif">\(body)</svg>
             """
+    }
+
+    static func overlay(_ item: OverlayItem) -> String {
+        var transform = "translate(\(f(item.origin.x)),\(f(item.origin.y)))"
+        if item.scale != 1 { transform += " scale(\(f(item.scale)))" }
+        let opacity = item.opacity < 1 ? " opacity=\"\(f(item.opacity))\"" : ""
+        return "<g class=\"\(item.kind.rawValue)\" transform=\"\(transform)\"\(opacity)>" + item.shapes.map { element($0, colors: nil) }.joined() + "</g>"
     }
 
     static func character(_ actor: StageActor, time: Double) -> String {
@@ -61,7 +75,7 @@ public enum SVGRenderer {
                 + CharacterArt.accessory(appearance.accessory) + CharacterArt.effects(e)).map { element($0, colors: colors) }.joined()
             + "</g>"
         inner += group("translate(\(f(CharacterArt.leftShoulder.x)),\(f(CharacterArt.leftShoulder.y))) rotate(\(f(pose.leftArm)))", CharacterArt.arm)
-        inner += group("translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))", CharacterArt.arm + CharacterArt.handProp(actor.prop))
+        inner += group("translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))", CharacterArt.arm + CharacterArt.handProp(actor.prop) + CharacterArt.handGesture(actor.gesture))
         inner += group("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
         let scaleX = pose.mirrored ? -1.0 : 1.0
         return "<g transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
@@ -92,6 +106,8 @@ public enum SVGRenderer {
         if let stroke = shape.stroke {
             let color = resolve(stroke, colors: colors)
             attributes += " stroke=\"\(color.hex)\" stroke-width=\"\(f(shape.lineWidth))\" stroke-linecap=\"round\" stroke-linejoin=\"round\""
+            if color.alpha < 1 { attributes += " stroke-opacity=\"\(f(color.alpha))\"" }
+            if shape.dash > 0 { attributes += " stroke-dasharray=\"\(f(shape.dash)) \(f(shape.dash))\"" }
         }
         if shape.opacity < 1 { attributes += " opacity=\"\(f(shape.opacity))\"" }
         switch shape.geometry {
