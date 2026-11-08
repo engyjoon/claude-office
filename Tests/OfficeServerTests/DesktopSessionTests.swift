@@ -68,6 +68,26 @@ struct DesktopSessionTests {
         #expect(cycle.ancestors == [SessionID("c-b")])
     }
 
+    @Test("열려 있는 디렉토리 목록: 보관한 세션과 폴더 없는 세션은 빼고, 워크트리·띄운 세션은 원래(최상위) 폴더로 묶어 이름순")
+    func openFolders() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write(root, "local_a", #"{"cwd":"/w/office","originCwd":"/w/office","isArchived":false,"lastActivityAt":1800000000000}"#)
+        try write(root, "local_b", #"{"cwd":"/w/office/.claude/worktrees/x","spawnedFrom":{"sessionId":"local_a"},"lastActivityAt":1800000100000}"#)
+        // 다른 폴더에서 띄운 세션은 띄운 쪽(최상위) 폴더로 셉니다
+        try write(root, "local_g", #"{"cwd":"/w/elsewhere","spawnedFrom":{"sessionId":"local_a"}}"#)
+        try write(root, org: "org2", "local_c", #"{"cwd":"/w/Blog"}"#)
+        try write(root, "local_d", #"{"cwd":"/w/old","isArchived":true}"#)
+        try write(root, "local_e", #"{"title":"폴더 없음"}"#)
+        try write(root, "local_f", "{ 깨진 파일")
+        let folders = DesktopSessionDirectory(root: root).openFolders()
+        #expect(folders.map(\.path) == ["/w/Blog", "/w/office"])
+        #expect(folders.map(\.name) == ["Blog", "office"])
+        #expect(folders[1].sessions == 3)
+        #expect(folders[1].lastActivity == Date(timeIntervalSince1970: 1_800_000_100))
+        #expect(DesktopSessionDirectory(root: root.appendingPathComponent("없음")).openFolders().isEmpty)
+    }
+
     @Test("정보 파일이 나중에 생기면 잠시 뒤 다시 찾는다")
     func lateFile() throws {
         let root = try temporaryDirectory()

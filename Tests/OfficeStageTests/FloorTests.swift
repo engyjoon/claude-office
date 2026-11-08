@@ -87,6 +87,20 @@ struct FloorTests {
         #expect(h.stage.nameplates[row2]?[Seat(desk: 1)] == "서브")
     }
 
+    @Test("서브가 둘이 되면 걸어가는 중에도 명패가 바로 서브1·서브2 (앉은 뒤에야 바뀌지 않음)")
+    func nameplatesNumberedWhileWalking() throws {
+        var h = FloorHarness()
+        h.hook(hook("SessionStart", session: "m"))
+        h.hook(delegateHook("m", "a1"), at: 1)
+        h.hook(delegateHook("m", "a2"), at: 1.1)
+        h.run(until: 1.4)
+        let row = h.team("m")
+        #expect(h.actor("member-2")?.isWalking == true)
+        #expect(h.stage.nameplates[row]?[Seat(desk: 1)] == "서브1")
+        #expect(h.stage.nameplates[row]?[Seat(desk: 2)] == "서브2")
+        #expect(h.actor("member-2")?.agent.displayName == "서브1")
+    }
+
     @Test("서브가 오면 오른쪽 끝에 책상이 생기고, 가운데 서브가 퇴근하면 오른쪽 끝 사람만 옮겨 앉고 끝 책상을 치운다")
     func desksAttachAndDetach() throws {
         var h = FloorHarness()
@@ -160,16 +174,18 @@ struct FloorTests {
         #expect(h.actor("lead-2")?.position == MapPoint(OfficeLayout.deskX(0), OfficeLayout.firstDeskY))
     }
 
-    @Test("메인을 고르면 그 메인(들)과 서브만 보이고, 고른 메인마다 한 행. '모두'로 돌아가면 그 자리에 바로 다시 선다")
+    @Test("디렉토리를 고르면 그 디렉토리에서 연 메인(들)과 서브만 보이고, 메인마다 한 행. '모두'로 돌아가면 그 자리에 바로 다시 선다")
     func selection() throws {
         var h = FloorHarness()
-        for (index, session) in ["a", "b", "c"].enumerated() { h.hook(hook("SessionStart", session: session), at: Double(index) * 0.2) }
+        for (index, session) in ["a", "b", "c"].enumerated() {
+            h.hook(hook("SessionStart", session: session, cwd: "/w/\(session)"), at: Double(index) * 0.2)
+        }
         h.hook(delegateHook("b", "x1"), at: 1)
         h.hook(delegateHook("c", "y1"), at: 1.1)
         h.run(until: 30)
         #expect(h.stage.actors.count == 5)
         let (a, b, c) = (h.team("a"), h.team("b"), h.team("c"))
-        h.select(FloorSelection(all: false, teams: [c, a]))
+        h.select(FloorSelection(all: false, folders: ["/w/c", "/w/a"]))
         h.run(until: 30.1)
         // 고른 순서가 아니라 메인이 온 순서로 행을 놓습니다
         #expect(h.stage.layout.rows.map(\.team) == [a, c])
@@ -188,38 +204,42 @@ struct FloorTests {
         #expect(lead2.position == h.stage.layout.seat(b, .main).final)
         #expect(lead2.pill?.text == "Edit · A.swift")
         #expect(h.actor("member-4")?.position == h.stage.layout.seat(b, Seat(desk: 1)).final)
+        // 같은 디렉토리에서 연 메인(워크트리 포함)은 모두 그 디렉토리에 속합니다
+        h.select(FloorSelection(all: false, folders: ["/w/a"]))
+        h.hook(hook("SessionStart", session: "a2", cwd: "/w/a/.claude/worktrees/x"), at: 33)
+        #expect(h.stage.layout.rows.map(\.team) == [a, h.team("a2")])
     }
 
-    @Test("새로 온 메인은 '모두'면 자동으로 보이고, 골라 둔 상태면 보이지 않는다")
+    @Test("새로 온 메인은 '모두'면 자동으로 보이고, 디렉토리를 골라 둔 상태면 고르지 않은 디렉토리의 메인은 보이지 않는다")
     func newMainFollowsSelection() {
         var h = FloorHarness()
-        h.hook(hook("SessionStart", session: "a"))
+        h.hook(hook("SessionStart", session: "a", cwd: "/w/a"))
         h.run(until: 1)
-        h.hook(hook("SessionStart", session: "b"), at: 2)
+        h.hook(hook("SessionStart", session: "b", cwd: "/w/b"), at: 2)
         #expect(h.actor("lead-2") != nil)
-        h.select(FloorSelection(all: false, teams: [h.team("a")]))
-        h.hook(hook("SessionStart", session: "c"), at: 3)
+        h.select(FloorSelection(all: false, folders: ["/w/a"]))
+        h.hook(hook("SessionStart", session: "c", cwd: "/w/c"), at: 3)
         #expect(h.actor("lead-3") == nil)
         #expect(h.stage.layout.rows.count == 1)
     }
 
     @Test("창 크기가 바뀌면 들어가는 수를 다시 센다 (사무실은 줄이지 않음)")
     func viewportChanges() {
-        var h = FloorHarness()
+        var h = FloorHarness(width: 1500, height: 648)
         h.hook(hook("SessionStart", session: "m"))
-        for index in 1...12 { h.hook(delegateHook("m", "a\(index)"), at: Double(index) * 0.3) }
+        for index in 1...14 { h.hook(delegateHook("m", "a\(index)"), at: Double(index) * 0.3) }
         h.run(until: 40)
-        #expect(h.stage.actors.count == 11)
+        #expect(h.stage.actors.count == 15)
         // 좁히면 오른쪽 서브가 숨고
-        h.resize(1000, 648)
-        let narrow = OfficeLayout.capacity(width: 1000, height: 648).columns
-        #expect(narrow < 11)
+        h.resize(1140, 648)
+        let narrow = OfficeLayout.capacity(width: 1140, height: 648).columns
+        #expect(narrow == 11)
         #expect(h.stage.actors.count == narrow)
-        #expect(h.floor.plan.hiddenCount == 13 - narrow)
-        #expect(h.stage.layout.width == 1000)
+        #expect(h.floor.plan.hiddenCount == 15 - narrow)
+        #expect(h.stage.layout.width == 1140)
         // 넓히면 모두 보이고 바로 자기 책상에 있습니다
         h.resize(1500, 648)
-        #expect(h.stage.actors.count == 13)
+        #expect(h.stage.actors.count == 15)
         #expect(h.floor.plan.hiddenCount == 0)
         #expect(h.stage.actors.values.allSatisfy { !$0.isWalking })
         #expect(OfficeLayout.displayScale(viewWidth: 1500, viewHeight: 648) == 1)

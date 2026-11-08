@@ -286,9 +286,9 @@ struct RoomTests {
         #expect(roster.teams[0].rows[1].calledBy == "메인1")
         #expect(roster.teams[0].rows.map(\.isMain) == [true, false, false])
         #expect(roster.teams[0].rows.allSatisfy { $0.mainName == "메인1" })
-        let filtered = roster.filtered(to: [roster.teams[1].id])
-        #expect(filtered.teams.map(\.mainName) == ["메인2"])
-        #expect(filtered.agentCount == 1)
-        #expect(roster.filtered(to: nil) == roster)
+        // 디렉토리로 거르기: 두 메인 모두 claude-office 폴더
+        #expect(roster.filtered(folders: [Self.folder]) == roster)
+        #expect(roster.filtered(folders: ["/elsewhere"]).agentCount == 0)
+        #expect(roster.filtered(folders: nil) == roster)
     }
 }

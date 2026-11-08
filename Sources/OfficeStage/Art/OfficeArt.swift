@@ -27,10 +27,13 @@ public enum OfficeArt {
     public static func liveLayers(stage: Stage) -> [ArtLayer] {
         let time = stage.time
         var layers: [ArtLayer] = []
-        let massaged = stage.actors.values.contains { actor in
-            actor.place?.key == "massageChair:0" && !actor.isWalking && actor.position.distance(to: massageSeat) < 1
+        for (index, seat) in OfficeLayout.massageSeats.enumerated() {
+            let massaged = stage.actors.values.contains { actor in
+                actor.place?.key == "massageChair:\(index)" && !actor.isWalking && actor.position.distance(to: seat) < 1
+            }
+            let name = index == 0 ? "massage-roller" : "massage-roller-\(index + 1)"
+            layers.append(ArtLayer(name, depth: seat.y - 0.5, massageRoller(at: seat, time: massaged ? time : nil)))
         }
-        layers.append(ArtLayer("massage-roller", depth: massageSeat.y - 0.5, massageRoller(time: massaged ? time : nil)))
         for actor in stage.sortedActors where actor.pose == .watching && actor.seated && !actor.isWalking {
             layers.append(ArtLayer("monitor-\(actor.id.raw)", depth: actor.position.y + 3.5, monitorProgress(at: actor.position, time: time, seed: actor.id.raw)))
         }
@@ -73,8 +76,11 @@ public enum OfficeArt {
             let to = row.endX + 11
             shapes.append(.rect(from, row.deskY - 84, to - from, 112, r: 26, fill: .swatch(Swatch.teamRugs[color % 4]), outline: false, opacity: 0.5))
         }
-        // 휴게 공간 러그와 현관 매트
-        shapes.append(.rect(6, 176, 286, 78, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
+        // 휴게 공간 러그(소파 구역), 안마 구역 러그, 현관 매트
+        let sofas = OfficeLayout.sofas
+        shapes.append(.rect(6, 176, sofas[sofas.count - 1].maxX + 8 - 6, 78, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
+        let m = OfficeLayout.massageArea
+        shapes.append(.rect(m.x, m.y + 4, m.width, m.height - 6, r: 22, fill: .color(ArtColor(0xD4E2F2)), outline: false, opacity: 0.85))
         shapes.append(.rect(layout.doorX + 4, 162, 64, 10, r: 5, fill: .swatch(.rugC)))
         return shapes
     }
@@ -288,46 +294,43 @@ public enum OfficeArt {
 
     static func lounge() -> [ArtLayer] {
         var layers: [ArtLayer] = []
-        // 소파 (앉는 자리 y 214): 등받이는 앉은 직원 뒤, 앉는 판과 팔걸이는 앞
-        layers.append(ArtLayer("sofa-back", depth: 184, [
-            .rect(20, 172, 116, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
-        ]))
-        layers.append(ArtLayer("sofa-front", depth: 217, [
-            .rect(24, 200, 108, 26, r: 10, fill: .color(ArtColor(0xB3A7E2))),
-            .rect(12, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
-            .rect(126, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
-        ]))
-        // 커피 카운터 (뒷벽 앞, 안마 의자 오른쪽)
-        let c = OfficeLayout.coffeeCounter
-        layers.append(ArtLayer("coffee", depth: c.maxY, [
-            .rect(c.x + 2, c.y + 4, 54, 32, r: 6, fill: .swatch(.wood)),
-            .rect(c.x + 2, c.y, 54, 7, r: 3, fill: .swatch(.woodTop)),
-            .rect(c.x + 10, c.y - 34, 32, 36, r: 6, fill: .swatch(.rack)),
-            .rect(c.x + 17, c.y - 27, 18, 8, r: 2, fill: .swatch(.mint), outline: false),
-            .rect(c.x + 20, c.y - 12, 12, 10, r: 2, fill: .swatch(.white)),
-            .rect(c.x + 45, c.y - 10, 7, 10, r: 2, fill: .swatch(.white), width: 1.1),
-        ]))
+        // 2인용 소파 (앉는 자리 y 214): 등받이는 앉은 직원 뒤, 앉는 판과 팔걸이는 앞
+        for (index, sofa) in OfficeLayout.sofas.enumerated() {
+            let x = sofa.x
+            layers.append(ArtLayer("sofa-back-\(index)", depth: 184, [
+                .rect(x + 6, 172, 84, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
+            ]))
+            layers.append(ArtLayer("sofa-front-\(index)", depth: 217, [
+                .rect(x + 10, 200, 76, 26, r: 10, fill: .color(ArtColor(0xB3A7E2))),
+                .rect(x + 47, 202, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false),
+                .rect(x - 2, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
+                .rect(x + 80, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
+            ]))
+        }
+        // 큰 화분 둘 (두 소파 사이, 소파 구역과 안마 구역 사이)
+        for (index, origin) in OfficeLayout.bigPlants.enumerated() {
+            layers.append(ArtLayer("big-plant-\(index)", depth: origin.y, bigPlant(at: origin)))
+        }
         // 안마 의자: 등판(직원 뒤) → 롤러(움직임, liveLayers) → 직원 → 앉는 판·팔걸이·발판(앞)
-        let s = massageSeat
-        layers.append(ArtLayer("massage-back", depth: s.y - 1, [
-            .rect(s.x - 26, s.y - 98, 52, 80, r: 16, fill: .color(ArtColor(0x6F86A8))),
-            .rect(s.x - 20, s.y - 90, 40, 64, r: 12, fill: .color(ArtColor(0x8EA6C8)), outline: false),
-            .rect(s.x - 18, s.y - 108, 36, 18, r: 9, fill: .color(ArtColor(0x8EA6C8))),
-        ]))
-        layers.append(ArtLayer("massage-front", depth: s.y + 1, [
-            .rect(s.x - 24, s.y - 22, 48, 18, r: 8, fill: .color(ArtColor(0x8EA6C8))),
-            .rect(s.x - 34, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
-            .rect(s.x + 20, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
-            .rect(s.x + 23, s.y - 40, 8, 6, r: 2, fill: .swatch(.mint), outline: false),
-            .rect(s.x - 14, s.y - 4, 28, 12, r: 5, fill: .color(ArtColor(0x6F86A8))),
-        ]))
-        layers.append(ArtLayer("lounge-plant", depth: 214, plant(at: MapPoint(296, 214), scale: 0.55)))
+        for (index, s) in OfficeLayout.massageSeats.enumerated() {
+            layers.append(ArtLayer("massage-back-\(index)", depth: s.y - 1, [
+                .rect(s.x - 26, s.y - 98, 52, 80, r: 16, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x - 20, s.y - 90, 40, 64, r: 12, fill: .color(ArtColor(0x8EA6C8)), outline: false),
+                .rect(s.x - 18, s.y - 108, 36, 18, r: 9, fill: .color(ArtColor(0x8EA6C8))),
+            ]))
+            layers.append(ArtLayer("massage-front-\(index)", depth: s.y + 1, [
+                .rect(s.x - 24, s.y - 22, 48, 18, r: 8, fill: .color(ArtColor(0x8EA6C8))),
+                .rect(s.x - 34, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x + 20, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x + 23, s.y - 40, 8, 6, r: 2, fill: .swatch(.mint), outline: false),
+                .rect(s.x - 14, s.y - 4, 28, 12, r: 5, fill: .color(ArtColor(0x6F86A8))),
+            ]))
+        }
         return layers
     }
 
     /// 안마 의자 등판 롤러 두 개. 누가 앉아 있으면 위아래로 오르내리고, 비어 있으면 위쪽에 멈춰 있습니다.
-    static func massageRoller(time: Double?) -> [ArtShape] {
-        let s = massageSeat
+    static func massageRoller(at s: MapPoint = massageSeat, time: Double?) -> [ArtShape] {
         let phase = time.map { (1 - cos($0 * 2 * Double.pi / 2.6)) / 2 } ?? 0
         let y = s.y - 82 + phase * 46
         return [
@@ -336,6 +339,19 @@ public enum OfficeArt {
             .circle(s.x - 13, y, 5, fill: .swatch(.lavender), width: 1.3),
             .circle(s.x + 13, y, 5, fill: .swatch(.lavender), width: 1.3),
         ]
+    }
+
+    /// 큰 화분 (발 위치 기준): 키 큰 잎 다섯 장과 큰 화분
+    static func bigPlant(at origin: MapPoint) -> [ArtShape] {
+        [
+            .path("M0,-26 C-24,-30 -34,-58 -22,-72 C-12,-56 -4,-42 0,-26 Z", fill: .color(ArtColor(0x86C9A9))),
+            .path("M0,-26 C22,-32 32,-60 20,-74 C10,-58 3,-42 0,-26 Z", fill: .color(ArtColor(0x86C9A9))),
+            .path("M0,-26 C-14,-40 -16,-70 -6,-88 C2,-70 2,-46 0,-26 Z", fill: .color(ArtColor(0x7CBF9E))),
+            .path("M0,-26 C12,-42 16,-72 8,-90 C0,-72 -2,-46 0,-26 Z", fill: .swatch(.mint)),
+            .path("M0,-26 C-30,-24 -40,-44 -34,-52 C-22,-44 -10,-34 0,-26 Z", fill: .swatch(.mint)),
+            .path("M-17,-28 H17 L13,0 H-13 Z", fill: .swatch(.pot)),
+            .rect(-19, -32, 38, 7, r: 3, fill: .swatch(.pot)),
+        ].transformed(scale: 1, offset: origin)
     }
 
     /// 긴 명령을 기다리는 직원의 모니터: 진행 막대가 차오르고 작은 불빛이 깜빡입니다. (x, y)는 직원 발 위치입니다.

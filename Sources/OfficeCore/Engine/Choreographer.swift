@@ -21,6 +21,8 @@ public struct ChoreographyConfig: Hashable, Sendable {
     public var pantryOnLeavePercent = 35
     /// 탕비 코너에 동시에 들르는 최대 인원 (자리 2개)
     public var pantryCapacity = 2
+    /// 안마 의자 수 (휴게 공간 오른쪽 안마 구역, 2026-11-08)
+    public var massageChairs = 2
     /// 승인 요청 노크를 다시 울리는 간격과 최대 횟수(첫 노크 포함)
     public var knockInterval: Double = 30
     public var maxKnocks = 3
@@ -453,7 +455,7 @@ public struct Choreographer: Sendable {
         }
     }
 
-    /// 쉼 단계: 60초 → 휴게 공간(소파·커피), 3분 → 안마 의자(비었으면), 10분 → 잠듦.
+    /// 쉼 단계: 60초 → 휴게 공간(소파), 3분 → 안마 의자(빈 의자가 있으면), 10분 → 잠듦.
     /// 안마 의자에 있으면 그 자리에서 잠들고, 아니면 자기 자리로 돌아가 꾸벅꾸벅 좁니다.
     private mutating func rest(_ id: AgentID, _ current: Presence, elapsed: Double, at now: Date, into out: inout [Directive]) {
         if elapsed >= config.napAfter, current.rest < .nap {
@@ -470,7 +472,7 @@ public struct Choreographer: Sendable {
             }
             modify(id) { $0.rest = .nap }
         } else if elapsed >= config.massageAfter, current.rest == .lounge,
-            !presences.values.contains(where: { $0.spot == .massageChair })
+            presences.values.filter({ $0.spot == .massageChair }).count < config.massageChairs
         {
             move(id, to: .massageChair, into: &out)
             out.append(Directive(id, .prop(nil)))

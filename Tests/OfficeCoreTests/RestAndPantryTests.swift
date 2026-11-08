@@ -13,25 +13,27 @@ struct RestAndPantryTests {
     func hook(_ index: Int) -> Hook { Hook(session: "s\(index)", cwd: Self.folder) }
     func lead(_ index: Int) -> AgentID { AgentID("lead-\(index)") }
 
-    @Test("안마 의자는 하나라 먼저 온 사람만 앉고, 다른 사람은 소파에 남았다가 10분이 되면 자기 자리에서 존다")
+    @Test("안마 의자는 둘이라 먼저 온 두 사람만 앉고, 셋째는 소파에 남았다가 10분이 되면 자기 자리에서 존다")
     func massageChairOccupancy() {
         var h = EngineHarness()
         h.send(hook(1).make("SessionStart"), at: 0)
         h.send(hook(2).make("SessionStart"), at: 0.1)
+        h.send(hook(3).make("SessionStart"), at: 0.2)
         h.send(hook(1).make("Stop"), at: 1)
         h.send(hook(2).make("Stop"), at: 2)
-        h.advance(to: 63)
-        #expect(h.engine.choreographer.spot(of: lead(1)) == .lounge)
-        #expect(h.engine.choreographer.spot(of: lead(2)) == .lounge)
-        h.advance(to: 185)
+        h.send(hook(3).make("Stop"), at: 3)
+        h.advance(to: 64)
+        for index in 1...3 { #expect(h.engine.choreographer.spot(of: lead(index)) == .lounge) }
+        h.advance(to: 186)
         #expect(h.engine.choreographer.spot(of: lead(1)) == .massageChair)
-        #expect(h.engine.choreographer.spot(of: lead(2)) == .lounge)
-        #expect(!h.actions(of: lead(2)).walks.contains(.massageChair))
-        h.advance(to: 605)
+        #expect(h.engine.choreographer.spot(of: lead(2)) == .massageChair)
+        #expect(h.engine.choreographer.spot(of: lead(3)) == .lounge)
+        #expect(!h.actions(of: lead(3)).walks.contains(.massageChair))
+        h.advance(to: 606)
         #expect(h.engine.choreographer.spot(of: lead(1)) == .massageChair)
         #expect(h.actions(of: lead(1)).last == .emote(.zzz) || h.actions(of: lead(1)).contains(.pose(.sleeping)))
-        #expect(h.engine.choreographer.spot(of: lead(2)) == .seat(team(2), .main))
-        #expect(h.actions(of: lead(2)).contains(.pose(.sleeping)))
+        #expect(h.engine.choreographer.spot(of: lead(3)) == .seat(team(3), .main))
+        #expect(h.actions(of: lead(3)).contains(.pose(.sleeping)))
 
         // 안마 의자에서 자다가 새 프롬프트가 오면 깨어 자리로 돌아가고, 의자가 빕니다
         h.send(hook(1).make("UserPromptSubmit"), at: 610)

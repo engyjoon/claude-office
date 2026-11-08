@@ -1,7 +1,9 @@
 import OfficeCore
+import OfficeServer
 import SwiftUI
 
-/// 사무실 창 오른쪽의 직원 현황 패널: 맨 위에서 볼 메인을 고르고(여럿 가능), 고른 메인과 그 서브들이 무엇을 하는지 보여줍니다.
+/// 사무실 창 오른쪽 패널 (2026-11-08): 위는 Claude 데스크톱 앱에 열려 있는 디렉토리 목록(여럿 고르기),
+/// 아래는 고른 디렉토리의 메인과 그 서브들이 무엇을 하는지 보여 주는 직원 현황.
 /// 줄을 누르면 사무실에서 그 캐릭터를 고른 것과 같습니다 (발밑 고리 + 신원 카드).
 struct StaffPanel: View {
     let model: AppModel
@@ -9,6 +11,10 @@ struct StaffPanel: View {
     var body: some View {
         let roster = model.visibleRoster
         VStack(alignment: .leading, spacing: 0) {
+            DirectoryList(model: model)
+
+            Divider()
+
             HStack(alignment: .firstTextBaseline) {
                 Text("직원 현황").font(.system(size: 13, weight: .bold))
                 Spacer()
@@ -17,12 +23,8 @@ struct StaffPanel: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
+            .padding(.top, 10)
             .padding(.bottom, 6)
-
-            MainPicker(model: model)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
 
             if model.hiddenOnScreen > 0 {
                 Label("화면에 다 못 보여 준 \(model.hiddenOnScreen)명", systemImage: "rectangle.dashed")
@@ -30,7 +32,7 @@ struct StaffPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
-                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행). 창을 넓히거나 볼 메인을 줄이면 더 보여요.")
+                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행). 창을 넓히거나 볼 디렉토리를 줄이면 더 보여요.")
             }
 
             Divider()
@@ -39,7 +41,7 @@ struct StaffPanel: View {
                 VStack(spacing: 6) {
                     Image(systemName: "building.2").font(.system(size: 22)).foregroundStyle(.tertiary)
                     Text("아직 출근한 직원이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Text("Claude Code 세션을 시작하면 메인이 출근해요")
+                    Text("Claude 데스크톱 앱에서 세션을 시작하면 메인이 출근해요")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }
@@ -48,8 +50,8 @@ struct StaffPanel: View {
             } else if roster.teams.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 22)).foregroundStyle(.tertiary)
-                    Text("고른 메인이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Button("모두 보기") { model.selectAllMains() }.controlSize(.small)
+                    Text("고른 디렉토리에 출근한 직원이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Button("모두 보기") { model.selectAllFolders() }.controlSize(.small)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -89,42 +91,78 @@ struct StaffPanel: View {
     }
 }
 
-/// 볼 메인 고르기 (체크 목록 + "모두"). 고른 메인마다 사무실에 한 행이 놓입니다.
-private struct MainPicker: View {
+/// Claude 데스크톱 앱에 열려 있는 디렉토리 목록 (체크 목록 + "모두"). 고른 디렉토리에서 연 메인마다 사무실에 한 행이 놓입니다.
+private struct DirectoryList: View {
     let model: AppModel
 
+    /// 목록이 길면 이 높이까지만 늘리고 스크롤합니다
+    private static let maxListHeight: CGFloat = 200
+    private static let rowHeight: CGFloat = 24
+
     var body: some View {
-        Menu {
-            Button {
-                model.selectAllMains()
-            } label: {
-                if model.selection.all { Label("모두", systemImage: "checkmark") } else { Text("모두") }
-            }
-            if !model.roster.teams.isEmpty { Divider() }
-            ForEach(model.roster.teams) { team in
-                Toggle(isOn: Binding(get: { model.isSelected(team.id) }, set: { model.setMain(team.id, selected: $0) })) {
-                    Text(team.mainTitle.map { "\(team.label) — \($0)" } ?? team.label)
+        let directories = model.directories
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("디렉토리").font(.system(size: 13, weight: .bold))
+                Spacer()
+                if !directories.isEmpty {
+                    Text("\(directories.count)개").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
-        } label: {
-            Label(summary, systemImage: "person.2.crop.square.stack")
-                .font(.system(size: 12))
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+
+            if directories.isEmpty {
+                Text("Claude 데스크톱 앱에 열려 있는 디렉토리가 없어요")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Toggle(isOn: Binding(
+                            get: { model.selection.all },
+                            set: { $0 ? model.selectAllFolders() : model.selectNoFolders() })
+                        ) {
+                            Text("모두").font(.system(size: 12, weight: .medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: Self.rowHeight)
+                        .help("새로 연 디렉토리도 자동으로 보여요")
+                        ForEach(directories) { folder in
+                            row(folder)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .padding(.horizontal, 14)
+                }
+                .frame(height: min(CGFloat(directories.count + 1) * Self.rowHeight + 4, Self.maxListHeight))
+                .padding(.bottom, 6)
+            }
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
-        .help("사무실과 직원 현황에 보여 줄 메인을 골라요 (여럿 가능)")
     }
 
-    private var summary: String {
-        let teams = model.roster.teams
-        if model.selection.all { return teams.isEmpty ? "모든 메인" : "모든 메인 (\(teams.count))" }
-        let picked = teams.filter { model.isSelected($0.id) }
-        if picked.isEmpty { return "고른 메인 없음" }
-        if picked.count <= 2 { return picked.map(\.mainName).joined(separator: ", ") }
-        return "메인 \(picked.count)개"
+    private func row(_ folder: DesktopFolder) -> some View {
+        let count = model.headcount(folder: folder.path)
+        return Toggle(isOn: Binding(
+            get: { model.isSelected(folder: folder.path) },
+            set: { model.setFolder(folder.path, selected: $0) })
+        ) {
+            HStack(spacing: 5) {
+                Image(systemName: "folder").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(folder.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                if count.people > 0 {
+                    Text(count.mains > 1 ? "메인 \(count.mains) · \(count.people)명" : "\(count.people)명")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: Self.rowHeight)
+        .help("\(folder.path)\n열린 세션 \(folder.sessions)개")
     }
 }
 

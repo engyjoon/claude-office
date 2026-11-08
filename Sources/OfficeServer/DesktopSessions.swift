@@ -15,14 +15,23 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     /// 이 세션을 띄운 데스크톱 세션 (`spawnedFrom.sessionId`). 사용자가 직접 연 메인 세션은 nil.
     public var parentLocalID: String?
     public var title: String?
+    /// 데스크톱 앱에서 보관(닫음)한 세션
+    public var isArchived: Bool
+    /// 마지막 활동 시각 (`lastActivityAt`, 밀리초)
+    public var lastActivity: Date?
 
-    public init(localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?) {
+    public init(
+        localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?,
+        isArchived: Bool = false, lastActivity: Date? = nil
+    ) {
         self.localID = localID
         self.cliSessionID = cliSessionID
         self.cwd = cwd
         self.originCwd = originCwd
         self.parentLocalID = parentLocalID
         self.title = title
+        self.isArchived = isArchived
+        self.lastActivity = lastActivity
     }
 
     public static func parse(_ data: Data, localID: String) -> DesktopSessionRecord? {
@@ -38,12 +47,33 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             cwd: text(json["cwd"]),
             originCwd: text(json["originCwd"]),
             parentLocalID: parent,
-            title: text(json["title"])
+            title: text(json["title"]),
+            isArchived: json["isArchived"]?.boolValue ?? false,
+            lastActivity: json["lastActivityAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }
 
     /// 방을 정할 때 쓰는 폴더 (워크트리 세션은 originCwd가 원래 폴더일 수 있어 먼저 봅니다)
     var folder: String? { originCwd ?? cwd }
+}
+
+/// 데스크톱 앱에 열려 있는 디렉토리 하나 (직원 현황 패널 위 디렉토리 목록, 2026-11-08)
+public struct DesktopFolder: Identifiable, Hashable, Sendable {
+    /// `Team.folder`와 같은 형식의 경로 (워크트리는 원래 폴더)
+    public var path: String
+    /// 그 폴더에서 열려 있는(보관하지 않은) 세션 수
+    public var sessions: Int
+    public var lastActivity: Date?
+
+    public init(path: String, sessions: Int, lastActivity: Date? = nil) {
+        self.path = path
+        self.sessions = sessions
+        self.lastActivity = lastActivity
+    }
+
+    public var id: String { path }
+    /// 폴더 이름
+    public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 }
 
 /// 데스크톱 앱 세션 정보 파일을 찾아 읽고, 훅 이벤트에 붙일 방 힌트(`SessionHint`)를 만듭니다.
@@ -91,6 +121,43 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
             parentID = parent.parentLocalID
         }
         return SessionHint(hostSession: record.localID, ancestors: ancestors, rootCwd: rootRecord.folder, title: record.title)
+    }
+
+    /// 데스크톱 앱에 열려 있는(보관하지 않은) 세션들의 디렉토리 목록. 폴더 이름순.
+    /// 띄운 세션은 사무실에서 띄운 쪽 행에 앉으므로 최상위 세션의 폴더로 셉니다.
+    /// 세션 정보 파일을 모두 다시 읽으므로 메인 스레드가 아닌 곳에서 가끔(몇 초마다) 부르세요.
+    public func openFolders() -> [DesktopFolder] {
+        let fileManager = FileManager.default
+        var records: [String: DesktopSessionRecord] = [:]
+        for folder in accountFolders(refresh: true, at: now()) {
+            let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
+            for name in names where name.hasSuffix(".json") {
+                let localID = String(name.dropLast(5))
+                guard HookRequestPolicy.isHostSessionID(localID),
+                      let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
+                      let record = DesktopSessionRecord.parse(data, localID: localID) else { continue }
+                records[localID] = record
+            }
+        }
+        var folders: [String: DesktopFolder] = [:]
+        for record in records.values where !record.isArchived {
+            var root = record
+            var visited: Set<String> = [record.localID]
+            while let parentID = root.parentLocalID, visited.count <= Self.maxDepth, visited.insert(parentID).inserted,
+                  let parent = records[parentID] {
+                root = parent
+            }
+            guard let raw = root.folder ?? record.folder else { continue }
+            let path = Team.folder(for: raw)
+            var entry = folders[path] ?? DesktopFolder(path: path, sessions: 0)
+            entry.sessions += 1
+            if let activity = record.lastActivity, entry.lastActivity.map({ $0 < activity }) ?? true { entry.lastActivity = activity }
+            folders[path] = entry
+        }
+        return folders.values.sorted { a, b in
+            let order = a.name.localizedStandardCompare(b.name)
+            return order == .orderedSame ? a.path < b.path : order == .orderedAscending
+        }
     }
 
     /// 캐시된 정보 파일 (없으면 찾아서 읽습니다)

@@ -32,8 +32,8 @@ public struct Place: Hashable, Sendable {
 ///
 /// ```
 /// ┌───────────────────────────────────────────────────────────────────────────────┐
-/// │ 액자 시계   [커피] [책장] [창문]   [화이트보드]  [출입문]  [냉장고][정수기][컵]   │ ← 뒷벽
-/// │ 소파 안마의자                                               (탕비 코너)        │ ← 공용 공간 (위쪽)
+/// │ 액자 시계            [책장] [창문]   [화이트보드]  [출입문]  [냉장고][정수기][컵]   │ ← 뒷벽
+/// │ 소파 🌿 소파 🌿 [안마 의자 둘]                               (탕비 코너)        │ ← 공용 공간 (위쪽)
 /// │ ★메인1  서브1  서브2  서브3                                                    │ ← 행 1
 /// │ ★메인2  서브1  서브2  서브3  서브4  서브5  서브6  서브7  서브8  서브9  +3        │ ← 행 2
 /// │ ★메인3  서브                                                                   │ ← 행 3 (최대 3행)
@@ -43,7 +43,7 @@ public struct Place: Hashable, Sendable {
 /// - 행 하나 = 메인 하나: 가장 왼쪽 책상이 메인, 오른쪽으로 그 메인의 서브 책상이 사람 수만큼 (빈 책상 없음).
 /// - 행은 메인이 온 순서대로 위에서 아래로 쌓고, 최대 3행까지 보여 줍니다. 화면에 들어가지 않는 행·서브는 그리지 않고
 ///   행 끝에 "+N"을 답니다 (판단은 `FloorPlan`).
-/// - 공용 공간(휴게 공간: 소파·안마 의자·커피, 책장, 화이트보드, 출입문, 탕비 코너)은 모두 위쪽 뒷벽 앞에 모았습니다.
+/// - 공용 공간(휴게 공간: 2인용 소파 둘·큰 화분 둘·안마 의자 둘, 책장, 화이트보드, 출입문, 탕비 코너)은 모두 위쪽 뒷벽 앞에 모았습니다.
 public struct OfficeLayout: Hashable, Sendable {
     public static let tile = 16.0
     public static let wallBottom = 160.0
@@ -64,23 +64,30 @@ public struct OfficeLayout: Hashable, Sendable {
     public static let moreBadgeWidth = 46.0
     /// 맨 아래 행 밑의 여백
     public static let bottomMargin = 36.0
-    /// 이보다 작은 화면에서는 사무실을 줄여서 보여 줍니다 (뒷벽 가구가 겹치지 않는 최소 크기)
-    public static let minWidth = 960.0
-    public static let minHeight = firstDeskY + bottomMargin
+    /// 이보다 작은 화면에서는 사무실을 줄여서 보여 줍니다. 폭은 뒷벽 가구(책장·화이트보드·출입문·탕비 코너)가 겹치지 않는 최소 크기(1130),
+    /// 높이는 3행(`maxRows`)이 모두 들어가는 크기입니다 (사무실 창도 이보다 낮아지지 않게 막습니다).
+    public static let minWidth = bookshelfX + 132 + 18 + 162 + 116 + 212
+    public static let minHeight = firstDeskY + rowSpacing * Double(maxRows - 1) + bottomMargin
     /// 창을 처음 열었을 때의 사무실 영역 (창 1400×700 − 직원 현황 패널 260 − 제목 막대)
     public static let defaultWidth = 1140.0
     public static let defaultHeight = 648.0
 
-    /// 휴게 공간 (위쪽 왼쪽): 소파 두 자리, 안마 의자, 커피 카운터
-    public static let lounge = MapRect(0, 160, 300, 100)
-    /// 안마 의자에 앉는 자리 (발 위치)
-    public static let massageSeat = MapPoint(178, 236)
-    /// 커피 카운터 (뒷벽 앞)
-    static let coffeeCounter = MapRect(222, 176, 58, 36)
-    static let sofa = MapRect(14, 168, 128, 56)
-    static let massageChair = MapRect(148, 186, 60, 58)
+    /// 휴게 공간 (위쪽 왼쪽, 2026-11-08): 2인용 소파 둘(사이에 큰 화분) → 큰 화분 → 안마 구역(안마 의자 둘)
+    public static let lounge = MapRect(0, 160, 470, 100)
+    /// 2인용 소파 둘 (앉는 자리는 소파마다 두 곳)
+    public static let sofas = [MapRect(14, 168, 96, 56), MapRect(154, 168, 96, 56)]
+    /// 큰 화분 (발 위치): 두 소파 사이, 소파 구역과 안마 구역 사이
+    public static let bigPlants = [MapPoint(132, 228), MapPoint(278, 230)]
+    /// 안마 구역 (러그)
+    public static let massageArea = MapRect(304, 172, 170, 84)
+    /// 안마 의자에 앉는 자리 (발 위치), 의자마다 하나
+    public static let massageSeats = [MapPoint(350, 236), MapPoint(428, 236)]
+    /// 첫 안마 의자 자리 (예전 이름, 테스트·그림에서 씀)
+    public static var massageSeat: MapPoint { massageSeats[0] }
+    static func massageChair(_ seat: MapPoint) -> MapRect { MapRect(seat.x - 30, seat.y - 50, 60, 58) }
+    static func bigPlantObstacle(_ origin: MapPoint) -> MapRect { MapRect(origin.x - 14, origin.y - 18, 28, 20) }
     /// 책장 왼쪽 x (휴게 공간 오른쪽)
-    public static let bookshelfX = 318.0
+    public static let bookshelfX = 490.0
 
     /// 화면에 들어가는 수
     public struct Capacity: Hashable, Sendable {
@@ -217,14 +224,13 @@ public struct OfficeLayout: Hashable, Sendable {
         case .whiteboard: points = [(MapPoint(whiteboardX + 34, 200), nil), (MapPoint(whiteboardX + 90, 202), nil)]
         case .pantry: points = [(MapPoint(pantryX + 38, 204), nil), (MapPoint(pantryX + 116, 206), nil)]
         case .lounge:
-            // 소파에 앉는 두 자리는 소파 앞에서 들어갑니다. 나머지 둘은 커피 카운터 앞에 서는 자리.
-            points = [
-                (MapPoint(52, 214), MapPoint(52, 250)), (MapPoint(104, 214), MapPoint(104, 250)),
-                (MapPoint(236, 238), nil), (MapPoint(278, 242), nil),
-            ]
+            // 2인용 소파 둘에 두 자리씩, 소파 앞에서 들어가 앉습니다
+            points = Self.sofas.flatMap { sofa in
+                [sofa.x + 28, sofa.x + 68].map { x in (MapPoint(x, 214), MapPoint(x, 250)) as (MapPoint, MapPoint?) }
+            }
         case .massageChair:
             // 의자 앞에서 앉습니다
-            points = [(Self.massageSeat, MapPoint(Self.massageSeat.x, 272))]
+            points = Self.massageSeats.map { ($0, MapPoint($0.x, 272)) }
         }
         return points.enumerated().map { index, item in
             Place(final: item.0, approach: item.1, key: "\(zone.rawValue):\(index)")
@@ -238,7 +244,7 @@ public struct OfficeLayout: Hashable, Sendable {
         case .bookshelf: area = MapRect(Self.bookshelfX, 222, 140, 40)
         case .whiteboard: area = MapRect(whiteboardX - 10, 222, 150, 40)
         case .pantry: area = MapRect(pantryX, 226, 200, 36)
-        case .lounge, .massageChair: area = MapRect(20, 258, 280, 20)
+        case .lounge, .massageChair: area = MapRect(20, 258, 440, 20)
         }
         let anchor = slots(zone)[0].final
         // 정해진 자리와 너무 가까운 점은 빼서 겹쳐 보이지 않게 합니다
@@ -287,7 +293,7 @@ public struct OfficeLayout: Hashable, Sendable {
                 rects.append(MapRect(Self.deskX(desk) - Self.deskWidth / 2, row.deskY - 33, Self.deskWidth, 38))
             }
         }
-        rects += [Self.sofa, Self.massageChair, Self.coffeeCounter]
+        rects += Self.sofas + Self.massageSeats.map(Self.massageChair) + Self.bigPlants.map(Self.bigPlantObstacle)
         return rects
     }
 

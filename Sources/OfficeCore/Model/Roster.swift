@@ -166,10 +166,10 @@ public struct Roster: Hashable, Sendable {
         return Roster(teams: teams, waiting: waiting)
     }
 
-    /// 선택한 행만 남긴 목록 (직원 현황 패널). nil이면 모두.
-    public func filtered(to teamIDs: Set<TeamID>?) -> Roster {
-        guard let teamIDs else { return self }
-        let kept = teams.filter { teamIDs.contains($0.id) }
+    /// 고른 디렉토리(폴더)의 메인 행만 남긴 목록 (직원 현황 패널). nil이면 모두.
+    public func filtered(folders: Set<String>?) -> Roster {
+        guard let folders else { return self }
+        let kept = teams.filter { folders.contains($0.folder) }
         return Roster(teams: kept, waiting: kept.flatMap(\.rows).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since })
     }
 

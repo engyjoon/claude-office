@@ -182,6 +182,11 @@ public struct Stage: Sendable {
             if directive.action == .clearQueue {
                 queues[id] = []
                 interrupt(id)
+            } else if case .refresh = directive.action, actors[id] != nil {
+                // 직함·자리 정보는 걷는 중에도 바로 바꿉니다 (명패가 앉은 뒤에야 "서브" → "서브1"로 바뀌지 않게).
+                // 이미 줄 서 있던 옛 정보는 버립니다.
+                queues[id]?.removeAll { if case .refresh = $0 { true } else { false } }
+                perform(directive.action, for: id)
             } else {
                 queues[id, default: []].append(directive.action)
             }

@@ -1,21 +1,23 @@
 import Foundation
 import OfficeCore
 
-/// 사무실 창에서 고른 메인 (설계서 §10, M5(1)). 처음에는 모두.
+/// 사무실 창에서 고른 디렉토리 (직원 현황 패널 위 디렉토리 목록, 2026-11-08). 처음에는 모두.
+/// 고른 디렉토리에서 연 메인과 그 서브가 사무실에 놓입니다.
 public struct FloorSelection: Hashable, Sendable {
-    /// 모두 보기. 새로 온 메인도 자동으로 들어갑니다.
+    /// 모두 보기. 새로 열린 디렉토리의 메인도 자동으로 들어갑니다.
     public var all: Bool
-    /// `all`이 아닐 때 고른 행
-    public var teams: Set<TeamID>
+    /// `all`이 아닐 때 고른 디렉토리 (`Team.folder`와 같은 형식: 워크트리는 원래 폴더)
+    public var folders: Set<String>
 
-    public init(all: Bool = true, teams: Set<TeamID> = []) {
+    public init(all: Bool = true, folders: Set<String> = []) {
         self.all = all
-        self.teams = teams
+        self.folders = folders
     }
 
     public static let everyone = FloorSelection()
 
-    public func contains(_ team: TeamID) -> Bool { all || teams.contains(team) }
+    public func contains(folder: String) -> Bool { all || folders.contains(folder) }
+    public func contains(_ team: Team) -> Bool { contains(folder: team.folder) }
 }
 
 /// 화면에 무엇을 보여 줄지 (순수 계산). 고른 메인의 행을 온 순서대로 위에서부터 놓고,
@@ -41,7 +43,7 @@ public struct FloorPlan: Hashable, Sendable {
 
     public static func make(state: OfficeState, selection: FloorSelection, capacity: OfficeLayout.Capacity) -> FloorPlan {
         var plan = FloorPlan.empty
-        for team in state.sortedTeams where selection.contains(team.id) {
+        for team in state.sortedTeams where selection.contains(team) {
             let people = state.agents(in: team.id)
             guard !people.isEmpty else { continue }
             if plan.rows.count >= capacity.rows {
@@ -146,7 +148,7 @@ public struct OfficeFloor: Sendable {
 
     // MARK: - 선택과 화면 크기
 
-    /// 고른 메인이 바뀜: 숨은 사람은 내리고, 새로 보이는 사람은 그 자리에 바로 놓습니다.
+    /// 고른 디렉토리가 바뀜: 숨은 사람은 내리고, 새로 보이는 사람은 그 자리에 바로 놓습니다.
     public mutating func setSelection(_ selection: FloorSelection, engine: OfficeEngine) {
         guard selection != self.selection else { return }
         self.selection = selection

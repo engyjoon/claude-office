@@ -1,4 +1,5 @@
 import OfficeCore
+import OfficeStage
 import SpriteKit
 import SwiftUI
 
@@ -46,7 +47,8 @@ struct OfficeWindowView: View {
     var body: some View {
         HStack(spacing: 0) {
             SpriteView(scene: model.officeScene, preferredFramesPerSecond: 30)
-                .frame(minWidth: 480, minHeight: 320)
+                // 3행이 언제나 다 보이도록 사무실 영역이 3행 높이보다 낮아지지 않게 합니다
+                .frame(minWidth: 480, minHeight: OfficeLayout.minHeight)
                 .background(Color(red: 0.945, green: 0.902, blue: 0.839))
                 .overlay(alignment: .topTrailing) {
                     // 캐릭터를 클릭하면 누구인지 보여줍니다. 빈 곳 클릭·✕·Esc로 닫습니다.

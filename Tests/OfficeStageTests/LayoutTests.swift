@@ -56,7 +56,7 @@ struct LayoutTests {
 
     @Test("공용 공간(휴게·책장·화이트보드·출입문·탕비 코너)은 모두 첫 행 위에 있고 행과 겹치지 않는다")
     func commonAreaOnTop() {
-        for width in [960.0, 1140, 1400, 1800] {
+        for width in [OfficeLayout.minWidth, 1140, 1400, 1800] {
             let layout = OfficeLayout(width: width, height: 648, rooms: [.init(team: main, desks: 12)])
             let firstRowTop = layout.rows[0].deskY - 60  // 의자 윗면
             for zone in OfficeLayout.Zone.allCases {
@@ -65,7 +65,12 @@ struct LayoutTests {
                     #expect(slot.final.x > 0 && slot.final.x < layout.width, "\(zone) \(slot.final) 폭 \(width)")
                 }
             }
-            #expect(OfficeLayout.sofa.maxY < firstRowTop && OfficeLayout.massageChair.maxY < firstRowTop)
+            for rect in OfficeLayout.sofas + OfficeLayout.massageSeats.map(OfficeLayout.massageChair) {
+                #expect(rect.maxY < firstRowTop)
+            }
+            // 휴게 공간(소파 구역 → 큰 화분 → 안마 구역)은 책장 앞을 막지 않습니다
+            #expect(OfficeLayout.massageArea.maxX < OfficeLayout.bookshelfX)
+            #expect(layout.slots(.lounge).count == 4 && layout.slots(.massageChair).count == 2)
             #expect(layout.doorPoint.y < firstRowTop)
             // 뒷벽 가구는 서로 겹치지 않고 화면 안에 있습니다
             let walls: [(Double, Double)] = [(OfficeLayout.bookshelfX, 132)] + layout.windowXs.map { ($0, 104) }
@@ -83,12 +88,14 @@ struct LayoutTests {
         #expect(OfficeLayout.capacity(width: 1140, height: 648) == .init(columns: 11, rows: 3))
         // 직원 현황을 숨기면 더 넓게
         #expect(OfficeLayout.capacity(width: 1400, height: 648).columns == 14)
-        // 키가 작으면 행이 줄고, 아무리 커도 3행까지
-        #expect(OfficeLayout.capacity(width: 1140, height: 520).rows == 2)
-        #expect(OfficeLayout.capacity(width: 1140, height: 400).rows == 1)
+        // 언제나 3행 (사무실 창이 3행 높이보다 낮아지지 않고, 더 낮은 화면은 줄여서 보여 줌). 아무리 커도 3행까지
+        #expect(OfficeLayout.minHeight == 638)
+        #expect(OfficeLayout.capacity(width: 1140, height: 520).rows == 3)
+        #expect(OfficeLayout.capacity(width: 1140, height: 400).rows == 3)
         #expect(OfficeLayout.capacity(width: 2400, height: 1600).rows == 3)
+        #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 574) < 1)
         // 들어간다고 센 마지막 책상과 "+N"은 화면 안에 있습니다
-        for width in [960.0, 1140, 1400, 2000] {
+        for width in [OfficeLayout.minWidth, 1140, 1400, 2000] {
             let capacity = OfficeLayout.capacity(width: width, height: 648)
             let layout = OfficeLayout(width: width, height: 648, rooms: [.init(team: main, desks: capacity.columns, hidden: 3)])
             #expect(layout.rows[0].endX + OfficeLayout.moreBadgeWidth <= width)
@@ -105,7 +112,7 @@ struct LayoutTests {
         #expect(OfficeLayout.displayScale(viewWidth: 1140, viewHeight: 648) == 1)
         #expect(OfficeLayout.displayScale(viewWidth: 1400, viewHeight: 900) == 1)
         #expect(OfficeLayout.displayScale(viewWidth: 2560, viewHeight: 1400) == 1)
-        #expect(OfficeLayout.displayScale(viewWidth: 480, viewHeight: 648) == 0.5)
+        #expect(OfficeLayout.displayScale(viewWidth: 565, viewHeight: 648) == 0.5)
         let layout = OfficeLayout(width: 1300, height: 700)
         #expect(layout.width == 1300 && layout.height == 700)
         #expect(OfficeLayout(width: 500, height: 200).width == OfficeLayout.minWidth)

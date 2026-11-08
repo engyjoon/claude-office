@@ -41,14 +41,18 @@ final class AppModel {
     private(set) var selectedAgent: AgentID?
     /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
     private(set) var soundSettings: SoundSettings
-    /// 사무실 창에서 고른 메인 (직원 현황 위 선택기, M5(1)). 처음엔 모두.
+    /// 사무실 창에서 고른 디렉토리 (직원 현황 위 디렉토리 목록). 처음엔 모두.
     private(set) var selection: FloorSelection
-    /// 고른 메인의 사람 중 사무실 화면에 다 못 보여 준 수
+    /// 고른 디렉토리의 사람 중 사무실 화면에 다 못 보여 준 수
     private(set) var hiddenOnScreen = 0
+    /// Claude 데스크톱 앱에 열려 있는 디렉토리 (몇 초마다 새로 읽음)
+    private(set) var directories: [DesktopFolder] = []
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var directoryTimer: Timer?
+    @ObservationIgnored private var loadingDirectories = false
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     let installer = HookInstaller()
     let endpointURL = EndpointFile.defaultURL()
@@ -63,7 +67,9 @@ final class AppModel {
 
     private static let privacyKey = "privacy"
     private static let selectAllKey = "office.selection.all"
-    private static let selectedTeamsKey = "office.selection.teams"
+    private static let selectedFoldersKey = "office.selection.folders"
+    /// 디렉토리 목록을 새로 읽는 간격
+    private static let directoryRefreshInterval: TimeInterval = 5
     private static let maxLogEntries = 600
 
     init() {
@@ -74,11 +80,11 @@ final class AppModel {
         soundSettings = sound
         soundPlayer = SoundPlayer(settings: sound)
         stageStore.privacy = saved
-        // 고른 메인은 기억해 둡니다 (행 id는 앱을 다시 켜면 바뀌므로, 다시 켰을 때는 "모두" 여부만 의미가 있음)
+        // 고른 디렉토리는 기억해 둡니다 (앱을 다시 켜도 이어짐)
         let defaults = UserDefaults.standard
         let all = defaults.object(forKey: Self.selectAllKey) as? Bool ?? true
-        let savedTeams = Set((defaults.stringArray(forKey: Self.selectedTeamsKey) ?? []).map(TeamID.init))
-        let selection = FloorSelection(all: all, teams: savedTeams)
+        let savedFolders = Set(defaults.stringArray(forKey: Self.selectedFoldersKey) ?? [])
+        let selection = FloorSelection(all: all, folders: savedFolders)
         self.selection = selection
         stageStore.floor = OfficeFloor(selection: selection)
         officeScene = OfficeScene(store: stageStore)
@@ -87,6 +93,7 @@ final class AppModel {
         refreshHookStatus()
         startServer()
         startTicking()
+        startDirectoryRefresh()
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -122,6 +129,7 @@ final class AppModel {
 
     func shutdown() {
         timer?.invalidate()
+        directoryTimer?.invalidate()
         server?.stop()
         EndpointFile.remove(at: endpointURL)
     }
@@ -196,34 +204,67 @@ final class AppModel {
         if hidden != hiddenOnScreen { hiddenOnScreen = hidden }
     }
 
-    // MARK: - 메인 선택 (M5(1))
+    // MARK: - 디렉토리 선택 (2026-11-08)
 
-    /// 직원 현황 패널에 보여 줄 목록 (고른 메인과 그 서브만)
+    /// 데스크톱 앱 세션 정보 파일을 몇 초마다 다시 읽어 열려 있는 디렉토리 목록을 맞춥니다 (파일 읽기는 백그라운드).
+    private func startDirectoryRefresh() {
+        refreshDirectories()
+        let timer = Timer(timeInterval: Self.directoryRefreshInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshDirectories() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        directoryTimer = timer
+    }
+
+    func refreshDirectories() {
+        guard !loadingDirectories else { return }
+        loadingDirectories = true
+        let directory = desktopSessions
+        Task.detached(priority: .utility) {
+            let folders = directory.openFolders()
+            await MainActor.run {
+                self.loadingDirectories = false
+                if folders != self.directories { self.directories = folders }
+            }
+        }
+    }
+
+    /// 직원 현황 패널에 보여 줄 목록 (고른 디렉토리의 메인과 그 서브만)
     var visibleRoster: Roster {
-        selection.all ? roster : roster.filtered(to: selection.teams)
+        selection.all ? roster : roster.filtered(folders: selection.folders)
     }
 
-    func isSelected(_ team: TeamID) -> Bool {
-        selection.contains(team)
+    func isSelected(folder: String) -> Bool {
+        selection.contains(folder: folder)
     }
 
-    func selectAllMains() {
-        setSelection(FloorSelection(all: true, teams: []))
+    /// 그 디렉토리에서 지금 사무실에 있는 메인 수와 사람 수
+    func headcount(folder: String) -> (mains: Int, people: Int) {
+        let teams = roster.teams.filter { $0.folder == folder }
+        return (teams.count, teams.reduce(0) { $0 + $1.rows.count })
     }
 
-    /// 메인 하나를 켜고 끕니다. "모두"였으면 지금 있는 메인 중 그 하나만 뺀 선택으로 바뀝니다.
-    func setMain(_ team: TeamID, selected: Bool) {
-        var teams = selection.all ? Set(roster.teams.map(\.id)) : selection.teams
-        if selected { teams.insert(team) } else { teams.remove(team) }
-        let all = Set(roster.teams.map(\.id))
-        setSelection(FloorSelection(all: selection.all && teams == all, teams: teams))
+    func selectAllFolders() {
+        setSelection(FloorSelection(all: true, folders: []))
+    }
+
+    /// "모두"를 끄면 아무 디렉토리도 고르지 않은 상태가 됩니다 (하나씩 골라 켜기)
+    func selectNoFolders() {
+        setSelection(FloorSelection(all: false, folders: []))
+    }
+
+    /// 디렉토리 하나를 켜고 끕니다. "모두"였으면 지금 열린 디렉토리 중 그 하나만 뺀 선택으로 바뀝니다.
+    func setFolder(_ folder: String, selected: Bool) {
+        var folders = selection.all ? Set(directories.map(\.path)) : selection.folders
+        if selected { folders.insert(folder) } else { folders.remove(folder) }
+        setSelection(FloorSelection(all: false, folders: folders))
     }
 
     private func setSelection(_ selection: FloorSelection) {
         self.selection = selection
         let defaults = UserDefaults.standard
         defaults.set(selection.all, forKey: Self.selectAllKey)
-        defaults.set(selection.teams.map(\.raw).sorted(), forKey: Self.selectedTeamsKey)
+        defaults.set(selection.folders.sorted(), forKey: Self.selectedFoldersKey)
         stageStore.floor.setSelection(selection, engine: engine)
         updateHidden()
         if let selectedAgent, visibleRoster.row(for: selectedAgent) == nil { select(nil) }
