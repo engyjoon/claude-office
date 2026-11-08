@@ -396,8 +396,7 @@ public enum OverlayArt {
             return [
                 ArtShape(.path(tailRect(f, radius: style.radius, tip: tip)), fill: .swatch(.butter), stroke: .swatch(.ink), lineWidth: 2.4),
                 .line(burst, width: 1.8),
-                .circle(f.x + 2, f.y + 1, 8, fill: .swatch(.alert)),
-                .text("!", f.x + 2, f.y + 1, size: 12, bold: true, color: .swatch(.white), baseline: .central),
+                // 왼쪽 위 "!" 원은 없앰 (M5(9) 화면 확인: 머리 위 "!" 아이콘과 겹쳐 두 번 보임)
                 label,
             ]
         }

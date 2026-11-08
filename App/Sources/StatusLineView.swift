@@ -6,7 +6,7 @@ import SwiftUI
 /// 내용은 OfficeCore의 `StatusLine`이 정하고(행 순서·표시 수준·묶기), 여기서는 색과 시간만 붙입니다.
 /// - 아무도 안 골랐으면 사무실의 행과 같은 순서로 행마다 한 줄: "● 디렉토리 · 메인1 · 그 행의 가장 최근 일 (3초 전)".
 /// - 캐릭터를 골랐으면 그 사람의 최근 일 세 개 (최신이 아래), 첫 줄 맨 앞에 "● 디렉토리 · 직함".
-/// 머리(점·디렉토리·직함)는 왼쪽 칸에 모아 줄마다 본문의 시작을 맞춥니다. 줄 위치는 고정이고, 바뀔 때 움직임 없이 바로 바꿉니다.
+/// 점·디렉토리·직함·본문을 칸으로 나눠 세 줄의 왼쪽을 칸마다 맞춥니다. 줄 위치는 고정이고, 바뀔 때 움직임 없이 바로 바꿉니다.
 struct StatusLineView: View {
     let line: StatusLine
 
@@ -20,16 +20,21 @@ struct StatusLineView: View {
     var body: some View {
         // 시간이 붙은 줄이 있으면 1초마다 다시 그립니다 ("12초째", "3초 전", 쉬는 중 → 잠든 중)
         TimelineView(.periodic(from: .now, by: line.ticks ? 1 : 60)) { context in
-            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
+            // 칸: 점 | 디렉토리 | 직함 | 본문. 칸마다 왼쪽을 맞춰 세 줄의 디렉토리·직함·본문 시작이 같습니다 (M5(9) 화면 확인).
+            // 디렉토리를 하나 골라 폴더 이름이 없으면 그 칸을 뺍니다.
+            let showsFolder = line.lines.contains { $0.folder != nil }
+            Grid(alignment: .leading, horizontalSpacing: 5, verticalSpacing: 0) {
                 ForEach(0..<StatusLine.lineCount, id: \.self) { index in
                     GridRow {
                         if index < line.lines.count {
                             let item = line.lines[index]
-                            head(item)
+                            dot(item)
+                            if showsFolder { folder(item) }
+                            title(item)
                             body(item, now: context.date)
                                 .help(item.text(now: context.date))
                         } else {
-                            Color.clear.gridCellColumns(2)
+                            Color.clear.gridCellColumns(showsFolder ? 4 : 3)
                         }
                     }
                     .frame(height: Self.lineHeight)
@@ -46,27 +51,41 @@ struct StatusLineView: View {
         .transaction { $0.animation = nil }
     }
 
-    /// 왼쪽 칸: 행 색 점, 흐린 디렉토리 이름, 직함 (없으면 빈 칸)
+    /// 첫 칸: 행 색 점 (안내 줄은 말풍선 아이콘, 고른 사람의 둘째·셋째 줄은 빈 칸)
     @ViewBuilder
-    private func head(_ item: StatusLine.Line) -> some View {
-        HStack(spacing: 5) {
-            if let colorIndex = item.colorIndex {
-                Circle().fill(Palette.team(colorIndex))
-                    .overlay(Circle().stroke(Color.primary.opacity(0.35), lineWidth: 0.8))
-                    .frame(width: 8, height: 8)
-            } else if line.mode == .office, item.head == nil {
-                Image(systemName: "text.bubble").font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-            if let folder = item.folder {
-                Text("\(folder) ·").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            if let head = item.head {
-                Text(line.mode == .office ? "\(head) ·" : head)
-                    .font(.system(size: 12, weight: line.mode == .agent ? .bold : .semibold))
-                    .lineLimit(1)
-            }
+    private func dot(_ item: StatusLine.Line) -> some View {
+        if let colorIndex = item.colorIndex {
+            Circle().fill(Palette.team(colorIndex))
+                .overlay(Circle().stroke(Color.primary.opacity(0.35), lineWidth: 0.8))
+                .frame(width: 8, height: 8)
+        } else if line.mode == .office, item.head == nil {
+            Image(systemName: "text.bubble").font(.system(size: 10)).foregroundStyle(.secondary)
+        } else {
+            Color.clear.frame(width: 8, height: 8)
         }
-        .fixedSize()
+    }
+
+    /// 둘째 칸: 흐린 디렉토리 이름 ("모두"일 때)
+    @ViewBuilder
+    private func folder(_ item: StatusLine.Line) -> some View {
+        if let folder = item.folder {
+            Text("\(folder) ·").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+
+    /// 셋째 칸: 직함
+    @ViewBuilder
+    private func title(_ item: StatusLine.Line) -> some View {
+        if let head = item.head {
+            Text("\(head) ·")
+                .font(.system(size: 12, weight: line.mode == .agent ? .bold : .semibold))
+                .lineLimit(1)
+                .fixedSize()
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
     }
 
     /// 오른쪽 칸: 화면 밖 표시, 일, 시간
