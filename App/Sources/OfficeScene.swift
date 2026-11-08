@@ -243,6 +243,10 @@ final class CharacterNode: SKNode {
     private var shownStar: Bool?
     private let leftLeg: SKNode
     private let rightLeg: SKNode
+    private let shadow: SKNode
+    /// 소파·안마 의자에 앉은 다리. 몸의 숨쉬기·떨림을 따르지 않고, 가구 앞판보다 앞에 그립니다.
+    private let seatedLegs = SKNode()
+    private var shownSeat: LoungeSeat??
     private let hairBackPivot = SKNode()
     private let headPivot = SKNode()
     private let headContent = SKNode()
@@ -284,13 +288,17 @@ final class CharacterNode: SKNode {
         selectionRing.isHidden = true
         leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors, transform: Self.local)
         rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors, transform: Self.local)
+        shadow = ArtNodes.node(for: CharacterArt.shadow, colors: colors, transform: Self.local)
         leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
         rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, transform: Self.local)
         super.init()
 
         addChild(selectionRing)
-        addChild(ArtNodes.node(for: CharacterArt.shadow, colors: colors, transform: Self.local))
+        addChild(shadow)
         addChild(body)
+        // 부모(직원 발 위치 깊이)에 더해지는 깊이: 소파 좌판·안마 의자 앞판보다 앞, 책상보다 뒤
+        seatedLegs.zPosition = CharacterArt.seatedLegsDepth
+        addChild(seatedLegs)
 
         body.addChild(leftLeg)
         body.addChild(rightLeg)
@@ -356,6 +364,18 @@ final class CharacterNode: SKNode {
             shownHandGesture = handShape
             handGesture.removeAllChildren()
             handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors, transform: Self.local))
+        }
+
+        let seat = actor.loungeSeat
+        if shownSeat == nil || shownSeat! != seat {
+            shownSeat = .some(seat)
+            seatedLegs.removeAllChildren()
+            if let seat {
+                seatedLegs.addChild(ArtNodes.node(for: CharacterArt.seatedLegs(seat), colors: colors, transform: Self.local))
+            }
+            leftLeg.isHidden = seat != nil
+            rightLeg.isHidden = seat != nil
+            shadow.isHidden = seat != nil
         }
 
         let pose = RigAnimator.pose(for: actor, time: time)

@@ -310,7 +310,8 @@ public enum OfficeArt {
             layers.append(ArtLayer("sofa-back-\(index)", depth: 184, [
                 .rect(x + 6, 172, w - 12, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
             ]))
-            layers.append(ArtLayer("sofa-front-\(index)", depth: 217, [
+            // 직원(214) 바로 앞, 앉은 다리(214 + CharacterArt.seatedLegsDepth)보다 뒤
+            layers.append(ArtLayer("sofa-front-\(index)", depth: 215.5, [
                 .rect(x + 10, 200, w - 20, 26, r: 10, fill: .color(ArtColor(0xB3A7E2))),
                 .rect(x + 47, 202, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false),
                 .rect(x + 87, 202, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false),

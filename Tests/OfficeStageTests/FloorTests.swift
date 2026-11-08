@@ -357,4 +357,48 @@ struct FloorTests {
         #expect(pose.leftArm > 20 && pose.rightArm < -20)  // 팔은 팔걸이에
     }
 
+    @Test("소파·안마 의자에 앉으면 무릎과 발이 보이는 앉은 다리를 가구 앞판 앞(책상보다는 뒤)에 그린다")
+    func seatedLegs() {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.run(until: 10)
+        // 책상에 앉으면 다리는 책상 뒤에 가려지므로 서 있는 다리 그대로
+        #expect(h.actor("lead-1")!.seated && h.actor("lead-1")!.loungeSeat == nil)
+        h.hook(hook("Stop"))
+        // 소파로 걸어가는 동안은 서 있는 다리
+        var sawWalking = false
+        while h.now < 90, h.actor("lead-1")!.loungeSeat == nil {
+            h.run(until: h.now + 0.5)
+            if h.actor("lead-1")!.isWalking { sawWalking = true }
+        }
+        #expect(sawWalking)
+        #expect(h.actor("lead-1")!.loungeSeat == .sofa)
+        var svg = SVGRenderer.render(stage: h.stage)
+        #expect(svg.components(separatedBy: "class=\"seated-legs\"").count == 2)
+        h.run(until: 200)
+        #expect(h.actor("lead-1")!.loungeSeat == .massageChair)
+        svg = SVGRenderer.render(stage: h.stage)
+        #expect(svg.components(separatedBy: "class=\"seated-legs\"").count == 2)
+
+        // 깊이: 소파 좌판·안마 의자 앞판보다 앞, 책상보다 뒤
+        let layers = OfficeArt.layers(layout: h.stage.layout, teams: h.stage.sortedTeams, nameplates: h.stage.nameplates)
+        let sofaSeatY = h.stage.layout.slots(.lounge)[0].final.y
+        let sofaFront = layers.first { $0.name == "sofa-front-0" }!.depth
+        let chairFront = layers.first { $0.name == "massage-front-0" }!.depth
+        #expect(sofaSeatY < sofaFront && sofaFront < sofaSeatY + CharacterArt.seatedLegsDepth)
+        #expect(OfficeLayout.massageSeat.y + CharacterArt.seatedLegsDepth > chairFront)
+        #expect(CharacterArt.seatedLegsDepth < 3)  // 책상 깊이 = 발 위치 + 3
+
+        // 발은 앉는 자리보다 아래(소파는 좌판 밑 바닥, 안마 의자는 발판), 허벅지는 몸 아랫단(-14)을 덮음
+        for seat in [LoungeSeat.sofa, .massageChair] {
+            let rects = CharacterArt.seatedLegs(seat).compactMap { shape -> MapRect? in
+                if case .rect(let rect, _) = shape.geometry { return rect }
+                return nil
+            }
+            #expect(rects.map(\.maxY).max()! > 0)
+            #expect(rects.map(\.y).min()! < -14)
+        }
+        #expect(CharacterArt.seatedFootY(.sofa) > OfficeLayout.sofas[0].maxY - sofaSeatY)
+    }
+
 }

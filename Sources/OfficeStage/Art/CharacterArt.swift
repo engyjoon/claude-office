@@ -41,6 +41,40 @@ public enum CharacterArt {
     public static let leftLeg: [ArtShape] = [.rect(-10, -17, 8.5, 17, r: 4, fill: .pants)]
     public static let rightLeg: [ArtShape] = [.rect(1.5, -17, 8.5, 17, r: 4, fill: .pants)]
 
+    /// 앉은 다리를 그리는 깊이 (직원 발 위치 + 이 값). 소파 좌판(+1.5)·안마 의자 앞판(+1)보다 앞, 책상(+3)보다 뒤입니다.
+    public static let seatedLegsDepth = 2.0
+
+    /// 소파·안마 의자에 앉은 다리 (원점: 앉는 자리 = 서 있을 때의 발 위치).
+    /// 앞으로 나온 허벅지가 무릎에서 끝나고, 종아리가 좌판 앞으로 내려와 발이 바닥(소파)·발판(안마 의자)에 닿습니다.
+    /// 몸의 숨쉬기·떨림과 함께 움직이지 않고 가구 위에 놓여 있습니다.
+    public static func seatedLegs(_ seat: LoungeSeat) -> [ArtShape] {
+        let foot = seatedFootY(seat)
+        let knee = -7.0
+        return [
+            .ellipse(0, foot + 1, 14, 3, fill: .swatch(.shadow)),
+            // 종아리 (무릎 안쪽에서 발목까지)
+            .rect(-9.5, knee - 2, 8, foot - knee, r: 4, fill: .pants),
+            .rect(1.5, knee - 2, 8, foot - knee, r: 4, fill: .pants),
+            // 발 (앞을 향한 발끝)
+            .rect(-11, foot - 4.5, 10, 5.5, r: 2.75, fill: .color(shoe)),
+            .rect(1, foot - 4.5, 10, 5.5, r: 2.75, fill: .color(shoe)),
+            // 허벅지 (엉덩이에서 무릎까지, 몸 아랫단을 덮어 무릎에 앉은 느낌)
+            .rect(-11.5, -20, 11, 20 + knee + 3, r: 5.5, fill: .pants),
+            .rect(0.5, -20, 11, 20 + knee + 3, r: 5.5, fill: .pants),
+        ]
+    }
+
+    /// 앉은 다리의 발끝 높이 (원점 기준). 소파는 좌판 아래 바닥, 안마 의자는 발판 위.
+    public static func seatedFootY(_ seat: LoungeSeat) -> Double {
+        switch seat {
+        case .sofa: 13
+        case .massageChair: 6
+        }
+    }
+
+    /// 앉은 다리에서만 보이는 신발 색 (앞을 향한 발끝)
+    static let shoe = ArtColor(0x4A4258)
+
     public static func body(isLead: Bool) -> [ArtShape] {
         var shapes: [ArtShape] = [.rect(-15, -44, 30, 30, r: 12, fill: .top)]
         if isLead {

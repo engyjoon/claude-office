@@ -22,20 +22,25 @@ public enum SVGRenderer {
         enum Item {
             case layer(ArtLayer)
             case actor(StageActor)
+            /// 소파·안마 의자에 앉은 다리 (가구 앞판 앞에 따로 그림)
+            case legs(StageActor, LoungeSeat)
             var depth: Double {
                 switch self {
                 case .layer(let layer): layer.depth
                 case .actor(let actor): actor.position.y
+                case .legs(let actor, _): actor.position.y + CharacterArt.seatedLegsDepth
                 }
             }
         }
         var items: [Item] = layers.filter { $0.depth != -.infinity }.map(Item.layer)
         items += stage.sortedActors.map(Item.actor)
+        items += stage.sortedActors.compactMap { actor in actor.loungeSeat.map { Item.legs(actor, $0) } }
         items.sort { $0.depth < $1.depth }
         for item in items {
             switch item {
             case .layer(let layer): body += layer.shapes.map { element($0, colors: nil) }.joined()
             case .actor(let actor): body += character(actor, time: stage.time)
+            case .legs(let actor, let seat): body += seatedLegs(actor, seat)
             }
         }
         // 말풍선·상태 칩·아이콘은 가구와 직원 모두의 위에 그립니다
@@ -68,8 +73,12 @@ public enum SVGRenderer {
         let head = "translate(0,\(f(CharacterArt.headOrigin.y + pose.headDrop))) rotate(\(f(pose.headRotation)),0,20)"
         let eyes = "translate(0,1) scale(1,\(f(pose.eyeScale))) translate(0,-1)"
         var inner = ""
-        inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
-        inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
+        // 소파·안마 의자에 앉으면 다리는 seatedLegs로 가구 앞에 따로 그립니다
+        let seated = actor.loungeSeat != nil
+        if !seated {
+            inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
+            inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
+        }
         inner += group(head, CharacterArt.hairBack(style: appearance.hairStyle))
         inner += group("", CharacterArt.body(isLead: actor.agent.isMain))
         inner += "<g transform=\"\(head)\">"
@@ -83,8 +92,14 @@ public enum SVGRenderer {
         inner += group("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
         let scaleX = pose.mirrored ? -1.0 : 1.0
         return "<g transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
-            + CharacterArt.shadow.map { element($0, colors: colors) }.joined()
+            + (seated ? "" : CharacterArt.shadow.map { element($0, colors: colors) }.joined())
             + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g></g>"
+    }
+
+    static func seatedLegs(_ actor: StageActor, _ seat: LoungeSeat) -> String {
+        let colors = CharacterArt.colors(for: actor.agent.profile.appearance)
+        return "<g class=\"seated-legs\" transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
+            + CharacterArt.seatedLegs(seat).map { element($0, colors: colors) }.joined() + "</g>"
     }
 
     /// 목록·카드용 얼굴 초상 하나를 SVG로 (앱의 CharacterPortrait와 같은 그림)

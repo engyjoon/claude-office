@@ -5,6 +5,11 @@ public enum Facing: String, Hashable, Sendable {
     case front, left, right
 }
 
+/// 휴게 공간에서 앉는 가구
+public enum LoungeSeat: String, Hashable, Sendable {
+    case sofa, massageChair
+}
+
 /// 무대 위 직원 한 명의 지금 모습. 렌더러(SpriteKit, SVG)는 이것만 보고 그립니다.
 public struct StageActor: Identifiable, Hashable, Sendable {
     public let id: AgentID
@@ -31,6 +36,19 @@ public struct StageActor: Identifiable, Hashable, Sendable {
     public internal(set) var queuedBubble: QueuedBubble?
 
     public var isWalking: Bool { !path.isEmpty }
+
+    /// 휴게 공간의 소파·안마 의자 자리에 앉아 있으면 그 가구. 렌더러는 이때 서 있는 다리 대신 앉은 다리를 가구 앞에 그립니다.
+    /// (책상에 앉으면 다리가 책상 뒤에 가려지므로 서 있는 다리 그대로 둡니다.)
+    public var loungeSeat: LoungeSeat? {
+        guard !isWalking, let place, position.distance(to: place.final) < 1, let key = place.key else { return nil }
+        let parts = key.split(separator: ":")
+        guard parts.count == 2, Int(parts[1]) != nil else { return nil }  // 넘친 자리("lounge:x0")는 서 있습니다
+        switch parts[0] {
+        case "lounge": return .sofa
+        case "massageChair": return .massageChair
+        default: return nil
+        }
+    }
 
     var place: Place?
     var bubbleUntil: Double?
