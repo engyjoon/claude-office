@@ -68,7 +68,7 @@ struct PortraitAndPlateTests {
         }.first)
         #expect(text.1 == .central)
         #expect(abs(text.0.y - (box.y + box.height / 2)) < 0.01)
-        // 명패는 책상 앞판에서 보이는 부분(상판 아래 ~ 앞판 바닥)의 가운데보다 1.5pt 위에 달리고, 상판을 덮지 않는다
+        // 명패는 책상 앞판에서 보이는 부분(상판 아래 ~ 앞판 바닥)의 가운데보다 1pt 위에 달리고, 상판을 덮지 않는다
         let rects = desk.shapes.compactMap { shape -> (MapRect, Paint?)? in
             if case .rect(let rect, _) = shape.geometry { return (rect, shape.fill) }
             return nil
@@ -76,7 +76,7 @@ struct PortraitAndPlateTests {
         let top = try #require(rects.first { $0.1 == .swatch(.woodTop) }?.0)
         let front = try #require(rects.first { $0.1 == .swatch(.wood) }?.0)
         let visibleMid = (top.maxY + front.maxY) / 2
-        #expect(abs((box.y + box.height / 2) - (visibleMid - 1.5)) < 0.01)
+        #expect(abs((box.y + box.height / 2) - (visibleMid - 1.0)) < 0.01)
         #expect(box.y > top.maxY)
         #expect(box.maxY < front.maxY)
     }

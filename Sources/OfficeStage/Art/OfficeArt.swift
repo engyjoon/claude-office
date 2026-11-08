@@ -138,7 +138,7 @@ public enum OfficeArt {
     static let plateFontSize = 9.5
     static let platePadding = 6.0
     /// 명패를 앞판 가운데보다 올리는 양
-    static let plateLift = 1.5
+    static let plateLift = 1.0
 
     /// 글자 폭 어림값 (한글·기호는 정사각형, 영문·숫자는 그 절반 남짓). 렌더러마다 글꼴이 달라 넉넉하게 잡습니다.
     static func estimatedWidth(_ text: String, size: Double) -> Double {
