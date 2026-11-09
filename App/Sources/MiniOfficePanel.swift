@@ -41,11 +41,13 @@ struct MiniOfficeSettings: Equatable {
 /// - 포커스를 빼앗지 않고(nonactivating), 모든 Space와 전체 화면 앱 위에도 보입니다.
 /// - 위 20pt는 머리줄(SwiftUI, 상태 문구·다른 메인 칩), 아래는 메인 + 서브 2명 띠 사무실(SpriteKit, 배율 1). 크기는 390×200 고정입니다.
 /// - 제목줄 없는 패널입니다. 어디든 누르면 미니를 숨기고 사무실 창을 열고(캐릭터를 눌렀으면 그 사람을 고름), 끌면 옮깁니다. 오른쪽 위 ✕는 끄기.
-/// - 기본 위치는 화면 오른쪽 아래(가장자리에서 16pt). 디스플레이마다 마지막 위치를 기억하고, 가장자리 40pt 안에 놓으면 붙입니다.
+/// - 기본 위치는 화면 오른쪽 아래 구석(여백 없이, M6(10)). 디스플레이마다 마지막 위치를 기억하고, 가장자리 40pt 안에 놓으면 끝에 딱 붙입니다.
+/// - 기준은 `visibleFrame`이라 위는 메뉴바 아래, 아래는 Dock 위(자동 숨김이면 화면 끝)에 붙습니다. 둥근 모서리는 그대로입니다.
 @MainActor
 final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     static let title = "Claude Office 미니 사무실"
-    static let margin: CGFloat = 16
+    /// 가장자리와 패널 사이 여백 (M6(10): 16 → 0, 끝까지 붙음)
+    static let margin: CGFloat = 0
     static let snapDistance: CGFloat = 40
 
     private weak var model: AppModel?
@@ -70,7 +72,12 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     func show() {
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        if !panel.isVisible { place(panel, frame: initialFrame()) }
+        if !panel.isVisible {
+            place(panel, frame: initialFrame())
+            // 예전(여백 16pt) 저장 자리도 가장자리 40pt 안이면 바로 끝에 붙입니다
+            snap()
+            save()
+        }
         panel.alphaValue = CGFloat(model?.miniSettings.opacity ?? 1)
         panel.orderFrontRegardless()
     }
