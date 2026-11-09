@@ -155,9 +155,17 @@ public enum Overlay {
                 let text = truncate(bubble.text, limit)
                 let style = OverlayArt.BubbleStyle(bubble.kind)
                 let width = TextMetrics.width(text, size: style.fontSize, bold: style.bold) + style.padX * 2
-                let tip = MapPoint(actor.position.x, (pillTops[actor.id] ?? actor.position.y + headTop) - 1)
+                var tip = MapPoint(actor.position.x, (pillTops[actor.id] ?? actor.position.y + headTop) - 1)
                 var frame = MapRect(tip.x - width / 2, tip.y - 9 - style.height, width, style.height)
                 frame = place(frame, avoiding: placed, in: area)
+                // 화면 위 끝에 밀려 상자가 머리까지 내려오면 꼬리가 아래로 머리를 가리킬 수 없습니다
+                // (M6(9): 미니에서 문으로 나가거나 메인 옆에서 보고할 때 꼬리가 상자를 뚫고 위로 솟았음). 머리 옆에 둡니다.
+                if frame.maxY > tip.y - minTail {
+                    let side = besideHead(
+                        width: width, height: style.height, headX: actor.position.x, top: tip.y + sideDrop, avoiding: placed, in: area)
+                    frame = side.frame
+                    tip = MapPoint(actor.position.x + sideTipOffset * side.direction, actor.position.y + headTop + sideTipDrop)
+                }
                 placed.append(frame)
                 // 톡 튀어나오기 (0.18초)
                 let t = min(max((time - actor.bubbleShownAt) / 0.18, 0), 1)
@@ -311,6 +319,39 @@ public enum Overlay {
         return frame
     }
 
+    /// 아래 꼬리의 가장 짧은 길이. 상자가 이보다 머리에 붙으면 머리 옆에 둡니다.
+    static let minTail = 5.0
+    /// 머리 옆 말풍선: 상자 안쪽 끝은 머리 가운데에서 이만큼 옆, 위 끝은 머리 위 기준점에서 이만큼 아래
+    static let sideGap = 30.0
+    static let sideDrop = 6.0
+    /// 머리 옆 말풍선의 꼬리 끝: 머리 가운데에서 옆으로, 머리 위 기준점에서 아래로 (머리 윗부분 옆)
+    static let sideTipOffset = 20.0
+    static let sideTipDrop = 25.0
+
+    /// 머리 옆 자리 (M6(9)). 오른쪽부터, 다른 말풍선·칩과 겹치면 바깥으로 비켜 보고, 안 되면 왼쪽.
+    /// 둘 다 겹치면 화면 안에 들어가는 쪽(오른쪽 먼저)에 겹친 채 둡니다. `direction`은 오른쪽 1, 왼쪽 −1.
+    static func besideHead(
+        width: Double, height: Double, headX: Double, top: Double, avoiding placed: [MapRect], in area: MapRect
+    ) -> (frame: MapRect, direction: Double) {
+        let y = max(top, area.y)
+        func hits(_ r: MapRect) -> [MapRect] { placed.filter { $0.intersects(r, gap: gap) } }
+        func fits(_ r: MapRect) -> Bool { r.x >= area.x && r.maxX <= area.maxX }
+        let right = MapRect(headX + sideGap, y, width, height)
+        let left = MapRect(headX - sideGap - width, y, width, height)
+        for (start, direction) in [(right, 1.0), (left, -1.0)] {
+            var frame = start
+            for _ in 0..<4 where fits(frame) {
+                let blockers = hits(frame)
+                if blockers.isEmpty { return (frame, direction) }
+                frame.x = direction > 0 ? blockers.map(\.maxX).max()! + gap : blockers.map(\.x).min()! - gap - width
+            }
+        }
+        if fits(right) { return (right, 1) }
+        if fits(left) { return (left, -1) }
+        let direction: Double = headX < area.x + area.width / 2 ? 1 : -1
+        return (clamp(direction > 0 ? right : left, in: area), direction)
+    }
+
     static func clamp(_ rect: MapRect, in area: MapRect) -> MapRect {
         var frame = rect
         if frame.width <= area.width {
@@ -407,8 +448,13 @@ public enum OverlayArt {
                 whisperLabel,
             ]
         case .thought:
-            let baseX = min(max(tip.x, f.x + f.height / 2), f.maxX - f.height / 2)
-            let base = MapPoint(baseX, f.maxY)
+            // 꼬리 끝이 상자 옆이면(머리 옆 말풍선, M6(9)) 점도 옆으로 이어 갑니다
+            let base: MapPoint =
+                switch tailSide(f, tip: tip) {
+                case .right: MapPoint(f.maxX, f.y + f.height / 2)
+                case .left: MapPoint(f.x, f.y + f.height / 2)
+                case .bottom, .none: MapPoint(min(max(tip.x, f.x + f.height / 2), f.maxX - f.height / 2), f.maxY)
+                }
             let near = tip + (base - tip) * 0.2
             let far = tip + (base - tip) * 0.55
             return [
@@ -430,18 +476,52 @@ public enum OverlayArt {
         }
     }
 
+    enum TailSide { case bottom, right, left, none }
+
+    /// 꼬리를 낼 변. 꼬리 끝이 상자 아래면 아래, 상자 옆이면 그 옆, 상자 안이면 꼬리 없음.
+    /// 꼬리가 상자를 가로질러 그려지는 일이 없게 합니다 (M6(9)).
+    static func tailSide(_ f: MapRect, tip: MapPoint) -> TailSide {
+        if tip.y >= f.maxY { return .bottom }
+        if tip.x >= f.maxX { return .right }
+        if tip.x <= f.x { return .left }
+        return .none
+    }
+
     /// 꼬리 달린 둥근 사각형. 꼬리 뿌리는 상자 아래쪽 안에 두고, 끝은 주인의 머리 위를 가리킵니다.
+    /// 머리 옆 말풍선(M6(9))이면 꼬리 뿌리를 머리 쪽 옆변 가운데에 둡니다.
     static func tailRect(_ f: MapRect, radius r: Double, tip: MapPoint) -> [PathCommand] {
-        let base = min(max(tip.x, f.x + r + 6), f.maxX - r - 6)
-        return [
-            .move(MapPoint(f.x + r, f.y)),
-            .line(MapPoint(f.maxX - r, f.y)), .quad(control: MapPoint(f.maxX, f.y), to: MapPoint(f.maxX, f.y + r)),
+        let side = tailSide(f, tip: tip)
+        // 옆 꼬리: 뿌리 폭 ±5를 옆변 가운데에 두고, 그 옆 모서리는 뿌리에 닿지 않을 만큼만 둥글게 합니다
+        let cy = f.y + f.height / 2
+        let upper = min(f.y + r, cy - 5), lower = max(f.maxY - r, cy + 5)
+        var right: [PathCommand] = [
+            .quad(control: MapPoint(f.maxX, f.y), to: MapPoint(f.maxX, f.y + r)),
             .line(MapPoint(f.maxX, f.maxY - r)), .quad(control: MapPoint(f.maxX, f.maxY), to: MapPoint(f.maxX - r, f.maxY)),
-            .line(MapPoint(base + 6, f.maxY)), .line(tip), .line(MapPoint(base - 6, f.maxY)),
-            .line(MapPoint(f.x + r, f.maxY)), .quad(control: MapPoint(f.x, f.maxY), to: MapPoint(f.x, f.maxY - r)),
-            .line(MapPoint(f.x, f.y + r)), .quad(control: MapPoint(f.x, f.y), to: MapPoint(f.x + r, f.y)),
-            .close,
         ]
+        var left: [PathCommand] = [
+            .quad(control: MapPoint(f.x, f.maxY), to: MapPoint(f.x, f.maxY - r)),
+            .line(MapPoint(f.x, f.y + r)), .quad(control: MapPoint(f.x, f.y), to: MapPoint(f.x + r, f.y)),
+        ]
+        if side == .right {
+            right = [
+                .quad(control: MapPoint(f.maxX, f.y), to: MapPoint(f.maxX, upper)),
+                .line(MapPoint(f.maxX, cy - 5)), .line(tip), .line(MapPoint(f.maxX, cy + 5)),
+                .line(MapPoint(f.maxX, lower)), .quad(control: MapPoint(f.maxX, f.maxY), to: MapPoint(f.maxX - r, f.maxY)),
+            ]
+        } else if side == .left {
+            left = [
+                .quad(control: MapPoint(f.x, f.maxY), to: MapPoint(f.x, lower)),
+                .line(MapPoint(f.x, cy + 5)), .line(tip), .line(MapPoint(f.x, cy - 5)),
+                .line(MapPoint(f.x, upper)), .quad(control: MapPoint(f.x, f.y), to: MapPoint(f.x + r, f.y)),
+            ]
+        }
+        var bottom: [PathCommand] = []
+        if side == .bottom {
+            let base = min(max(tip.x, f.x + r + 6), f.maxX - r - 6)
+            bottom = [.line(MapPoint(base + 6, f.maxY)), .line(tip), .line(MapPoint(base - 6, f.maxY))]
+        }
+        return [.move(MapPoint(f.x + r, f.y)), .line(MapPoint(f.maxX - r, f.y))] + right + bottom
+            + [.line(MapPoint(f.x + r, f.maxY))] + left + [.close]
     }
 
     /// 상태 칩. 원점은 칩의 왼쪽 위입니다. 밤에는 흰 30% 테두리를 1pt 답니다 (M6(6)).
