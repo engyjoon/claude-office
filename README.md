@@ -7,6 +7,7 @@ Claude 데스크톱 앱의 Claude Code 세션과 서브에이전트가 일하는
 - 스타일 미리보기: [docs/preview/index.html](docs/preview/index.html)
 - 훅 페이로드 수집 안내 (M0): [docs/M0-capture.md](docs/M0-capture.md)
 - 맥에서 빌드하고 확인하기 (M2): [docs/M2-build.md](docs/M2-build.md)
+- **다른 맥에 설치하기** (클론 → 빌드 → 첫 실행, 문제 해결): [docs/INSTALL.md](docs/INSTALL.md)
 
 ## 진행 상황
 
