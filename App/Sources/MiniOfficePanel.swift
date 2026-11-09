@@ -124,6 +124,10 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         let header = CGFloat(MiniOffice.headerHeight)
         let container = MiniContainerView(frame: NSRect(origin: .zero, size: size))
         container.onClick = { [weak model] in model?.openOfficeFromMini(nil) }
+        container.setAccessibilityElement(true)
+        container.setAccessibilityRole(.group)
+        container.setAccessibilityLabel("미니 사무실")
+        container.setAccessibilityHelp("누르면 사무실 창이 열려요. 직원을 누르면 그 직원을 골라 열어요.")
         container.wantsLayer = true
         container.layer?.cornerRadius = 10
         container.layer?.masksToBounds = true
@@ -233,7 +237,7 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
 }
 
 /// 비활성 패널에서도 첫 클릭이 바로 캐릭터·버튼에 가도록
-final class FirstMouseSKView: SKView {
+final class FirstMouseSKView: AccessibleSKView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -269,6 +273,12 @@ final class MiniContainerView: NSView {
         guard let window else { return }
         if !MiniWindowDrag.track(event, in: window) { onClick?() }
     }
+
+    /// VoiceOver 누르기 = 패널 누르기 (사무실 창 열기, M6(7))
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return onClick != nil
+    }
 }
 
 /// 미니 패널 끌기: 마우스를 놓을 때까지 창을 따라 옮기고, 3pt 넘게 움직였으면 true (아니면 클릭)
@@ -297,6 +307,8 @@ enum MiniWindowDrag {
 /// 메인·디렉토리 이름은 사무실의 명패·폴더 표지에 이미 있어 쓰지 않습니다. 오른쪽 끝은 ✕ 버튼 자리입니다.
 struct MiniHeaderView: View {
     let model: AppModel
+    /// 시스템 "대비 증가" (M6(7)): 칩 테두리를 잉크색으로
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private static let ink = Color(hex: 0x3A3247)
     private static let paper = Color(hex: 0xFFF8EC)
@@ -336,7 +348,8 @@ struct MiniHeaderView: View {
                     .font(.system(size: 9.5))
                     .padding(.horizontal, 4)
                     .background(Capsule().fill(.white))
-                    .overlay(Capsule().stroke(Color(hex: 0xCFC6D9)))
+                    .overlay(Capsule().stroke(contrast == .increased ? Self.ink : Color(hex: 0xCFC6D9)))
+                    .accessibilityLabel("다른 메인 \(others.count - Self.maxChips)개 더")
             }
         }
         .foregroundStyle(Self.ink)
@@ -348,6 +361,9 @@ struct MiniHeaderView: View {
                 : nightPlain ? Self.nightPaper : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(model.isNight ? Self.nightLine : Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
+        // VoiceOver (M6(7)): "미니 사무실 머리줄" + 상태 문구, 다른 메인 칩은 "메인2, 답변 기다림"처럼 말로
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("미니 사무실 머리줄")
     }
 
     /// 다른 메인 칩 순서: 답변 필요 → 완료 → 그 밖
@@ -368,6 +384,11 @@ struct MiniHeaderView: View {
         case .completed: ("✉", Self.done, 0x5DBB7A)
         default: ("", .white, 0xCFC6D9)
         }
+        let spoken: String? = switch tier {
+        case .answer: "답변 기다림"
+        case .completed: "새 응답"
+        default: nil
+        }
         return HStack(spacing: 3) {
             Circle().fill(Palette.team(team.colorIndex)).frame(width: 6, height: 6)
             Text(icon + (number.isEmpty ? "메인" : number))
@@ -375,8 +396,10 @@ struct MiniHeaderView: View {
         }
         .padding(.horizontal, 5)
         .background(Capsule().fill(fill))
-        .overlay(Capsule().stroke(Color(hex: stroke)))
+        .overlay(Capsule().stroke(contrast == .increased ? Self.ink : Color(hex: stroke), lineWidth: contrast == .increased ? 1.2 : 1))
         .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.miniChip(main: team.mainName, tier: spoken))
     }
 
     /// 머리줄에 보여 줄 한 사람: 답변을 기다리는 사람이 있으면 가장 오래 기다린 사람, 아니면 가장 마지막으로 상태가 바뀐 사람

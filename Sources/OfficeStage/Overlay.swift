@@ -40,15 +40,19 @@ public struct OverlayOptions: Hashable, Sendable {
     public var bounds: MapRect?
     /// 사무실 조명 (M6(6)). 밤에는 잉크색 상태 칩이 어두운 바닥에 묻히지 않게 옅은 테두리를 답니다.
     public var lighting: Lighting
+    /// 시스템 "대비 증가" (M6(7)): 상태 칩·배지 테두리를 진하게 합니다.
+    public var highContrast: Bool
 
     public init(
-        privacy: PrivacyLevel = .detailed, displayScale: Double = 1, hovered: AgentID? = nil, bounds: MapRect? = nil, lighting: Lighting = .day
+        privacy: PrivacyLevel = .detailed, displayScale: Double = 1, hovered: AgentID? = nil, bounds: MapRect? = nil, lighting: Lighting = .day,
+        highContrast: Bool = false
     ) {
         self.privacy = privacy
         self.displayScale = displayScale
         self.hovered = hovered
         self.bounds = bounds
         self.lighting = lighting
+        self.highContrast = highContrast
     }
 
     public var tier: OverlayTier { OverlayTier(scale: displayScale) }
@@ -121,7 +125,7 @@ public enum Overlay {
                 }
                 items.append(OverlayItem(
                     id: "pill:zone:\(group.zone.rawValue)", kind: .pill, agent: nil, origin: MapPoint(frame.x, frame.y),
-                    shapes: OverlayArt.pill(text: text, width: width, category: group.category, lighting: options.lighting), frame: frame, text: text))
+                    shapes: OverlayArt.pill(text: text, width: width, category: group.category, lighting: options.lighting, contrast: options.highContrast), frame: frame, text: text))
             }
             for actor in actors where !grouped.contains(actor.id) {
                 guard let pill = actor.pill else { continue }
@@ -136,7 +140,7 @@ public enum Overlay {
                 let origin = MapPoint(frame.x, frame.y)
                 items.append(OverlayItem(
                     id: "pill:\(actor.id.raw)", kind: .pill, agent: actor.id, origin: origin,
-                    shapes: OverlayArt.pill(text: text, width: width, category: pill.category, lighting: options.lighting), frame: frame, text: text))
+                    shapes: OverlayArt.pill(text: text, width: width, category: pill.category, lighting: options.lighting, contrast: options.highContrast), frame: frame, text: text))
             }
         }
 
@@ -190,7 +194,7 @@ public enum Overlay {
             items.append(OverlayItem(
                 id: "badge:\(actor.id.raw)", kind: .badge, agent: actor.id,
                 origin: actor.position + side, scale: 0.4 + 0.6 * appear, opacity: appear,
-                shapes: OverlayArt.badge(badge)))
+                shapes: OverlayArt.badge(badge, lighting: options.lighting, contrast: options.highContrast)))
         }
 
         // 5) 효과
@@ -441,11 +445,13 @@ public enum OverlayArt {
     }
 
     /// 상태 칩. 원점은 칩의 왼쪽 위입니다. 밤에는 흰 30% 테두리를 1pt 답니다 (M6(6)).
-    public static func pill(text: String, width: Double, category: ToolCategory, lighting: Lighting = .day) -> [ArtShape] {
-        [
+    /// 대비 증가(M6(7))면 밤 테두리를 흰 85% 1.5pt로, 낮에는 흰 1pt 안쪽 선을 둘러 잉크 칩이 짙은 가구·머리카락 위에서도 떨어져 보이게 합니다.
+    public static func pill(text: String, width: Double, category: ToolCategory, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
+        let edge: ArtColor? = contrast ? (lighting == .night ? pillContrastNightEdge : ArtColor(0xFFFFFF)) : lighting == .night ? pillNightEdge : nil
+        return [
             ArtShape(
                 .rect(MapRect(0, 0, width, 17), radius: 8.5), fill: .swatch(.ink),
-                stroke: lighting == .night ? .color(pillNightEdge) : nil, lineWidth: lighting == .night ? 1 : 1.8),
+                stroke: edge.map { .color($0) }, lineWidth: contrast ? 1.5 : lighting == .night ? 1 : 1.8),
             .circle(10, 8.5, 3, fill: .color(categoryColor(category)), outline: false),
             .text(text, 17, 8.5, size: 9.5, color: .swatch(.white), anchor: .start, baseline: .central),
         ]
@@ -453,6 +459,8 @@ public enum OverlayArt {
 
     /// 밤 상태 칩 테두리
     public static let pillNightEdge = ArtColor(0xFFFFFF, alpha: 0.3)
+    /// 대비 증가 + 밤 상태 칩 테두리 (M6(7))
+    public static let pillContrastNightEdge = ArtColor(0xFFFFFF, alpha: 0.85)
 
     /// 툴 종류 색 (미리보기의 CAT)
     public static func categoryColor(_ category: ToolCategory) -> ArtColor {
@@ -515,11 +523,21 @@ public enum OverlayArt {
     /// 답변 필요·확인 안 함 배지 (원점: 배지 가운데, M6(4)).
     /// 답변 필요 = 파란 말풍선에 흰 "?" (승인 대기 "!"의 주황 원과 색·모양이 다름),
     /// 확인 안 함 = 흰 원 안 편지 ✉ + 파란 점 (데스크톱 앱 사이드바의 안 읽음 점과 같은 뜻).
-    public static func badge(_ cue: SessionCue) -> [ArtShape] {
+    /// 대비 증가(M6(7))면 "?" 풍선에 테두리(낮 잉크, 밤 흰색)를 두르고 ✉ 원 테두리를 굵게 합니다.
+    public static func badge(_ cue: SessionCue, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
         let blue = Paint.color(ArtColor(0x5B8DEF))
         switch cue {
         case .reply:
-            return [
+            var shapes: [ArtShape] = []
+            if contrast {
+                // 풍선 모양 그대로 테두리만 먼저 굵게 그리고 그 위에 원래 풍선을 덮습니다 (꼬리 이음매에 선이 남지 않게)
+                let edge: Paint = lighting == .night ? .swatch(.white) : .swatch(.ink)
+                shapes += [
+                    ArtShape(.path(VectorPath.parse("M4,7 L8,13.5 L-2,7 Z")), fill: edge, stroke: edge, lineWidth: 3),
+                    ArtShape(.rect(MapRect(-11.5, -11, 23, 19), radius: 8), fill: edge, stroke: edge, lineWidth: 3),
+                ]
+            }
+            return shapes + [
                 // 꼬리는 머리 쪽(오른쪽 아래)을 가리킵니다 (배지가 머리 왼쪽 위에 있으므로)
                 .path("M4,7 L8,13.5 L-2,7 Z", fill: blue),
                 .rect(-11.5, -11, 23, 19, r: 8, fill: blue),
@@ -528,7 +546,7 @@ public enum OverlayArt {
             ]
         case .unread:
             return [
-                .circle(0, 0, 10.5, fill: .swatch(.white)),
+                .circle(0, 0, 10.5, fill: .swatch(.white), width: contrast ? 2.6 : 1.8),
                 .rect(-6, -4.5, 12, 9, r: 1.5, fill: .swatch(.sky), width: 1.4),
                 .path("M-6,-3.8 L0,1 L6,-3.8", width: 1.4),
                 ArtShape(.circle(center: MapPoint(8, -8), radius: 3.4), fill: .color(ArtColor(0x4A8FE0)), stroke: .swatch(.white), lineWidth: 1.3),

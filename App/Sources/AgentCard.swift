@@ -38,6 +38,9 @@ struct AgentCard: View {
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.team(team.colorIndex), lineWidth: 2))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        // VoiceOver (M6(7)): 카드 전체를 "인스펙터: 메인1" 묶음으로
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("인스펙터: \(row.name)")
     }
 
     private var content: some View {
@@ -73,6 +76,7 @@ struct AgentCard: View {
             }
             .buttonStyle(.plain)
             .help("닫기 (Esc)")
+            .accessibilityLabel("인스펙터 닫기")
         }
     }
 
@@ -92,6 +96,8 @@ struct AgentCard: View {
                     }
                     .buttonStyle(.plain)
                     .help("눌러서 \(main.name) 보기")
+                    .accessibilityLabel("소속: \(main.name)의 서브")
+                    .accessibilityHint("누르면 \(main.name)을 골라요.")
                 }
             }
             if let agentType = row.agentType {
@@ -113,6 +119,7 @@ struct AgentCard: View {
                     Circle().fill(Palette.team(team.colorIndex))
                         .overlay(Circle().stroke(Color.primary.opacity(0.4), lineWidth: 0.8))
                         .frame(width: 9, height: 9)
+                        .accessibilityHidden(true)
                     Text(team.label).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                 }
             }
@@ -177,7 +184,7 @@ struct AgentCard: View {
 
     private var subList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            sectionTitle("서브 \(subs.count)명")
+            sectionTitle("서브 \(subs.count)명").accessibilityAddTraits(.isHeader)
             ForEach(subs) { sub in
                 Button { onSelect(sub.id) } label: {
                     HStack(spacing: 6) {
@@ -194,6 +201,8 @@ struct AgentCard: View {
                 }
                 .buttonStyle(.plain)
                 .help("눌러서 \(sub.name) 보기")
+                .accessibilityLabel(AccessibilityText.agent(sub))
+                .accessibilityHint("누르면 \(sub.name)을 골라요.")
             }
         }
     }
@@ -205,7 +214,7 @@ struct AgentCard: View {
         let hidden = timeline.items.count - items.count
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                sectionTitle("최근 일")
+                sectionTitle("최근 일").accessibilityAddTraits(.isHeader)
                 Spacer()
                 if timeline.items.count > Self.collapsedLines {
                     Button(expanded ? "접기" : "모두 보기 (\(timeline.items.count))") { expanded.toggle() }
@@ -295,6 +304,7 @@ private struct TimelineRow: View {
                 .truncationMode(.middle)
         }
         .help(item.text(now: now))
+        .accessibilityElement(children: .combine)
     }
 
     private func styled(now: Date) -> AttributedString {

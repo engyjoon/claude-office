@@ -528,9 +528,9 @@ struct SoundSettingsView: View {
                 Toggle("효과음 켜기", isOn: binding(\.masterEnabled))
                 LabeledContent("음량") {
                     HStack {
-                        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                        Slider(value: binding(\.volume), in: 0...1)
-                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                        Image(systemName: "speaker.fill").foregroundStyle(.secondary).accessibilityHidden(true)
+                        Slider(value: binding(\.volume), in: 0...1).accessibilityLabel("음량")
+                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary).accessibilityHidden(true)
                         Text("\(Int((model.soundSettings.volume * 100).rounded()))%")
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
@@ -572,6 +572,7 @@ struct SoundSettingsView: View {
             }
             .buttonStyle(.borderless)
             .help("미리 듣기")
+            .accessibilityLabel("\(group.displayName) 미리 듣기")
         }
         .disabled(!model.soundSettings.masterEnabled)
     }

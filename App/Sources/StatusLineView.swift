@@ -42,6 +42,10 @@ struct StatusLineView: View {
                     .frame(height: Self.lineHeight)
                 }
             }
+            // VoiceOver (M6(7)): 세 줄을 한 요소로 ("실시간 현황", 줄마다 마침표). 색 점·형광펜은 글자(디렉토리·상태 이름)로 이미 있음
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("실시간 현황")
+            .accessibilityValue(AccessibilityText.statusLines(line, now: context.date))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, Self.verticalPadding)

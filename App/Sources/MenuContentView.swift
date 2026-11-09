@@ -90,6 +90,8 @@ struct MenuContentView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
                 RosterRowView(row: row, highlight: highlight) { model.focusSession(of: row) }
             }
@@ -108,25 +110,30 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack {
+            // 키보드 (M6(7)): 드롭다운이 열려 있으면 ⌘O·⌘L·⌘,·⌘Q로 바로 (버튼 Tab 이동은 시스템 "키보드 탐색"을 켰을 때만)
             Button("사무실 보기") {
                 NSApp.activate()
                 openWindow(id: WindowID.office)
             }
+            .keyboardShortcut("o")
             Button("이벤트 로그") {
                 NSApp.activate()
                 openWindow(id: WindowID.eventLog)
             }
+            .keyboardShortcut("l")
             Button("설정…") {
                 openSettings()
                 // 메뉴바 앱은 설정 창이 다른 앱 뒤에 열리기 쉬워 활성화한 뒤 앞으로 올립니다 (M5(8))
                 SettingsWindow.bringToFront()
             }
+            .keyboardShortcut(",")
             Spacer()
             Button {
                 model.setMiniEnabled(!model.miniSettings.enabled)
             } label: {
                 Image(systemName: model.miniSettings.enabled ? "pip.fill" : "pip")
             }
+            .accessibilityLabel(model.miniSettings.enabled ? "미니 사무실 끄기" : "미니 사무실 켜기")
             .help(model.miniSettings.enabled ? "미니 사무실 끄기 (켜 두면 사무실 창이 닫혀 있을 때 화면 구석에 보여요)" : "미니 사무실 켜기")
             Button {
                 var settings = model.soundSettings
@@ -135,8 +142,10 @@ struct MenuContentView: View {
             } label: {
                 Image(systemName: model.soundSettings.masterEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
             }
+            .accessibilityLabel(model.soundSettings.masterEnabled ? "효과음 끄기" : "효과음 켜기")
             .help(model.soundSettings.masterEnabled ? "효과음 끄기" : "효과음 켜기")
             Button("종료") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 14)
@@ -188,6 +197,12 @@ struct RosterRowView: View {
         .onTapGesture(count: 2) { focusSession() }
         .help(row.hostSession != nil ? "더블클릭하면 Claude 데스크톱 앱을 앞으로 가져와요"
             : row.term.map { "더블클릭하면 \($0)을(를) 앞으로 가져와요" } ?? "")
+        // VoiceOver (M6(7)): 한 문장으로 읽고, 누르기 = 그 세션으로 이동 (승인 대기 줄의 [앱으로] 버튼과 같음)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel((highlight ? "승인 대기, " : "") + AccessibilityText.row(row))
+        .accessibilityHint(row.focusLabel.map { "누르면 \($0) 이동해요." } ?? "")
+        .accessibilityAddTraits(row.canFocus ? .isButton : [])
+        .accessibilityAction { focusSession() }
     }
 
     private func focusSession() {
@@ -216,19 +231,27 @@ struct RosterRowView: View {
 struct StatusChip: View {
     let status: RosterStatus
     @Environment(\.colorScheme) private var colorScheme
+    /// 시스템 "대비 증가" (M6(7)): 모든 칩에 진한 테두리
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         let tone = status.tone
+        let increased = contrast == .increased
         Text(status.label)
-            .font(.system(size: 11, weight: tone == .attention ? .semibold : .regular))
+            .font(.system(size: 11, weight: tone == .attention || increased ? .semibold : .regular))
             .foregroundStyle(Palette.chipText(tone))
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(Palette.chip(tone, dark: colorScheme == .dark), in: Capsule())
+            .background(Palette.chip(tone, dark: colorScheme == .dark, increased: increased), in: Capsule())
             // 승인 대기는 테두리로 한 번 더 눈에 띄게 (어두운 바탕에서도 칩 경계가 보이게)
             .overlay {
-                if tone == .attention { Capsule().strokeBorder(Color(hex: 0xC99A1E), lineWidth: 1) }
+                if increased {
+                    Capsule().strokeBorder(Palette.chipEdge(tone), lineWidth: 1.2)
+                } else if tone == .attention {
+                    Capsule().strokeBorder(Color(hex: 0xC99A1E), lineWidth: 1)
+                }
             }
+            .accessibilityLabel(AccessibilityText.status(status))
     }
 }
 
@@ -266,7 +289,7 @@ struct Banner<Accessory: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: systemImage).foregroundStyle(tint)
+            Image(systemName: systemImage).foregroundStyle(tint).accessibilityHidden(true)
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             accessory.controlSize(.small)

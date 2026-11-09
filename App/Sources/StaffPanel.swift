@@ -10,6 +10,8 @@ struct StaffPanel: View {
     let model: AppModel
     /// 패널 폭 (사무실 창 크기 계산에도 씀)
     static let width: CGFloat = 260
+    /// 세션 목록이 키보드 초점을 가졌는지 (M6(7): ↑↓로 고르기, Return으로 이동)
+    @FocusState private var listFocused: Bool
 
     var body: some View {
         let roster = model.visibleRoster
@@ -25,6 +27,8 @@ struct StaffPanel: View {
                     Text("\(roster.agentCount)명").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
             .padding(.horizontal, 14)
             .padding(.top, 10)
             .padding(.bottom, 6)
@@ -42,7 +46,7 @@ struct StaffPanel: View {
 
             if model.roster.teams.isEmpty {
                 VStack(spacing: 6) {
-                    Image(systemName: "building.2").font(.system(size: 22)).foregroundStyle(.tertiary)
+                    Image(systemName: "building.2").font(.system(size: 22)).foregroundStyle(.tertiary).accessibilityHidden(true)
                     Text("아직 출근한 직원이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
                     Text("Claude 데스크톱 앱에서 세션을 시작하면 메인이 출근해요")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
@@ -53,25 +57,58 @@ struct StaffPanel: View {
             } else if roster.teams.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 22)).foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                     Text("고른 디렉토리에 출근한 직원이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
                     Button("모두 보기") { model.selectAllFolders() }.controlSize(.small)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(roster.teams) { team in
-                            teamSection(team)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(roster.teams) { team in
+                                teamSection(team)
+                            }
                         }
+                        .padding(10)
                     }
-                    .padding(10)
+                    // 키보드 (M6(7)): Tab으로 들어와 ↑↓로 고르고 Return으로 그 세션으로 이동, Esc로 풀기(창 단위)
+                    .focusable(interactions: .edit)
+                    .focused($listFocused)
+                    .onKeyPress(.upArrow) { moveSelection(-1, in: roster) }
+                    .onKeyPress(.downArrow) { moveSelection(1, in: roster) }
+                    .onKeyPress(.return) {
+                        guard let id = model.selectedAgent, roster.row(for: id) != nil else { return .ignored }
+                        model.focusAgent(id)
+                        return .handled
+                    }
+                    .onChange(of: model.selectedAgent) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: nil) }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("세션 목록")
+                    .accessibilityHint("위아래 화살표로 고르고 Return으로 그 세션을 열어요.")
                 }
             }
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background(.background)
+    }
+
+    /// ↑↓: 목록 순서(행 → 책상)로 앞뒤 사람 고르기. 아무도 안 골랐으면 ↓는 첫 사람, ↑는 마지막 사람.
+    private func moveSelection(_ step: Int, in roster: Roster) -> KeyPress.Result {
+        let ids = roster.teams.flatMap(\.rows).map(\.id)
+        guard !ids.isEmpty else { return .ignored }
+        guard let current = model.selectedAgent, let index = ids.firstIndex(of: current) else {
+            model.select(step > 0 ? ids.first : ids.last)
+            return .handled
+        }
+        let next = index + step
+        if ids.indices.contains(next) { model.select(ids[next]) }
+        return .handled
     }
 
     private func teamSection(_ team: RosterTeam) -> some View {
@@ -86,8 +123,19 @@ struct StaffPanel: View {
                 Text("\(team.rows.count)").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(team.label), \(team.rows.count)명")
+            .accessibilityAddTraits(.isHeader)
             ForEach(team.rows) { row in
                 StaffRow(row: row, colorIndex: team.colorIndex, selected: model.selectedAgent == row.id)
+                    .id(row.id)
+                    // VoiceOver (M6(7)): 누르기 = 고르기/풀기, 동작 메뉴 = 그 세션으로 이동
+                    .accessibilityAction { model.select(model.selectedAgent == row.id ? nil : row.id) }
+                    .accessibilityActions {
+                        if let focus = row.focusLabel {
+                            Button(AccessibilityText.moveActionName(focusLabel: focus)) { model.focusAgent(row.id) }
+                        }
+                    }
                     .onTapGesture {
                         // 더블클릭(M5(7))은 두 번째 클릭에서 그 세션으로 이동합니다. 한 번 누르기는 고르기/풀기 그대로라
                         // 두 번 누르기를 기다리느라 늦어지지 않게, 지금 클릭이 몇 번째인지로 가릅니다.
@@ -175,6 +223,8 @@ private struct DirectoryPopUp: NSViewRepresentable {
         (button.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingMiddle
         button.setContentHuggingPriority(.defaultLow, for: .horizontal)
         button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // VoiceOver: "디렉토리, 모두 · 7명, 팝업 버튼" (도움말은 toolTip)
+        button.setAccessibilityLabel("디렉토리")
         return button
     }
 
@@ -250,6 +300,12 @@ private struct StaffRow: View {
                 .stroke(selected ? Palette.team(colorIndex) : Color.clear, lineWidth: 1.5))
         .contentShape(Rectangle())
         .help(["누르면 사무실에서 이 직원을 보여줘요", row.focusLabel.map { "더블클릭하면 \($0) 이동" }].compactMap { $0 }.joined(separator: " · "))
+        // VoiceOver (M6(7)): "메인1, claude-office, 편집 중, Stage.swift" (얼굴·칩·부제는 한 문장으로)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.row(row))
+        .accessibilityValue(AccessibilityText.agentValue(selected: selected) ?? "")
+        .accessibilityHint(selected ? "누르면 고르기를 풀어요." : "누르면 사무실에서 이 직원을 골라요.")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func subtitle(now: Date) -> String {

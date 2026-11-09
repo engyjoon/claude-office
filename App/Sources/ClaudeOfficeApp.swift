@@ -243,7 +243,13 @@ struct OfficeSpriteView: NSViewRepresentable {
 }
 
 /// 창에 붙을 때 마우스 이동(말풍선 전체 보기)을 받게 하고 멈춤을 풉니다. 창에서 떨어지면 멈춥니다 (디스플레이 링크가 돌지 않게).
-final class OfficeSKView: SKView {
+///
+/// 키보드 (M6(7)): 창을 열면 장면이 키보드 초점을 받습니다.
+/// - ← → · Tab ⇧Tab: 앞뒤 사람 고르기 (행 → 책상 순서). Tab은 끝을 넘으면 다음 조작(세션 패널)으로 초점을 넘깁니다. ⌃Tab은 바로 넘김.
+/// - ↑ ↓: 윗행·아랫행의 가장 가까운 책상
+/// - Return·Enter: 그 세션으로 이동 (더블클릭과 같음)
+/// - Esc: 고르기 풀기 (창 단위로 `OfficeWindowView`가 받음)
+final class OfficeSKView: AccessibleSKView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else {
@@ -253,6 +259,52 @@ final class OfficeSKView: SKView {
         window.acceptsMouseMovedEvents = true
         limitDrawables()
         (scene as? OfficeScene)?.resumeIfPaused()
+        focusRingType = .exterior
+        // 처음 열 때 아무것도 초점이 없으면 장면이 받습니다 (바로 화살표로 고를 수 있게)
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            if window.firstResponder === window || window.firstResponder == nil { window.makeFirstResponder(self) }
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        noteFocusRingMaskChanged()
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        noteFocusRingMaskChanged()
+        return super.resignFirstResponder()
+    }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2)).fill()
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds.insetBy(dx: 2, dy: 2) }
+
+    override func keyDown(with event: NSEvent) {
+        guard let scene = officeScene else { return super.keyDown(with: event) }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        switch event.keyCode {
+        case 48:  // Tab
+            if modifiers.contains(.control) || modifiers.contains(.option) {
+                modifiers.contains(.shift) ? window?.selectPreviousKeyView(self) : window?.selectNextKeyView(self)
+            } else if !scene.moveSelection(modifiers.contains(.shift) ? .previous : .next) {
+                modifiers.contains(.shift) ? window?.selectPreviousKeyView(self) : window?.selectNextKeyView(self)
+            }
+        case 123 where modifiers.isEmpty: scene.moveSelection(.previous)
+        case 124 where modifiers.isEmpty: scene.moveSelection(.next)
+        case 126 where modifiers.isEmpty: scene.moveSelection(.up)
+        case 125 where modifiers.isEmpty: scene.moveSelection(.down)
+        case 36, 76 where modifiers.isEmpty:  // Return, Enter
+            if let id = scene.selectedAgent { scene.onActivate?(id) } else { NSSound.beep() }
+        default:
+            super.keyDown(with: event)
+        }
     }
 }
 
@@ -276,10 +328,14 @@ struct MenuBarLabel: View {
 
     var body: some View {
         let mood = roster.mood
-        Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark))
+        // VoiceOver (M6(7)): 상태 점의 색 대신 "Claude Office, 승인 대기 1명, 일하는 중 2명, 쉬는 중 3명"
+        let spoken = AccessibilityText.menuBar(roster)
+        Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark, description: spoken))
+            .accessibilityLabel(spoken)
             .onAppear { registerOpenWindow(openWindow) }
         if !roster.waiting.isEmpty {
             Text("\(roster.waiting.count)")
+                .accessibilityHidden(true)
         }
     }
 }
@@ -289,9 +345,13 @@ struct MenuBarLabel: View {
 enum MenuBarIcon {
     private static var cache: [String: NSImage] = [:]
 
-    static func image(mood: Roster.Mood, dark: Bool) -> NSImage {
+    /// - Parameter description: VoiceOver가 읽을 설명 (상태별 사람 수, M6(7)). 그림은 상태·모양별로 캐시하고 설명만 바꿉니다.
+    static func image(mood: Roster.Mood, dark: Bool, description: String? = nil) -> NSImage {
         let key = "\(mood.rawValue).\(dark)"
-        if let cached = cache[key] { return cached }
+        if let cached = cache[key] {
+            if let description, cached.accessibilityDescription != description { cached.accessibilityDescription = description }
+            return cached
+        }
         let size = NSSize(width: 22, height: 16)
         let image = NSImage(size: size, flipped: false) { rect in
             // 실제로 그리는 곳의 모양을 먼저 보고, 모르면 SwiftUI가 알려 준 모양을 씁니다
@@ -316,7 +376,7 @@ enum MenuBarIcon {
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = accessibility(mood)
+        image.accessibilityDescription = description ?? accessibility(mood)
         cache[key] = image
         return image
     }

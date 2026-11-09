@@ -22,15 +22,22 @@ enum Palette {
     /// 답변 필요 (응답을 끝내고 내 답을 기다림, M6(4)): 배지의 파랑을 옅게
     static let reply = Color(hex: 0xC9DAFB)
 
-    static func chip(_ tone: RosterStatus.Tone, dark: Bool = false) -> Color {
+    /// - Parameter increased: 시스템 "대비 증가" (M6(7)). 비치는 파스텔을 꽉 채우고, 쉬는 칩 바탕을 조금 진하게.
+    static func chip(_ tone: RosterStatus.Tone, dark: Bool = false, increased: Bool = false) -> Color {
+        let solid = dark || increased
         switch tone {
-        case .working: Color(hex: 0x9FD8C7).opacity(dark ? 1 : 0.55)
-        case .reading: Color(hex: 0xC7BCEB).opacity(dark ? 1 : 0.6)
-        case .running: Color(hex: 0xA9D3F0).opacity(dark ? 1 : 0.6)
-        case .attention: attentionStrong
-        case .reply: reply
-        case .calm: Color.secondary.opacity(0.15)
+        case .working: return Color(hex: 0x9FD8C7).opacity(solid ? 1 : 0.55)
+        case .reading: return Color(hex: 0xC7BCEB).opacity(solid ? 1 : 0.6)
+        case .running: return Color(hex: 0xA9D3F0).opacity(solid ? 1 : 0.6)
+        case .attention: return attentionStrong
+        case .reply: return reply
+        case .calm: return Color.secondary.opacity(increased ? 0.28 : 0.15)
         }
+    }
+
+    /// 대비 증가 칩 테두리 (M6(7)): 색이 있는 칩은 진한 잉크, 쉬는 칩은 기본 글자색
+    static func chipEdge(_ tone: RosterStatus.Tone) -> Color {
+        tone == .calm ? Color.primary.opacity(0.7) : ink.opacity(0.85)
     }
 
     /// 상태 칩 글자색: 색이 있는 칩은 진한 잉크(어두운 모드에서도), 쉬는 칩은 기본 글자색

@@ -48,6 +48,8 @@ final class AppModel {
     /// 동작 줄이기 설정과 macOS 손쉬운 사용 값 (설계서 §10, M5(8))
     private(set) var motionSettings: MotionSettings
     private(set) var systemReduceMotion = false
+    /// macOS 손쉬운 사용 "대비 증가" (M6(7))
+    private(set) var systemIncreaseContrast = false
     /// 사무실 조명을 켜는 기준과 지금 밤인지 (M6(6), 설정 → 일반)
     private(set) var lightingMode: LightingMode
     private(set) var isNight = false
@@ -84,6 +86,8 @@ final class AppModel {
     @ObservationIgnored private var loadingDirectories = false
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     @ObservationIgnored private var motionObserver: NSObjectProtocol?
+    /// 승인 대기·답변 필요를 VoiceOver로 한 번씩 알림 (M6(7))
+    @ObservationIgnored private var announcer = AccessibilityAnnouncer()
     let installer = HookInstaller()
     /// 훅 스크립트가 읽는 엔드포인트 파일. 환경 변수 `CLAUDE_OFFICE_ENDPOINT`로 바꿀 수 있습니다 (훅 스크립트와 같은 이름).
     /// 성능 측정(scripts/perf-launch.sh isolated)은 다른 파일을 써서 실제 세션의 훅이 섞이지 않게 합니다 (M6(1)).
@@ -162,17 +166,23 @@ final class AppModel {
         miniScene.onActivate = { [weak self] id in self?.focusFromMini(id) }
         miniScene.hoverHelp = { [weak self] id in self?.hoverHelp(for: id, mini: true) }
         miniScene.onViewportChange = { [weak self] size in self?.setMiniViewport(size) }
+        // VoiceOver가 캐릭터를 읽을 때 지금 목록에서 찾습니다 (M6(7))
+        officeScene.accessibilityRow = { [weak self] id in self?.roster.row(for: id) }
+        miniScene.accessibilityRow = { [weak self] id in self?.roster.row(for: id) }
+        officeScene.accessibilityHiddenRows = { [weak self] in self?.hiddenRowsDescription }
         notifier.onAuthorizationChange = { [weak self] status in self?.notificationAuthorization = status }
         notifier.onOpen = { [weak self] target in self?.open(target) }
         focusAccess = FocusDetector.access
         systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         applyMotion()
+        applyContrast()
         motionObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
                 self?.applyMotion()
+                self?.applyContrast()
             }
         }
         refreshHookStatus()
@@ -336,7 +346,7 @@ final class AppModel {
         } catch {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
         }
-        roster = Roster.make(from: engine.state, privacy: privacy)
+        updateRoster()
         refreshMiniFocus(now: delivery.receivedAt)
         // 고른 직원이 퇴근하면 카드를 닫습니다
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
@@ -348,6 +358,49 @@ final class AppModel {
         officeScene.selectedAgent = id
         if let id { acknowledge(id) }
         refreshStatusLine()
+        // 발밑 고리를 바로 그립니다 (잠잠함 3fps를 기다리지 않음, 키보드로 고를 때 늦어 보이지 않게)
+        settleUntil = max(settleUntil, Date().addingTimeInterval(RenderPacer.settleTime))
+        updatePacing()
+    }
+
+    /// 목록을 다시 만들고, 바뀌었으면 장면의 VoiceOver 요소와 알림을 맞춥니다 (M6(7))
+    private func updateRoster() {
+        let next = Roster.make(from: engine.state, privacy: privacy)
+        guard next != roster else { return }
+        roster = next
+        officeScene.accessibilityRosterChanged()
+        miniScene.accessibilityRosterChanged()
+        announceChanges()
+    }
+
+    /// 승인 대기·답변 필요가 새로 생기면 VoiceOver로 알립니다 (M6(7)).
+    /// 같은 일로 macOS 알림이 갈 때(그 종류 알림이 켜져 있고 허용됨)는 VoiceOver가 알림을 읽으므로 알리지 않습니다.
+    private func announceChanges() {
+        let authorized = notificationAuthorization == .authorized || notificationAuthorization == .provisional
+        var kinds: Set<AccessibilityAnnouncer.Kind> = []
+        if !(authorized && notificationSettings.permission) { kinds.insert(.permission) }
+        if !(authorized && notificationSettings.reply) { kinds.insert(.reply) }
+        let fresh = announcer.announcements(for: roster, kinds: kinds)
+        guard let sentence = AccessibilityAnnouncer.sentence(fresh), NSWorkspace.shared.isVoiceOverEnabled, let app = NSApp else { return }
+        NSAccessibility.post(
+            element: app, notification: .announcementRequested,
+            userInfo: [.announcement: sentence, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
+
+    /// 행이 모자라 사무실에 못 보여 준 행 (VoiceOver 요약, M6(7))
+    private var hiddenRowsDescription: String? {
+        let hidden = stageStore.floor.plan.hiddenTeams
+        let teams = hidden.compactMap { id in roster.teams.first { $0.id == id } }
+        return AccessibilityText.hiddenRows(teams.map { ($0.name, $0.mainName, $0.rows.count) })
+    }
+
+    /// 대비 증가를 장면에 알립니다 (칩·배지·명패 테두리, M6(7))
+    private func applyContrast() {
+        let on = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        systemIncreaseContrast = on
+        officeScene.setHighContrast(on)
+        miniScene.setHighContrast(on)
+        settleUntil = max(settleUntil, Date().addingTimeInterval(RenderPacer.settleTime))
     }
 
     /// 캐릭터를 눌렀으면 그 세션의 응답을 본 것으로 칩니다 (M6(4): ✉ 확인 안 함 배지를 내림. "?" 답변 필요는 답할 때까지 그대로)
@@ -356,7 +409,7 @@ final class AppModel {
         let directives = engine.acknowledge(agent.session, at: Date())
         guard !directives.isEmpty else { return }
         record(directives)
-        roster = Roster.make(from: engine.state, privacy: privacy)
+        updateRoster()
         refreshMiniFocus()
     }
 
@@ -437,7 +490,7 @@ final class AppModel {
         if left > 0 { append(.system, "데스크톱 앱에서 닫은 세션 \(left)명이 퇴근했어요") }
         record(directives)
         notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
-        roster = Roster.make(from: engine.state, privacy: privacy)
+        updateRoster()
         refreshMiniFocus(now: now)
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
         refreshStatusLine()
@@ -705,7 +758,7 @@ final class AppModel {
         miniStore.privacy = level
         engine.privacy = level
         UserDefaults.standard.set(level.rawValue, forKey: PrivacyLevel.settingsKey)
-        roster = Roster.make(from: engine.state, privacy: level)
+        updateRoster()
         refreshStatusLine()
     }
 

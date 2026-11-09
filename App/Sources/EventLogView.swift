@@ -34,6 +34,7 @@ struct EventLogView: View {
                         Image(systemName: icon(entry.kind))
                             .foregroundStyle(color(entry.kind))
                             .frame(width: 14)
+                            .accessibilityHidden(true)
                         Text(entry.text)
                             .font(.system(size: 12, design: entry.kind == .directive ? .monospaced : .default))
                             .textSelection(.enabled)

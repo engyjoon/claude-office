@@ -12,6 +12,8 @@ final class StageStore {
     var privacy: PrivacyLevel = .detailed
     /// 사무실 조명 (M6(6)). 바꿀 때는 씬의 `setLighting`을 거쳐 크로스페이드합니다.
     var lighting: Lighting = .day
+    /// 시스템 "대비 증가" (M6(7)): 상태 칩·배지·명패 테두리를 진하게
+    var highContrast = false
 }
 
 /// SpriteKit 사무실 화면 (설계서 §8).
@@ -32,10 +34,10 @@ final class OfficeScene: SKScene {
         case band(top: Double)
     }
 
-    private let store: StageStore
+    let store: StageStore
     let framing: Framing
     /// 지도 좌표(사무실 크기)로 그리는 층. 창 크기에 맞춰 크기와 위치만 바뀝니다.
-    private let world = SKNode()
+    let world = SKNode()
     private let furniture = SKNode()
     /// 움직이는 가구 (안마 의자 롤러, 긴 명령을 기다리는 모니터). 그림이 바뀔 때만 다시 만듭니다.
     private let liveFurniture = SKNode()
@@ -72,7 +74,93 @@ final class OfficeScene: SKScene {
             guard oldValue != selectedAgent else { return }
             if let oldValue { characters[oldValue]?.isSelected = false }
             if let selectedAgent { characters[selectedAgent]?.isSelected = true }
+            // 키보드로 고르면 VoiceOver 커서도 그 사람에게 (장면에 키보드 초점이 있을 때)
+            if let selectedAgent, keyboardFocusedAgent == selectedAgent, NSWorkspace.shared.isVoiceOverEnabled {
+                NSAccessibility.post(element: characterElement(for: selectedAgent), notification: .focusedUIElementChanged)
+            }
         }
+    }
+
+    // MARK: - 접근성 (M6(7))
+
+    /// 사람마다 한 번 만든 VoiceOver 요소 (`SceneAccessibility.swift`)
+    var characterElements: [AgentID: CharacterAccessibilityElement] = [:]
+    var accessibilityExtras = AccessibilityExtras()
+    /// 요소가 읽을 목록 줄 (모델의 지금 `Roster`에서 찾음)
+    var accessibilityRow: ((AgentID) -> RosterRow?)?
+    /// 행이 모자라 통째로 숨긴 행 요약 (사무실 창만)
+    var accessibilityHiddenRows: (() -> String?)?
+    /// 마지막으로 VoiceOver에 알린 "+N" (사람이 오가는 것은 노드를 만들거나 지울 때 압니다)
+    private var announcedHidden: [TeamID: Int]?
+    /// 상태 글자가 바뀌었는지 보려고 마지막으로 읽힌 문구
+    private var spokenLabels: [AgentID: String] = [:]
+
+    /// 미니 사무실 띠인지
+    var isBand: Bool {
+        if case .band = framing { return true }
+        return false
+    }
+
+    /// 키보드 초점이 장면에 있을 때 고른 사람 (VoiceOver 초점 요소)
+    var keyboardFocusedAgent: AgentID? {
+        guard let view, view.window?.firstResponder === view else { return nil }
+        return selectedAgent
+    }
+
+    func characterNodeExists(_ id: AgentID) -> Bool { characters[id] != nil }
+
+    /// 캐릭터의 화면 좌표 사각형 (VoiceOver 커서 상자)
+    func accessibilityScreenFrame(of id: AgentID) -> NSRect {
+        guard let view, let node = characters[id] else { return .zero }
+        let frame = node.hitFrame
+        let a = convert(CGPoint(x: frame.minX, y: frame.minY), from: world)
+        let b = convert(CGPoint(x: frame.maxX, y: frame.maxY), from: world)
+        let p = view.convert(a, from: self), q = view.convert(b, from: self)
+        return NSAccessibility.screenRect(
+            fromView: view, rect: NSRect(x: min(p.x, q.x), y: min(p.y, q.y), width: abs(q.x - p.x), height: abs(q.y - p.y)))
+    }
+
+    /// 사람이 오가거나 "+N"이 바뀌었으면 VoiceOver에 알립니다 (바뀐 때만, VoiceOver가 켜져 있을 때만).
+    /// 매 프레임 부르지만 바뀐 게 없으면 작은 사전 비교 하나로 끝납니다.
+    private func noteAccessibilityMembers(_ stage: Stage, membersChanged: Bool) {
+        let hidden = stage.hiddenCounts
+        guard membersChanged || announcedHidden != hidden else { return }
+        announcedHidden = hidden
+        characterElements = characterElements.filter { characters[$0.key] != nil }
+        spokenLabels = spokenLabels.filter { characters[$0.key] != nil }
+        guard let view, NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(element: view, notification: .layoutChanged)
+    }
+
+    /// 목록(`Roster`)이 바뀐 뒤 모델이 부릅니다: 읽는 문구가 바뀐 요소에만 `titleChanged`
+    func accessibilityRosterChanged() {
+        guard view != nil, NSWorkspace.shared.isVoiceOverEnabled else {
+            spokenLabels.removeAll()
+            return
+        }
+        for (id, element) in characterElements {
+            guard let label = element.accessibilityLabel() else { continue }
+            if let old = spokenLabels[id], old != label {
+                NSAccessibility.post(element: element, notification: .titleChanged)
+            }
+            spokenLabels[id] = label
+        }
+    }
+
+    /// 키보드로 다음 사람 고르기 (사무실 창). 끝을 넘으면 false (Tab이면 장면 밖으로 초점을 넘김).
+    @discardableResult
+    func moveSelection(_ move: SceneNavigation.Move) -> Bool {
+        guard let next = SceneNavigation.target(from: selectedAgent, move: move, stage: store.stage) else { return false }
+        onSelect?(next)
+        return true
+    }
+
+    /// 시스템 "대비 증가"가 바뀜: 가구(명패)를 다시 굽고 칩·배지를 새 테두리로
+    func setHighContrast(_ on: Bool) {
+        guard store.highContrast != on else { return }
+        store.highContrast = on
+        // 칩·배지는 다음 장에서 도형이 달라져 저절로 다시 만들어집니다
+        furnitureKey = nil
     }
 
     init(store: StageStore, framing: Framing = .office) {
@@ -274,12 +362,14 @@ final class OfficeScene: SKScene {
         }
 
         var present = Set<AgentID>()
+        var membersChanged = false
         for actor in stage.sortedActors {
             present.insert(actor.id)
             let node: CharacterNode
             if let existing = characters[actor.id] {
                 node = existing
             } else {
+                membersChanged = true
                 let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
                 node = CharacterNode(agent: actor.agent, teamColor: Swatch.teamColors[colorIndex % Swatch.teamColors.count].color.skColor)
                 node.isSelected = actor.id == selectedAgent
@@ -292,8 +382,10 @@ final class OfficeScene: SKScene {
         }
         for (id, node) in characters where !present.contains(id) {
             characters[id] = nil
+            membersChanged = true
             node.run(.sequence([.fadeOut(withDuration: 0.25), .removeFromParent()]))
         }
+        noteAccessibilityMembers(stage, membersChanged: membersChanged)
         syncOverlays(stage, extent: extent)
     }
 
@@ -307,7 +399,8 @@ final class OfficeScene: SKScene {
         case .band: visible = MapRect(0, extent.y, extent.width + extent.x, extent.height)
         }
         let options = OverlayOptions(
-            privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible, lighting: store.lighting)
+            privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible, lighting: store.lighting,
+            highContrast: store.highContrast)
         var present = Set<String>()
         for (index, item) in Overlay.items(for: stage, options: options).enumerated() {
             present.insert(item.id)
@@ -462,6 +555,7 @@ final class OfficeScene: SKScene {
         var teams: [Team]
         var nameplates: [TeamID: [Seat: String]]
         var lighting: Lighting
+        var contrast: Bool
     }
 
     private var furnitureKey: FurnitureKey?
@@ -488,7 +582,7 @@ final class OfficeScene: SKScene {
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
         let key = FurnitureKey(
             fit: [extent.x, extent.width, extent.height].map { Int(($0 / 4).rounded()) }, layout: stage.layout, teams: teams,
-            nameplates: stage.nameplates, lighting: store.lighting)
+            nameplates: stage.nameplates, lighting: store.lighting, contrast: store.highContrast)
         guard key != furnitureKey else { return }
         furnitureKey = key
 
@@ -496,7 +590,7 @@ final class OfficeScene: SKScene {
         let height = stage.layout.height
         let layers = OfficeArt.layers(
             layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
-            lighting: store.lighting)
+            lighting: store.lighting, contrast: store.highContrast)
 
         // 가구는 비트맵으로 구워 둡니다 (M6(1)). 깊이가 같은 층(한 행의 책상들, 의자들, 바닥·벽·표지)은 한 장으로 합칩니다:
         // 깊이가 같으면 SpriteKit도 넣은 순서대로 그리므로 순서가 같고, 그릴 노드 수가 줄어 매 프레임 순회 비용이 줄어듭니다.

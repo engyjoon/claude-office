@@ -12,9 +12,10 @@ public enum OfficeArt {
     ///   - lounge: 휴게 공간(소파·안마 의자와 그 러그)을 그릴지. 미니 사무실은 그리지 않습니다 (M5(4) v2).
     ///   - lighting: 밤이면 벽·바닥·가구를 밤 팔레트로 칠하고, 창밖을 밤하늘로, 휴게 공간에 스탠드를 켭니다 (M6(6)).
     ///     사람 있는 책상의 불빛은 자리에 따라 바뀌므로 따로 `deskLight(at:)`로 그립니다.
+    ///   - contrast: 시스템 "대비 증가" (M6(7)). 명패·행 표지·"+N" 테두리를 굵게 합니다.
     public static func layers(
         layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil, lounge: Bool = true,
-        lighting: Lighting = .day
+        lighting: Lighting = .day, contrast: Bool = false
     ) -> [ArtLayer] {
         var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent, lounge: lounge))]
         for row in layout.rows {
@@ -22,6 +23,7 @@ public enum OfficeArt {
             layers += self.row(row, team: team, plates: nameplates[row.team] ?? [:])
         }
         if lounge { layers += self.lounge() }
+        if contrast { layers = layers.map(boostPlates) }
         layers = layers.map { $0.lit(lighting) }
         // 벽 가구는 스스로 밤 색을 칠합니다 (창밖 그림이 낮·밤으로 다름). 바탕 바로 뒤에 둡니다.
         layers.insert(contentsOf: wallFurniture(layout, lighting: lighting), at: 1)
@@ -403,6 +405,18 @@ public enum OfficeArt {
             .circle(x + 9, desk.y + 17, 3.5, fill: .swatch(Swatch.teamColors[color % 4]), width: 1),
             .text(text, x + 16, desk.y + 17.5, size: 9, color: .swatch(.ink), anchor: .start, baseline: .central),
         ]
+    }
+
+    /// 대비 증가 (M6(7)): 명패 바탕(`plate`)을 쓴 도형(책상 명패, 행 표지, "+N")의 잉크 테두리를 2.2pt로
+    static func boostPlates(_ layer: ArtLayer) -> ArtLayer {
+        var layer = layer
+        layer.shapes = layer.shapes.map { shape in
+            guard shape.fill == .swatch(.plate), shape.stroke != nil else { return shape }
+            var shape = shape
+            shape.lineWidth = max(shape.lineWidth, 2.2)
+            return shape
+        }
+        return layer
     }
 
     /// 행 끝 "+N" (화면에 다 못 보여 준 사람 수)
