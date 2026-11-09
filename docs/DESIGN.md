@@ -768,6 +768,14 @@ CharacterNode (SKNode)
 3. 실행할 때 화면 배율(2x, 3x)에 맞춰 `SKTexture`로 래스터화하고 캐시합니다.
 4. 말풍선 글꼴은 **고운돋움(Gowun Dodum, OFL)**을 앱에 번들합니다. 라벨 등 UI는 시스템 글꼴을 씁니다.
 
+**앱 아이콘 (M6(3), 2026-11-09)**
+
+- 그림: 노란(`#F7DE8B`) 둥근 사각형 바탕에 헤드폰을 쓰고 웃는 직원 얼굴과 몸통(가슴에 메인의 별 배지). `AppIconArt`가 직원 현황 초상과 같은 `CharacterArt` 부위(머리·표정·헤드폰·몸통)를 10배로 키워 씁니다. 팔은 뺐습니다(차렷 자세처럼 보임).
+- 격자: 1024 캔버스 가운데 824 둥근 사각형(모서리 185, macOS 아이콘 격자), 아래로 옅은 그림자, 잉크 외곽선. 그림은 바탕 안으로 잘라 몸통이 바탕 아래로 이어지게 합니다. macOS 26은 이 바탕 모양을 그대로 받아 유리 테두리만 덧입힙니다(회색 틀에 넣지 않음).
+- 작은 크기: 16·32px 칸(16@1x, 16@2x, 32@1x)은 `small` 그림입니다. 얼굴을 12배로 더 키우고, 볼터치·별 배지·뒤 원을 빼고, 모든 선을 1024 기준 32(32px에서 1px) 이상으로 굵게 합니다. 64px 이상은 `full`.
+- 만들기: `make icon`(`scripts/make-app-icon.sh`) → `office-sim icon`이 `build/icon/app-icon-{full,small}.svg`를 쓰고 → `scripts/render-icon.swift`(AppKit `NSImage`가 SVG를 직접 읽음, 따로 설치할 도구 없음)가 투명 바탕 PNG 10장(72dpi)을 `App/Assets.xcassets/AppIcon.appiconset`에 씁니다. PNG는 Git에 올려 앱 빌드에 패키지 실행이 필요 없게 합니다. `project.yml`의 `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`으로 `AppIcon.icns`와 `CFBundleIconName`이 들어갑니다.
+- 고른 과정: 시안 셋(책상 앞 직원, 헤드폰 얼굴, 창문마다 얼굴이 보이는 건물) 중 16px에서도 얼굴로 읽히는 헤드폰 얼굴. 메뉴바 아이콘(SF Symbol `building.2` + 상태 점)은 흑백 템플릿이라 그대로 둡니다.
+
 ---
 
 ## 10. 앱 화면 구성 (SwiftUI + AppKit)
@@ -1030,7 +1038,7 @@ claude-office/
 │  │  └─ Resources/    dialogue.ko.json
 │  ├─ OfficeServer/    # 로컬 훅 서버(BSD 소켓, macOS·Linux), 훅 스크립트(리소스), HookInstaller, EndpointFile, HookHealth(훅 상태 판정)
 │  ├─ OfficeStage/     # 배치·길찾기, 무대(연출 지시 실행·말풍선 규칙), OfficeFloor(보일 사람 고르기), MiniOffice(미니 사무실 영역·보여 줄 행), Overlay(말풍선·칩 배치), Art(그림 데이터), SVG 렌더러
-│  └─ office-sim/      # run(연출 타임라인), sounds(WAV), serve(헤드리스 서버+엔진), replay(앱으로 시나리오 전송)
+│  └─ office-sim/      # run(연출 타임라인), sounds(WAV), serve(헤드리스 서버+엔진), replay(앱으로 시나리오 전송), snapshot(SVG), icon(앱 아이콘 SVG)
 ├─ Scenarios/          # office-sim용 시나리오 (JSON Lines)
 ├─ Tests/OfficeCoreTests/
 │  └─ Fixtures/
@@ -1045,10 +1053,12 @@ claude-office/
 │  │                   # M5(3): Notifier(알림·DesktopAppFocuser·FocusDetector), 설정 알림 탭, 메뉴바 상태 점
 │  │                   # M5~: MiniOfficePanel
 │  │                   # M5(8): LoginItem(로그인 시 실행·SettingsWindow), 설정 일반·연동·표시·미니 탭
-│  └─ Resources/       Assets.xcassets(SVG 벡터), Fonts/GowunDodum
+│  └─ Assets.xcassets/ AppIcon.appiconset (M6(3), make icon으로 만든 PNG)
 ├─ scripts/
 │  ├─ capture-hook.sh              # M0: 실제 페이로드를 이벤트마다 파일로 저장
-│  └─ capture.py                   # M0: 수집 훅 설치·제거, 구조 리포트, 픽스처 내보내기
+│  ├─ capture.py                   # M0: 수집 훅 설치·제거, 구조 리포트, 픽스처 내보내기
+│  ├─ perf*.sh                     # M6(1): 성능 측정
+│  └─ make-app-icon.sh, render-icon.swift  # M6(3): 앱 아이콘 PNG 만들기 (make icon)
 ├─ docs/
 │  ├─ DESIGN.md                    # 이 문서
 │  ├─ M0-capture.md                # 훅 페이로드 수집 안내
@@ -1063,6 +1073,7 @@ claude-office/
 | `make test` | `swift test` (OfficeCore, Linux에서도 실행 가능) |
 | `make demo` | `office-sim`으로 `Scenarios/delegation.jsonl`의 연출 타임라인 출력 |
 | `make sounds` | 효과음을 `build/sounds/*.wav`로 렌더링 |
+| `make icon` | (M6(3), macOS) 앱 아이콘 PNG를 `App/Assets.xcassets/AppIcon.appiconset`에 다시 만들기 (§9.5) |
 | `make bootstrap` | (M2) `brew install xcodegen` 후 프로젝트 생성 |
 | `make app` / `make install` | (M2) `xcodebuild`로 Release 빌드 / `/Applications`에 복사 |
 
@@ -1180,3 +1191,4 @@ claude-office/
 | 2026-11-09 | 현황 줄 세 줄 (M5(9)) | 한 줄에 여러 일을 이어 붙이던 방식 → **행마다 한 줄**(사무실의 행과 같은 순서·색, 그 행의 가장 최근 일 하나 + 시간, 승인 대기 우선, 조용하면 쉬는 중·잠든 중), 캐릭터를 고르면 **그 사람의 최근 일 세 개**(최신이 아래). 숨긴 행의 승인 대기는 빈 줄(없으면 셋째 줄)에 "화면 밖" 알림. MCP 도구는 사람이 읽는 말(`MCPNames`), Bash 명령의 절대 경로는 마지막 이름으로. 인스펙터 타임라인·알림도 같은 말 함수 |
 | 2026-11-09 | 성능 목표 측정과 그리기 빈도 단계 (M6(1)) | 측정 도구(`make perf`, `scripts/perf-*.sh`, 앱 안 계측 `PerfProbe` 기본 꺼짐)를 만들고 (a)~(e)를 전후로 잼(§8.3 구현 메모). 도형은 SKShapeNode 대신 CoreGraphics로 구운 스프라이트(`ShapeBaker`), 안 보이는 SKView는 멈춤, 그리기 빈도는 0/3/6/10/30fps 다섯 단계(`RenderPacer`)이고 30fps 아래는 SKView를 멈춰 두고 한 장씩 그림(`preferredFramesPerSecond`만 낮추면 디스플레이 링크가 120Hz로 돌아 효과 없음). 쉬는 캐릭터는 멈추지 않고 6fps, 20초 넘게 조용하면 3fps + 느린 깜빡임: 완전히 멈추면 죽어 보이고, 그 아래로는 숨쉬기가 끊겨 보임. SwiftUI 시계는 글자가 바뀌는 순간에만, 창이 안 보이면 멈춤. 결과: 메뉴바만 19.9→0.4%, 사무실 창 대기 43.9→1.6%, 최소화·가려짐 51→0.3~0.4%. 보이는 대기(1.1~1.6%)와 걷기가 많은 바쁜 상황(8.4%)은 목표를 조금 넘어 목표 조정 제안 |
 | 2026-11-09 | 압축 상태 풀기·안마 의자 그림 (M6(2)) | 쉬던 세션이 압축(수동 `/compact`·데스크톱 앱)되면 Stop이 오지 않아 "정리 중"이 몇 시간 남던 문제: `SessionStart` source `compact`(또는 `PostCompact`)를 받으면 응답 중이 아니면 압축 전 쉬는 상태와 그 시각으로(쉼 단계가 이어짐), 응답 중이면 하던 일로 되돌림. 끝 신호가 없어도 5분(`OfficeState.compactionTimeout`) 뒤 쉬는 상태로 풂. 정리 연출은 걷지 않고 그 자리에서, 이전 Zz·♪를 내리고 끝나면 쉼 단계 모습을 되살림. 안마 의자는 팔걸이를 팔꿈치 높이로 낮춰 직원 뒤로, 앉는 판을 낮춰 몸통이 보이게. 훅 순서(PreCompact → SessionStart compact, 수동 압축 뒤 Stop 없음)는 문서에 순서가 적혀 있지 않아 추정 |
+| 2026-11-09 | 앱 아이콘 (M6(3)) | 시안 셋(책상 앞 직원·헤드폰 얼굴·창문 얼굴 건물) 중 **헤드폰 얼굴**: 16px에서도 노란 바탕·보라 헤드폰·얼굴이 남고, 앱의 핵심인 캐릭터를 바로 보여 줌. 사무실 그림 도형(`CharacterArt`)을 그대로 키워 그림체를 맞춤. 16·32px는 따로 덜어 낸 그림. PNG는 macOS `NSImage`의 SVG 읽기로 그려 도구 설치 없이 다시 만들 수 있게 하고, 결과를 Git에 올림. 설치 뒤 아이콘 캐시 문제는 없었음(`cp -R`로 새로 놓인 번들을 Launch Services가 바로 읽음)이라 `make install`에 `touch`·`killall`을 넣지 않음 (§9.5) |

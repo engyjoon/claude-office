@@ -116,6 +116,30 @@ public enum SVGRenderer {
             + "<g clip-path=\"url(#c)\">\(body)</g></svg>"
     }
 
+    /// 앱 아이콘 한 장 (M6(3)). 1024 캔버스를 `size` 픽셀로 그립니다.
+    /// 바탕 둥근 사각형 아래에 옅은 그림자를 두고, 그림은 바탕 안으로 잘라 그립니다.
+    public static func appIcon(_ detail: AppIconArt.Detail, size: Double = 1024) -> String {
+        let plate = AppIconArt.plate
+        let radius = AppIconArt.plateRadius
+        func rect(_ r: MapRect, _ radius: Double, _ attributes: String) -> String {
+            "<rect x=\"\(f(r.x))\" y=\"\(f(r.y))\" width=\"\(f(r.width))\" height=\"\(f(r.height))\" rx=\"\(f(radius))\" \(attributes)/>"
+        }
+        let defs = "<clipPath id=\"plate\">" + rect(plate, radius, "") + "</clipPath>"
+        var body = ""
+        for group in AppIconArt.groups(detail) {
+            let colors = group.appearance.map(CharacterArt.colors(for:))
+            body += group.shapes.map { element($0, colors: colors) }.joined()
+        }
+        let ink = Swatch.ink.color.hex
+        let line = AppIconArt.plateLine(detail)
+        let shadow = rect(MapRect(plate.x, plate.y + 14, plate.width, plate.height), radius, "fill=\"\(ink)\" fill-opacity=\"0.22\"")
+        let fill = rect(plate, radius, "fill=\"\(AppIconArt.plateFill.hex)\"")
+        let outline = rect(plate, radius, "fill=\"none\" stroke=\"\(ink)\" stroke-width=\"\(f(line))\"")
+        let canvas = f(AppIconArt.canvas)
+        return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(f(size))\" height=\"\(f(size))\" viewBox=\"0 0 \(canvas) \(canvas)\">"
+            + "<defs>\(defs)</defs>\(shadow)\(fill)<g clip-path=\"url(#plate)\">\(body)</g>\(outline)</svg>"
+    }
+
     static func element(_ shape: ArtShape, colors: CharacterArt.Colors?) -> String {
         var attributes = ""
         if let fill = shape.fill {

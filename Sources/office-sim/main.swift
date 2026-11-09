@@ -16,6 +16,8 @@ import OfficeStage
 //       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
 //       --mini 390 이면 미니 사무실(폭 390 패널의 한 행 띠: 메인 + 서브 2명, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
 //       --pin <세션>으로 고정할 행을 정할 수 있습니다.
+//   office-sim icon [--out 폴더]
+//       앱 아이콘을 SVG로 저장합니다 (64px 이상용 app-icon-full.svg, 16·32px용 app-icon-small.svg). PNG는 make icon.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
@@ -36,6 +38,7 @@ func usage() -> Never {
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
           office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390 [--pin 세션]]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
+          office-sim icon [--out 폴더]
         """)
     exit(2)
 }
@@ -396,6 +399,19 @@ func replay(_ arguments: [String]) throws {
     print("\n\(steps.count)개 중 \(sent)개를 보냈습니다 (\(speed)배속).")
 }
 
+// MARK: - icon
+
+/// 앱 아이콘 SVG를 <폴더>/app-icon-<detail>.svg로 씁니다 (M6(3))
+func icon(_ arguments: [String]) throws {
+    let folder = URL(fileURLWithPath: option("--out", in: arguments) ?? "build/icon")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    for detail in AppIconArt.Detail.allCases {
+        let url = folder.appendingPathComponent("app-icon-\(detail.rawValue).svg")
+        try SVGRenderer.appIcon(detail).write(to: url, atomically: true, encoding: .utf8)
+        print(url.path)
+    }
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch arguments.first {
@@ -404,6 +420,7 @@ do {
     case "serve": try serve(Array(arguments.dropFirst()))
     case "replay": try replay(Array(arguments.dropFirst()))
     case "snapshot": try snapshot(Array(arguments.dropFirst()))
+    case "icon": try icon(Array(arguments.dropFirst()))
     default: usage()
     }
 } catch {

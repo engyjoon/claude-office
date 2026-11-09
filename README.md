@@ -30,6 +30,7 @@ Claude 데스크톱 앱의 Claude Code 세션과 서브에이전트가 일하는
 | M5(9) 창 크기 고정, 현황 줄 세 줄 | 완료. 사무실 창 크기를 고정(사무실 3행 + 아래 현황 줄 + 오른쪽 패널, 가장자리 조절·최대화·전체 화면 막음, 패널을 숨기거나 보일 때만 너비가 바뀜, 화면이 작으면 화면 안에 맞게 줄임). 현황 줄을 세 줄로: 아무도 안 고르면 사무실의 행과 같은 순서로 행마다 한 줄(`● claude-office · 메인1 · 서브2가 Edit StaffPanel.swift (방금)`, 승인 대기 노랑, 조용하면 쉬는 중·잠든 중), 화면에 못 보여 준 행의 승인 대기는 "화면 밖" 알림 줄, 캐릭터를 고르면 그 사람의 최근 일 세 개. MCP 도구는 사람이 읽는 말("할 일 목록 정리"), 명령의 긴 경로는 마지막 이름(`cd claude-office`) (설계서 §10.2). 맥 화면 확인은 사용자 몫 |
 | **M5 편의** | **완료** (M5(1)~M5(9)) |
 | M6(1) 성능 측정과 최적화 | 완료. `make perf CASE=…`로 상황별 CPU·메모리를 재고(창 조작·격리 실행·바쁜 부하 스크립트 포함, 앱 안 계측은 기본 꺼짐), 도형을 구운 스프라이트로 바꾸고, 안 보이는 장면은 멈추고, 그리기 빈도를 움직임에 따라 30·10·6·3fps로 나눔. 메뉴바만 19.9 → 0.4%, 사무실 창 대기 43.9 → 1.6%, 최소화·가려짐 51 → 0.4%, 훅 → 화면 p95 80ms 이하 (설계서 §8.3). 쉬는 캐릭터가 자연스러운지 맥 화면 확인은 사용자 몫 |
+| M6(3) 앱 아이콘 | 완료. 노란 둥근 사각형 바탕에 헤드폰을 쓰고 웃는 직원 얼굴(사무실과 같은 `CharacterArt` 도형). 16·32px 칸은 선을 굵게 하고 볼터치·별 배지를 뺀 그림. `make icon`이 `App/Assets.xcassets/AppIcon.appiconset`의 PNG를 다시 만듦 (설계서 §9.5). Finder·로그인 항목 확인은 사용자 몫 |
 | M6 다듬기 (야간 모드, 접근성, 직원 꾸미기) | 예정 |
 
 ## 개발
@@ -51,6 +52,8 @@ make sounds
 ```
 
 `make sounds`는 효과음을 `build/sounds/*.wav`로 저장하고, `make snapshot`은 말풍선까지 포함한 사무실 장면(위임 시나리오, 혼잡한 행 배치 `Scenarios/floor.jsonl`)을 `build/snapshots/*.svg`로 그립니다 (맥 없이 그림 확인, `office-sim snapshot … --size 1440x748`로 사무실 영역 크기 지정). 앱에서는 설정 → 효과음에서 항목별로 켜고 끄고 미리 들을 수 있습니다.
+
+앱 아이콘 그림(`Sources/OfficeStage/Art/AppIconArt.swift`)을 고쳤다면 `make icon`으로 아이콘 PNG를 다시 만들어 함께 커밋합니다 (macOS에서만, `office-sim icon`이 SVG를 쓰고 `scripts/render-icon.swift`가 PNG로 그림).
 
 맥 앱은 Xcode와 XcodeGen이 필요합니다 ([docs/M2-build.md](docs/M2-build.md)).
 

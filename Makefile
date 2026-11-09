@@ -13,7 +13,7 @@ ifeq ($(origin DEVELOPER_DIR),undefined)
   endif
 endif
 
-.PHONY: build test demo sounds snapshot serve replay notify-demo bootstrap app run install uninstall clean perf
+.PHONY: build test demo sounds icon snapshot serve replay notify-demo bootstrap app run install uninstall clean perf
 
 ## 설치된 앱의 CPU·메모리를 상황별로 측정 (설계서 §8.3): make perf CASE=a DURATION=60
 ##   격리 실행·창 조작·바쁜 부하는 scripts/perf-launch.sh, perf-window.sh, perf-busy.sh
@@ -38,6 +38,10 @@ demo:
 ## 효과음을 build/sounds/*.wav로 렌더링
 sounds:
 	$(SWIFT) run -q office-sim sounds build/sounds
+
+## 앱 아이콘 PNG를 App/Assets.xcassets/AppIcon.appiconset에 다시 만들기 (그림: AppIconArt, 만든 PNG는 Git에 올림)
+icon:
+	SWIFT=$(SWIFT) scripts/make-app-icon.sh
 
 ## 사무실 장면을 build/snapshots/*.svg로 (맥 없이 그림 확인, 사무실 1140×708·둘레 여백 20·배율 1)
 ##   위임: 2.6초 종이비행기 · 11초 자기 책상에서 읽기 · 20초 외침 풍선 · 52.2초 보고 · 61.5초 응답 완료 · 128초 휴게 공간
