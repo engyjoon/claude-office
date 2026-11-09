@@ -34,6 +34,11 @@ struct StatusLineTests {
                 .texts(now: Fixture.epoch.addingTimeInterval(seconds ?? clock))
         }
 
+        /// 사용자가 그 세션의 응답을 봄 (M6(4))
+        mutating func acknowledge(_ session: String = "s1", at seconds: Double) {
+            _ = engine.acknowledge(SessionID(session), at: Fixture.epoch.addingTimeInterval(seconds))
+        }
+
         var main: AgentID { engine.state.lead(of: SessionID("s1"))!.id }
         func team(_ session: String) -> TeamID { engine.state.lead(of: SessionID(session))!.teamID }
         func color(_ session: String) -> Int? { engine.state.teams[team(session)]?.colorIndex }
@@ -217,7 +222,7 @@ struct StatusLineTests {
         #expect(office.texts(rows: rows, at: 6) == [
             "claude-office · 메인2 · Bash make test (4초째)",
             "a-sdn-portal · 메인1 · Edit auth.ts (5초째)",
-            "workspace · 메인3 · 쉬는 중",
+            "workspace · 메인3 · 새 응답 (방금)",
         ])
         // 보이는 행이 하나면 한 줄
         #expect(office.texts(rows: [office.team("s1")], at: 6) == ["a-sdn-portal · 메인1 · Edit auth.ts (5초째)"])
@@ -225,11 +230,12 @@ struct StatusLineTests {
         #expect(office.line().lines.map(\.head) == ["메인1", "메인2", "메인3"])
     }
 
-    @Test("조용한 행은 쉬는 중, 10분이 지나면 잠든 중")
+    @Test("조용한 행은 (응답을 확인한 뒤) 쉬는 중, 10분이 지나면 잠든 중")
     func quietRow() {
         var office = Office()
         for payload in read("r1", "a.ts") { office.send(payload) }
         office.send(hook.make("Stop"), at: 10)
+        office.acknowledge(at: 11)
         let line = office.line()
         #expect(line.lines[0].segment.tone == .muted)
         #expect(line.ticks)
@@ -266,7 +272,7 @@ struct StatusLineTests {
         #expect(office.texts(at: 10) == ["a-sdn-portal · 메인 · 서브가 Bash rm -rf build 승인 대기 (6초째)"])
     }
 
-    @Test("notify-demo 흐름: 명령 승인 대기 중에는 행 줄도 승인 대기, 끝나면 쉬는 중")
+    @Test("notify-demo 흐름: 명령 승인 대기 중에는 행 줄도 승인 대기, 끝나면 새 응답, 확인하면 쉬는 중")
     func notifyDemo() {
         var office = Office()
         let demo = session("s1", "notify-demo")
@@ -279,7 +285,9 @@ struct StatusLineTests {
         #expect(office.line().lines[0].segment.tone == .attention)
         office.send(demo.tool("PostToolUse", "Bash", id: "t1", input: ["command": "npm test"], extra: [("tool_response", [:])]), at: 44)
         office.send(demo.make("Stop"), at: 47)
-        #expect(office.texts(at: 50) == ["notify-demo · 메인 · 쉬는 중"])
+        #expect(office.texts(at: 50) == ["notify-demo · 메인 · 새 응답 (방금)"])
+        office.acknowledge(at: 51)
+        #expect(office.texts(at: 52) == ["notify-demo · 메인 · 쉬는 중"])
     }
 
     @Test("디렉토리를 고르면 그 디렉토리의 행만, 디렉토리 이름은 생략")

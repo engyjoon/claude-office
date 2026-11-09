@@ -19,12 +19,16 @@ enum Palette {
     static func team(_ index: Int) -> Color { Color(hex: teams[abs(index) % teams.count]) }
 
     /// 상태 칩 바탕. 밝은 모드는 흰 바탕에 비치는 연한 파스텔, 어두운 모드는 비치지 않는 파스텔(글자는 `chipText`의 진한 잉크).
+    /// 답변 필요 (응답을 끝내고 내 답을 기다림, M6(4)): 배지의 파랑을 옅게
+    static let reply = Color(hex: 0xC9DAFB)
+
     static func chip(_ tone: RosterStatus.Tone, dark: Bool = false) -> Color {
         switch tone {
         case .working: Color(hex: 0x9FD8C7).opacity(dark ? 1 : 0.55)
         case .reading: Color(hex: 0xC7BCEB).opacity(dark ? 1 : 0.6)
         case .running: Color(hex: 0xA9D3F0).opacity(dark ? 1 : 0.6)
         case .attention: attentionStrong
+        case .reply: reply
         case .calm: Color.secondary.opacity(0.15)
         }
     }

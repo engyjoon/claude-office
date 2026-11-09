@@ -70,8 +70,6 @@ final class AppModel {
     private(set) var focusAccess: FocusDetector.Access = .notDetermined
     /// 미니 사무실 (M5(4)): 지금 보여 주는 행과 그 까닭, 사용자가 고정한 행, 설정
     private(set) var miniFocus: MiniFocus = .empty
-    /// 미니에서 확인한 완료 (세션 → 확인한 완료 시각). 확인한 완료는 우선순위 ②에서 내려갑니다.
-    private(set) var miniAcknowledged: [SessionID: Date] = [:]
     /// 미니를 눌러 사무실 창을 여는 중 (창이 뜨기 전에 미니가 다시 나타나지 않게)
     @ObservationIgnored private var miniHiddenUntil = Date.distantPast
     private(set) var miniSettings: MiniOfficeSettings
@@ -340,7 +338,18 @@ final class AppModel {
     func select(_ id: AgentID?) {
         selectedAgent = id
         officeScene.selectedAgent = id
+        if let id { acknowledge(id) }
         refreshStatusLine()
+    }
+
+    /// 캐릭터를 눌렀으면 그 세션의 응답을 본 것으로 칩니다 (M6(4): ✉ 확인 안 함 배지를 내림. "?" 답변 필요는 답할 때까지 그대로)
+    private func acknowledge(_ id: AgentID) {
+        guard let agent = engine.state.agents[id], agent.cue == .unread else { return }
+        let directives = engine.acknowledge(agent.session, at: Date())
+        guard !directives.isEmpty else { return }
+        record(directives)
+        roster = Roster.make(from: engine.state, privacy: privacy)
+        refreshMiniFocus()
     }
 
     /// 현황 줄과 인스펙터 타임라인을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
@@ -393,11 +402,13 @@ final class AppModel {
         guard !loadingDirectories else { return }
         loadingDirectories = true
         let directory = desktopSessions
+        let desktopActive = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == DesktopAppFocuser.bundleID
         Task.detached(priority: .utility) {
             let readAt = Date()
             let records = directory.allRecords()
             let folders = DesktopSessionDirectory.openFolders(in: records)
-            let roll = DesktopResidents.roll(from: records, readAt: readAt)
+            // 데스크톱 앱이 맨 앞이면 가장 최근에 연 세션을 "지금 보는 세션"으로 칩니다 (M6(4) 확인 안 함)
+            let roll = DesktopResidents.roll(from: records, readAt: readAt, desktopAppActive: desktopActive)
             await MainActor.run {
                 self.loadingDirectories = false
                 if folders != self.directories { self.directories = folders }
@@ -532,6 +543,7 @@ final class AppModel {
     /// 서브에이전트도 자기가 속한 세션 기준이고(`RosterRow.hostSession`·`term`은 세션의 것), 미리 출근해 쉬는 데스크톱 세션도 앱으로 갑니다.
     func focusAgent(_ id: AgentID) {
         guard let row = roster.row(for: id) else { return }
+        acknowledge(id)
         guard row.focusLabel != nil else {
             append(.system, "\(row.name): 앞으로 가져올 앱을 몰라요")
             return
@@ -561,10 +573,8 @@ final class AppModel {
 
     /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 답변 필요 → 완료 → 가장 마지막에 요청
     private func refreshMiniFocus(now: Date = Date()) {
-        miniAcknowledged = miniAcknowledged.filter { engine.state.parts[$0.key]?.completedAt == $0.value }
         let next = MiniFocus.next(
-            previous: miniFocus, state: engine.state, pinned: nil, acknowledged: miniAcknowledged,
-            autoSwitch: miniSettings.autoSwitch, now: now)
+            previous: miniFocus, state: engine.state, pinned: nil, autoSwitch: miniSettings.autoSwitch, now: now)
         if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
         if next != miniFocus { miniFocus = next }
     }
@@ -638,13 +648,10 @@ final class AppModel {
         focusAgent(id)
     }
 
-    /// 완료를 보여 주던 중이면 확인한 것으로 쳐서 다음 순위를 보여 줍니다
+    /// 확인하지 않은 응답(✉)을 보여 주던 중이면 그 행의 응답을 모두 본 것으로 쳐서 다음 순위를 보여 줍니다 (M6(4))
     private func acknowledgeMiniCompletion() {
-        guard miniFocus.tier == .completed, let team = miniFocus.team, let main = engine.state.main(of: team),
-            let done = engine.state.parts[main.session]?.completedAt
-        else { return }
-        miniAcknowledged[main.session] = done
-        refreshMiniFocus()
+        guard miniFocus.tier == .completed, let team = miniFocus.team else { return }
+        for agent in engine.state.agents(in: team) where agent.cue == .unread { acknowledge(agent.id) }
     }
 
     /// SwiftUI 장면의 창 열기 동작을 받아 둡니다 (메뉴바 아이콘·메뉴가 나타날 때)

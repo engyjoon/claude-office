@@ -121,6 +121,10 @@ struct StatusLineView: View {
             // 승인 대기: 노랑 형광펜
             text.foregroundColor = Palette.ink  // 어두운 모드에서도 흰 글자가 되지 않게
             text.backgroundColor = Palette.attention
+        case .reply:
+            // 답변 필요: 파랑 형광펜 (M6(4))
+            text.foregroundColor = Palette.ink
+            text.backgroundColor = Palette.reply
         case .error:
             text.foregroundColor = .red
         }

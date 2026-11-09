@@ -20,6 +20,8 @@ public struct StageActor: Identifiable, Hashable, Sendable {
     public internal(set) var pose: Pose = .standing
     public internal(set) var expression: FacialExpression = .neutral
     public internal(set) var emote: Emote?
+    /// 머리 왼쪽 위 배지 (답변 필요 "?", 확인 안 함 ✉, M6(4))
+    public internal(set) var badge: SessionCue?
     public internal(set) var bubble: Bubble?
     public internal(set) var pill: StatusPill?
     public internal(set) var prop: Prop?
@@ -32,6 +34,7 @@ public struct StageActor: Identifiable, Hashable, Sendable {
     /// 말풍선이 화면에 뜬 무대 시각 (렌더러가 톡 튀어나오는 애니메이션을 계산)
     public internal(set) var bubbleShownAt: Double = 0
     public internal(set) var emoteShownAt: Double = 0
+    public internal(set) var badgeShownAt: Double = 0
     /// 행의 말풍선이 꽉 차서 기다리는 말풍선 (설계서 §7.2)
     public internal(set) var queuedBubble: QueuedBubble?
 
@@ -322,6 +325,9 @@ public struct Stage: Sendable {
         case .emote(let emote):
             if actors[id]!.emote != emote { actors[id]!.emoteShownAt = time }
             actors[id]!.emote = emote
+        case .badge(let badge):
+            if actors[id]!.badge != badge { actors[id]!.badgeShownAt = time }
+            actors[id]!.badge = badge
         case .say(let bubble):
             let blip = actors[id]!.pendingBlip
             actors[id]!.pendingBlip = nil

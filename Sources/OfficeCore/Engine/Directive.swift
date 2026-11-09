@@ -122,6 +122,8 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         case gesture(BodyGesture)
         case express(FacialExpression)
         case emote(Emote?)
+        /// 머리 왼쪽 위 배지 (답변 필요 "?", 확인 안 함 ✉, M6(4)). 쉼 단계와 상관없이 따라다닙니다.
+        case badge(SessionCue?)
         case say(Bubble)
         case dismissBubble
         case status(StatusPill?)
@@ -158,6 +160,7 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         case .gesture(let gesture): what = "제스처 \(gesture.rawValue)"
         case .express(let expression): what = "표정 \(expression.rawValue)"
         case .emote(let emote): what = "아이콘 \(emote?.rawValue ?? "없음")"
+        case .badge(let cue): what = "배지 \(cue?.rawValue ?? "없음")"
         case .say(let bubble): what = "말풍선[\(bubble.kind.rawValue)] \"\(bubble.text)\""
         case .dismissBubble: what = "말풍선 닫기"
         case .status(let pill): what = "상태 칩 \(pill.map { "\"\($0.text)\"" } ?? "없음")"

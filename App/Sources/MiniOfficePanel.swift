@@ -337,7 +337,8 @@ struct MiniHeaderView: View {
         .padding(.leading, 10)
         .padding(.trailing, CGFloat(MiniOffice.headerHeight))  // ✕ 자리
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(line?.kind == .answer ? Palette.attention : line?.kind == .completed ? Self.done : Self.paper)
+        .background(
+            line?.kind == .answer ? Palette.attention : line?.kind == .reply ? Palette.reply : line?.kind == .completed ? Self.done : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
     }
@@ -352,12 +353,12 @@ struct MiniHeaderView: View {
         }
     }
 
-    /// 다른 메인: "?2"(답변 필요, 노랑), "✓3"(완료, 초록), "1"
+    /// 다른 메인: "?2"(답변 필요, 노랑), "✉3"(확인 안 한 응답, 초록), "1"
     private func chip(_ team: RosterTeam, tier: MiniFocus.Tier) -> some View {
         let number = team.mainName.replacingOccurrences(of: "메인", with: "")
         let (icon, fill, stroke): (String, Color, UInt32) = switch tier {
         case .answer: ("?", Palette.attention, 0xE2B93B)
-        case .completed: ("✓", Self.done, 0x5DBB7A)
+        case .completed: ("✉", Self.done, 0x5DBB7A)
         default: ("", .white, 0xCFC6D9)
         }
         return HStack(spacing: 3) {
@@ -373,16 +374,19 @@ struct MiniHeaderView: View {
 
     /// 머리줄에 보여 줄 한 사람: 답변을 기다리는 사람이 있으면 가장 오래 기다린 사람, 아니면 가장 마지막으로 상태가 바뀐 사람
     struct Line {
-        enum Kind { case answer, completed, normal }
+        /// answer = 승인·질문 답 대기("!"), reply = 응답을 끝내고 답을 기다림("?"), completed = 확인 안 한 응답(✉) (M6(4))
+        enum Kind { case answer, reply, completed, normal }
         var row: RosterRow
         var kind: Kind
     }
 
     static func latest(focus: MiniFocus, rows: [RosterRow], waiting: [RosterRow]) -> Line? {
         if let first = waiting.first { return Line(row: first, kind: .answer) }
+        if let asker = rows.filter({ $0.status == .awaitingReply }).min(by: { ($0.since, $0.id) < ($1.since, $1.id) }) {
+            return Line(row: asker, kind: .reply)
+        }
         guard let row = rows.max(by: { ($0.since, $1.id) < ($1.since, $0.id) }) else { return nil }
-        let resting = row.status == .idle || row.status == .waitingForInput
-        return Line(row: row, kind: row.isMain && resting && focus.tier == .completed ? .completed : .normal)
+        return Line(row: row, kind: row.status == .unread ? .completed : .normal)
     }
 
     /// "서브: 요청 받음 · 방금", "메인: 응답 완료 · 1분 전", "서브3: 승인 대기 12초째", "메인: 쉬는 중 · 3분 전"
@@ -395,8 +399,10 @@ struct MiniHeaderView: View {
             let elapsed = StatusLine.elapsed(now.timeIntervalSince(row.since)).map { " \($0)" } ?? ""
             let more = waitingCount > 1 ? " (외 \(waitingCount - 1)명)" : ""
             return "\(name): \(model.waitLabel(of: row.id))\(elapsed)\(more)"
+        case .reply:
+            return "\(name): 답변 필요 · \(Self.ago(row.since, now: now))"
         case .completed:
-            return "\(name): 응답 완료 · \(Self.ago(row.since, now: now))"
+            return "\(name): 새 응답 · \(Self.ago(row.since, now: now))"
         case .normal:
             let prompted = row.status == .thinking && model.promptedAt(row).map { abs($0.timeIntervalSince(row.since)) < 1 } == true
             return "\(name): \(prompted ? "요청 받음" : row.status.label) · \(Self.ago(row.since, now: now))"

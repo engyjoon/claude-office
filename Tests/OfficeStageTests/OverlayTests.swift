@@ -244,3 +244,33 @@ struct OverlayTests {
         #expect(TextMetrics.width("가", size: 12, bold: true) > TextMetrics.width("가", size: 12))
     }
 }
+
+@Suite("답변 필요·확인 안 함 배지 (M6(4))")
+struct CueBadgeTests {
+    @Test("배지는 머리 왼쪽 위에 가만히 있고(Zz·♪는 오른쪽 위), 나타날 때만 빠른 그리기")
+    func badgePlacement() throws {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.hook(hook("UserPromptSubmit", #""prompt":"x""#), at: 1)
+        h.hook(hook("Stop"), at: 2)
+        h.run(until: 15)  // 출입문에서 걸어 들어와 "다 됐어요" 말풍선과 3초 뒤에 배지
+        let lead = try #require(h.actor("lead-1"))
+        #expect(lead.badge == .unread)
+        let items = Overlay.items(for: h.stage)
+        let badge = try #require(items.first { $0.kind == .badge })
+        #expect(badge.origin == lead.position + Overlay.badgeOffset)
+        #expect(badge.scale == 1 && badge.opacity == 1)
+        #expect(RenderPacer.motion(h.stage) != .fast)
+        // 한참 뒤에도 같은 자리 (통통 튀지 않음)
+        h.run(until: 16.3)
+        let later = try #require(Overlay.items(for: h.stage).first { $0.kind == .badge })
+        #expect(later.origin == h.actor("lead-1")!.position + Overlay.badgeOffset)
+    }
+
+    @Test("답변 필요는 파란 말풍선 \"?\", 확인 안 함은 편지")
+    func badgeArt() {
+        let reply = OverlayArt.badge(.reply)
+        #expect(reply.contains { if case .text("?", _, _, _, _, _) = $0.geometry { true } else { false } })
+        #expect(OverlayArt.badge(.unread).count == 4)
+    }
+}

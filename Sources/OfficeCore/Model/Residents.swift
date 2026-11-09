@@ -13,11 +13,24 @@ public struct ResidentSession: Hashable, Sendable {
     public var title: String?
     /// 데스크톱 앱이 기록한 마지막 활동 시각. 쉼 단계(소파 → 안마 의자 → 잠)를 이 시각부터 셉니다.
     public var lastActivity: Date?
+    /// 사용자가 데스크톱 앱에서 이 세션을 마지막으로 연 때 (`lastFocusedAt`, M6(4))
+    public var lastFocused: Date?
+    /// 데스크톱 앱이 앞에 있고 지금 이 세션을 보고 있음 (가장 최근에 연 세션). 그동안은 계속 "본" 것으로 칩니다.
+    public var isFocused: Bool
+    /// 응답이 마지막으로 시작하거나 끝난 때 (`lastTurnEdgeAt`). 사무실에 새로 앉힐 때 응답을 끝낸 때로 씁니다.
+    public var lastTurnEdge: Date?
+    /// 데스크톱 앱의 최신 응답 요약이 "사용자 결정이 필요함"(`blocked` + `needs_action`)이면 true, 다른 판정이면 false,
+    /// 요약이 없거나 지난 응답의 것이면 nil (M6(4))
+    public var replyRequest: Bool?
 
     public init(
         session: SessionID, hostSession: String, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil,
-        lastActivity: Date? = nil
+        lastActivity: Date? = nil, lastFocused: Date? = nil, isFocused: Bool = false, lastTurnEdge: Date? = nil, replyRequest: Bool? = nil
     ) {
+        self.lastFocused = lastFocused
+        self.isFocused = isFocused
+        self.lastTurnEdge = lastTurnEdge
+        self.replyRequest = replyRequest
         self.session = session
         self.hostSession = hostSession
         self.ancestors = ancestors

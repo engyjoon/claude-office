@@ -32,6 +32,8 @@ public enum Beat: Hashable, Sendable {
     case compactionEnded(Agent)
     case reported(member: Agent, to: Agent?)
     case left(Agent)
+    /// 응답을 끝낸 세션의 표시(`Agent.cue`: 답변 필요·확인 안 함)가 바뀜 (M6(4)). 다른 비트 뒤에 옵니다.
+    case cueChanged(Agent)
 }
 
 /// 사무실의 의미 상태 (누가 어느 행·책상에서 무엇을 하는지). 순수 값 타입이며 시간은 이벤트에서만 받습니다.
@@ -59,6 +61,9 @@ public struct OfficeState: Sendable {
     /// 최근에 끝난 tool_use_id. 훅 스크립트가 curl을 백그라운드로 보내므로 Post가 Pre보다 먼저 도착할 수 있습니다.
     private var finishedToolIDs: [String] = []
     private var finishedToolIDSet: Set<String> = []
+    /// 데스크톱 앱이 앞에 있을 때 지금 보고 있는 데스크톱 세션 (`syncResidents`가 맞춤, M6(4)).
+    /// 이 세션의 응답이 끝나면 사용자가 보고 있었으므로 바로 "본" 것으로 칩니다.
+    private var focusedHost: String?
 
     public init() {}
 
@@ -100,6 +105,7 @@ public struct OfficeState: Sendable {
 
         if case .sessionEnded = event.kind {
             endSession(event.session, beats: &beats)
+            refreshCues(beats: &beats)
             return beats
         }
 
@@ -117,6 +123,8 @@ public struct OfficeState: Sendable {
         case .promptSubmitted:
             parts[event.session]?.lastPromptAt = now
             parts[event.session]?.completedAt = nil
+            parts[event.session]?.seenAt = now
+            parts[event.session]?.replyRequested = false
             update(leadID) {
                 $0.consecutiveErrors = 0
                 $0.runningTools = []
@@ -222,7 +230,7 @@ public struct OfficeState: Sendable {
                 beats.append(.waitingForInput(agents[leadID]!))
             }
 
-        case .turnEnded(let failed):
+        case .turnEnded(let failed, let asksUser):
             // 안전장치: 세션 응답이 끝났는데 남은 (백그라운드가 아닌) 서브에이전트는 이때 보고하고 퇴근합니다
             let leftovers = agents.values
                 .filter { $0.session == event.session && $0.role == .member && !$0.runsInBackground }
@@ -235,6 +243,8 @@ public struct OfficeState: Sendable {
                 $0.setActivity(.idle, at: now)
             }
             parts[event.session]?.completedAt = now
+            parts[event.session]?.replyRequested = asksUser && !failed
+            if let host = parts[event.session]?.hostSession, host == focusedHost { parts[event.session]?.seenAt = now }
             beats.append(.turnEnded(agents[leadID]!, failed: failed))
 
         case .compacting:
@@ -246,6 +256,38 @@ public struct OfficeState: Sendable {
             }
             beats.append(.compacting(agents[leadID]!))
         }
+        refreshCues(beats: &beats)
+        return beats
+    }
+
+    // MARK: - 답변 필요·확인 안 함 (M6(4))
+
+    /// 응답을 끝낸 세션 직원의 표시. 응답 중이거나 쉬는 중이 아니면(정리 중 등) 없음.
+    func cue(for agent: Agent) -> SessionCue? {
+        guard agent.role == .lead, agent.isResting, let part = parts[agent.session], let done = part.completedAt,
+            !isResponding(agent.session)
+        else { return nil }
+        if part.replyRequested { return .reply }
+        if (part.seenAt ?? .distantPast) < done { return .unread }
+        return nil
+    }
+
+    /// 모든 세션 직원의 표시를 다시 정하고, 바뀐 사람마다 `cueChanged` 비트를 냅니다.
+    private mutating func refreshCues(beats: inout [Beat]) {
+        for id in agents.keys.sorted() {
+            let next = cue(for: agents[id]!)
+            guard agents[id]!.cue != next else { continue }
+            agents[id]!.cue = next
+            beats.append(.cueChanged(agents[id]!))
+        }
+    }
+
+    /// 사용자가 그 세션의 응답을 봤음 (사무실·미니에서 캐릭터를 누름). "확인 안 함"이 풀립니다. "답변 필요"는 답할 때까지 그대로.
+    public mutating func acknowledge(_ session: SessionID, at now: Date) -> [Beat] {
+        guard parts[session] != nil else { return [] }
+        parts[session]!.seenAt = max(parts[session]!.seenAt ?? .distantPast, now)
+        var beats: [Beat] = []
+        refreshCues(beats: &beats)
         return beats
     }
 
@@ -296,6 +338,7 @@ public struct OfficeState: Sendable {
         for agent in stuck {
             finishCompaction(agent.id, at: now, timedOut: true, beats: &beats)
         }
+        if !beats.isEmpty { refreshCues(beats: &beats) }
         return beats
     }
 
@@ -396,6 +439,7 @@ public struct OfficeState: Sendable {
     ///   데스크톱 id가 없어서 건드리지 않습니다.
     public mutating func syncResidents(_ roll: ResidentRoll, at now: Date, busyGrace: TimeInterval = 10 * 60) -> [Beat] {
         var beats: [Beat] = []
+        focusedHost = roll.residents.first(where: \.isFocused)?.hostSession
         if roll.isReliable {
             let gone = parts.values
                 .filter { part in
@@ -419,6 +463,7 @@ public struct OfficeState: Sendable {
             }
             if let part = parts[resident.session], agents[part.lead] != nil {
                 absorb(hint, for: resident.session, beats: &beats)
+                observe(resident, at: now)
                 continue
             }
             let arrival = OfficeEvent(
@@ -426,13 +471,30 @@ public struct OfficeState: Sendable {
             var local: [Beat] = []
             let id = ensureLead(for: arrival, beats: &local)
             update(id) { $0.setActivity(.idle, at: min(resident.lastActivity ?? now, now)) }
+            // 사무실에 오기 전에 끝난 응답도 확인 안 함·답변 필요를 보여 주도록 응답 끝을 데스크톱 기록에서 가져옵니다
+            parts[resident.session]?.completedAt = resident.lastTurnEdge.map { min($0, now) }
+            parts[resident.session]?.replyRequested = resident.replyRequest ?? false
+            observe(resident, at: now)
             let settled = agents[id]!
             beats += local.map { beat in
                 if case .arrived(let agent) = beat, agent.id == id { return .settled(settled) }
                 return beat
             }
         }
+        refreshCues(beats: &beats)
         return beats
+    }
+
+    /// 데스크톱 앱이 알려 준 "본 때"와 응답 요약을 세션 기록에 반영합니다 (M6(4)).
+    private mutating func observe(_ resident: ResidentSession, at now: Date) {
+        guard var part = parts[resident.session] else { return }
+        let seen = [part.seenAt, resident.lastFocused.map { min($0, now) }, resident.isFocused ? now : nil].compactMap { $0 }.max()
+        part.seenAt = seen
+        // 응답 요약은 끝난 응답에 대한 것만 따릅니다 (응답 중이면 지난 응답의 요약일 수 있음)
+        if let verdict = resident.replyRequest, part.completedAt != nil, !isResponding(resident.session) {
+            part.replyRequested = verdict
+        }
+        parts[resident.session] = part
     }
 
     private mutating func openTeam(folder: String, beats: inout [Beat]) -> TeamID {

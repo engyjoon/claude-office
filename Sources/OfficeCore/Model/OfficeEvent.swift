@@ -82,7 +82,8 @@ public struct OfficeEvent: Hashable, Sendable {
         case permissionDenied(ToolCall?)
         /// Claude Code가 한동안 입력을 기다린다고 알려줄 때 (`idle_prompt`)
         case waitingForInput
-        case turnEnded(failed: Bool)
+        /// 응답 끝 (`Stop`·`StopFailure`). `asksUser`: 마지막 응답이 질문·결정 요청으로 끝남 (`ReplyRequest`, M6(4))
+        case turnEnded(failed: Bool, asksUser: Bool = false)
         /// 대화 압축 시작 (`PreCompact`, 수동 `/compact`·자동 압축 모두)
         case compacting
         /// 대화 압축 끝 (`PostCompact`). 설치하는 훅 목록에는 아직 없고, 받으면 `SessionStart`(source `compact`)와 같이 처리합니다 (M6(2)).

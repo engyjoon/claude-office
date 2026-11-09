@@ -44,6 +44,14 @@ public struct OfficeEngine: Sendable {
         return choreographer.handle(beats, at: now)
     }
 
+    /// 사용자가 그 세션의 응답을 봤음 (사무실·미니에서 캐릭터를 누름, M6(4)). "확인 안 함" 배지를 내립니다.
+    public mutating func acknowledge(_ session: SessionID, at now: Date) -> [Directive] {
+        let beats = state.acknowledge(session, at: now)
+        guard !beats.isEmpty else { return [] }
+        journal.record(beats, in: state, at: now)
+        return choreographer.handle(beats, at: now)
+    }
+
     public var notificationSettings: NotificationSettings {
         get { notices.settings }
         set { notices.settings = newValue }

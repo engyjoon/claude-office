@@ -89,6 +89,7 @@ public enum RenderPacer {
             if actor.isWalking || actor.gesture != nil { return .fast }
             if actor.bubble != nil, time - actor.bubbleShownAt < bubblePopTime { return .fast }
             if actor.emote != nil, time - actor.emoteShownAt < emoteAppearTime { return .fast }
+            if actor.badge != nil, time - actor.badgeShownAt < emoteAppearTime { return .fast }
             if isFastPose(actor.pose) { motion = .busy }
         }
         return motion

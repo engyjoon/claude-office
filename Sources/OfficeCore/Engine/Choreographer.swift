@@ -88,6 +88,8 @@ public struct Choreographer: Sendable {
         var shout: Bubble?
         /// 대화를 압축하는 중 (서류 정리 자세). 쉼 단계(`rest`)와 쉬기 시작한 때(`idleSince`)는 그대로 두었다가 끝나면 되돌립니다 (M6(2)).
         var compacting = false
+        /// 머리 위 배지 (M6(4)). "답변 필요"면 쉬러 가지 않고 자기 책상에서 기다립니다.
+        var badge: SessionCue?
     }
 
     /// 쉼 단계 (설계서 §6.2): 소파 → 안마 의자 → 잠듦
@@ -285,7 +287,8 @@ public struct Choreographer: Sendable {
         case .waitingForInput(let agent):
             touch(agent)
             out.append(Directive(nil, .sound(.inputWaiting)))
-            if presences[agent.id]?.rest == Rest.none {
+            // 배지(답변 필요·확인 안 함)를 단 사람은 "?" 아이콘을 따로 띄우지 않습니다 (M6(4))
+            if presences[agent.id]?.rest == Rest.none, presences[agent.id]?.badge == nil {
                 out.append(Directive(agent.id, .gesture(.tilt)))
                 setEmote(agent.id, .question, into: &out)
             }
@@ -408,6 +411,25 @@ public struct Choreographer: Sendable {
             }
             leave(member.id, into: &out)
 
+        case .cueChanged(let agent):
+            touch(agent)
+            guard let presence = presences[agent.id], presence.badge != agent.cue else { return }
+            modify(agent.id) { $0.badge = agent.cue }
+            out.append(Directive(agent.id, .badge(agent.cue)))
+            // 답변 필요: 쉬러 가 있었으면(데스크톱 앱의 응답 요약이 늦게 옴) 자기 책상으로 돌아와 깨어 기다립니다.
+            // 쉼 단계는 멈추고(`tickPresence`), 답하면(새 요청) 평소처럼 일합니다.
+            if agent.cue == .reply, !presence.waiting, !presence.compacting {
+                if presence.rest > .none || !isDesk(presence.spot) {
+                    setEmote(agent.id, nil, into: &out)
+                    out.append(Directive(agent.id, .prop(nil)))
+                    move(agent.id, to: seatSpot(agent), into: &out)
+                    out.append(Directive(agent.id, .pose(.sitting)))
+                    out.append(Directive(agent.id, .express(.neutral)))
+                    modify(agent.id) { $0.rest = .none }
+                }
+                out.append(Directive(agent.id, .gesture(.tilt)))
+            }
+
         case .left(let agent):
             guard presences[agent.id] != nil else { return }
             touch(agent)
@@ -484,8 +506,9 @@ public struct Choreographer: Sendable {
             }
         }
 
+        // 답변 필요(M6(4))는 쉬러 가지 않고 자기 책상에서 기다립니다
         if let current = presences[id], current.agent.role == .lead, current.shown == .idle, !current.waiting,
-            let since = current.idleSince
+            current.badge != .reply, let since = current.idleSince
         {
             rest(id, current, elapsed: now.timeIntervalSince(since), at: now, into: &out)
         }
@@ -914,6 +937,7 @@ public struct Choreographer: Sendable {
         out.append(Directive(id, .prop(restoredProp(presence))))
         out.append(Directive(id, .express(restoredExpression(presence))))
         if let emote = presence.emote { out.append(Directive(id, .emote(emote))) }
+        if let badge = presence.badge { out.append(Directive(id, .badge(badge))) }
         if let pill = presence.pill { out.append(Directive(id, .status(pill))) }
         if presence.waiting, let shout = presence.shout { out.append(Directive(id, .say(shout))) }
         return out

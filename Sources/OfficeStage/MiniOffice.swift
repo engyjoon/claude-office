@@ -84,8 +84,13 @@ public enum MiniCast {
         }
     }
 
-    /// 내 답을 기다림 (승인 대기, 질문, 계획 승인)
+    /// 내 답을 기다림 (승인 대기, 질문, 계획 승인, 응답을 끝내고 답을 기다림 M6(4))
     public static func needsAnswer(_ agent: Agent) -> Bool {
+        isAsking(agent) || agent.cue == .reply
+    }
+
+    /// 응답 도중 승인·질문 답을 기다림 ("!")
+    public static func isAsking(_ agent: Agent) -> Bool {
         if case .waitingForPermission = agent.activity { return true }
         return false
     }
@@ -93,11 +98,11 @@ public enum MiniCast {
 
 /// 미니 사무실이 지금 보여 줄 행과 그 까닭 (순수 계산, M5(4) v2).
 ///
-/// 1. **답변 필요** (자동 전환을 켰을 때): 내 답을 기다리는 사람(승인 대기·질문·계획 승인)이 있는 행.
-///    지금 보는 행에도 있으면 그대로, 아니면 가장 오래 기다린 사람의 행.
+/// 1. **답변 필요** (자동 전환을 켰을 때): 응답 도중 승인·질문 답을 기다리는 사람("!")이 있는 행이 먼저,
+///    없으면 응답을 끝내고 답을 기다리는 사람("?", M6(4))이 있는 행. 지금 보는 행에도 있으면 그대로, 아니면 가장 오래 기다린 행.
 /// 2. **고정**: 사용자가 머리줄에서 고른 행.
-/// 3. **완료**: 메인 세션이 응답을 끝내고 다음 요청을 기다리는 행. 가장 최근에 완료한 행.
-///    `completionWindow`(10분)가 지났거나 사용자가 확인했으면(`acknowledged`) 완료로 보지 않습니다.
+/// 3. **완료**: 아직 확인하지 않은 응답(✉, `SessionCue.unread`)이 있는 행. 가장 최근에 끝난 행.
+///    데스크톱 앱에서 그 세션을 보거나, 새 요청을 보내거나, 캐릭터를 누르면 풀립니다 (M6(4): 예전의 10분 제한 대신).
 /// 4. **최근 요청**: 가장 마지막에 요청(UserPromptSubmit)을 받은 행 (행 안의 메인·서브 세션 중 가장 최근).
 /// 5. 아무것도 없으면 먼저 온 행.
 public struct MiniFocus: Hashable, Sendable {
@@ -131,51 +136,47 @@ public struct MiniFocus: Hashable, Sendable {
 
     public static let empty = MiniFocus(team: nil, reason: .none, since: .distantPast)
 
-    /// 완료를 우선으로 보여 주는 시간
-    public static let completionWindow: TimeInterval = 10 * 60
-
     /// 행 하나의 상태
     public struct Status: Hashable, Sendable {
         public var tier: Tier
         public var at: Date?
-        /// 답변을 가장 오래 기다린 때
+        /// 답변을 가장 오래 기다린 때 (승인 대기, 없으면 응답을 끝내고 답을 기다림)
         public var answerSince: Date?
-        /// 완료한 때 (아직 완료로 볼 때만)
+        /// 응답 도중 승인·질문 답을 가장 오래 기다린 때 ("!")
+        public var askingSince: Date?
+        /// 응답을 끝내고 답을 가장 오래 기다린 때 ("?", M6(4))
+        public var replySince: Date?
+        /// 확인하지 않은 응답이 끝난 때 (가장 최근)
         public var completedAt: Date?
         public var lastPromptAt: Date?
-        /// 완료한 메인 세션
+        /// 확인하지 않은 응답의 세션 (가장 최근)
         public var completedSession: SessionID?
     }
 
-    public static func status(
-        of team: Team, state: OfficeState, acknowledged: [SessionID: Date], now: Date
-    ) -> Status {
+    public static func status(of team: Team, state: OfficeState) -> Status {
         let people = state.agents(in: team.id)
-        let answerSince = people.filter(MiniCast.needsAnswer).map(\.activitySince).min()
-        var completedAt: Date?
-        var completedSession: SessionID?
-        if let main = state.main(of: team.id), let part = state.parts[main.session], let done = part.completedAt,
-            MiniCast.isResting(main), now.timeIntervalSince(done) < completionWindow, acknowledged[main.session] != done
-        {
-            completedAt = done
-            completedSession = main.session
-        }
+        func done(_ agent: Agent) -> Date { state.parts[agent.session]?.completedAt ?? agent.activitySince }
+        let askingSince = people.filter(MiniCast.isAsking).map(\.activitySince).min()
+        let replySince = people.filter { $0.cue == .reply }.map(done).min()
+        let unread = people.filter { $0.cue == .unread }.max { done($0) < done($1) }
+        let completedAt = unread.map(done)
+        let answerSince = askingSince ?? replySince
         let sessions = Set(people.map(\.session))
         let lastPromptAt = sessions.compactMap { state.parts[$0]?.lastPromptAt }.max()
         let tier: Tier = answerSince != nil ? .answer : completedAt != nil ? .completed : lastPromptAt != nil ? .requested : .none
         let at = answerSince ?? completedAt ?? lastPromptAt
         return Status(
-            tier: tier, at: at, answerSince: answerSince, completedAt: completedAt, lastPromptAt: lastPromptAt,
-            completedSession: completedSession)
+            tier: tier, at: at, answerSince: answerSince, askingSince: askingSince, replySince: replySince, completedAt: completedAt,
+            lastPromptAt: lastPromptAt, completedSession: unread?.session)
     }
 
     public static func next(
-        previous: MiniFocus, state: OfficeState, pinned: TeamID?, acknowledged: [SessionID: Date] = [:], autoSwitch: Bool, now: Date
+        previous: MiniFocus, state: OfficeState, pinned: TeamID?, autoSwitch: Bool, now: Date
     ) -> MiniFocus {
         let teams = state.sortedTeams.filter { !state.agents(in: $0.id).isEmpty }
         guard !teams.isEmpty else { return MiniFocus(team: nil, reason: .none, since: now) }
         var statuses: [TeamID: Status] = [:]
-        for team in teams { statuses[team.id] = status(of: team, state: state, acknowledged: acknowledged, now: now) }
+        for team in teams { statuses[team.id] = status(of: team, state: state) }
         let tiers = statuses.mapValues(\.tier)
         func pick(_ team: TeamID, _ reason: Reason) -> MiniFocus {
             let status = statuses[team]!
@@ -192,10 +193,12 @@ public struct MiniFocus: Hashable, Sendable {
             return chosen?.0.id
         }
 
-        // 1) 답변 필요
+        // 1) 답변 필요: 응답 도중 막힌 승인·질문("!")이 먼저, 그다음 응답을 끝내고 답을 기다림("?")
         if autoSwitch {
-            if let current = previous.team, statuses[current]?.answerSince != nil { return pick(current, .answer) }
-            if let team = best({ $0.answerSince }, latest: false) { return pick(team, .answer) }
+            for key in [\Status.askingSince, \Status.replySince] {
+                if let current = previous.team, statuses[current]?[keyPath: key] != nil { return pick(current, .answer) }
+                if let team = best({ $0[keyPath: key] }, latest: false) { return pick(team, .answer) }
+            }
         }
         // 2) 고정
         if let pinned, statuses[pinned] != nil { return pick(pinned, .pinned) }

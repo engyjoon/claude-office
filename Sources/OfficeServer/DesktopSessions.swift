@@ -21,11 +21,22 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     public var lastActivity: Date?
     /// 만든 시각 (`createdAt`, 밀리초). 같은 행의 서브를 앉히는 순서에 씀.
     public var createdAt: Date?
+    /// 사용자가 이 세션을 마지막으로 연 때 (`lastFocusedAt`, 밀리초). 다른 세션에서 옮겨 올 때 기록됩니다 (M6(4) "확인 안 함").
+    public var lastFocused: Date?
+    /// 응답이 마지막으로 시작하거나 끝난 때 (`lastTurnEdgeAt`, 밀리초)
+    public var lastTurnEdge: Date?
+    /// 데스크톱 앱의 응답 요약(`postTurnSummary`)이 마지막 응답(`lastAssistantUuid`)에 대한 것이면 그 판정:
+    /// `status_category`가 `blocked`이고 `needs_action`이 있으면 true(답변 필요), 다른 판정이면 false. 요약이 없거나 지난 것이면 nil.
+    public var replyRequest: Bool?
 
     public init(
         localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?,
-        isArchived: Bool = false, lastActivity: Date? = nil, createdAt: Date? = nil
+        isArchived: Bool = false, lastActivity: Date? = nil, createdAt: Date? = nil, lastFocused: Date? = nil, lastTurnEdge: Date? = nil,
+        replyRequest: Bool? = nil
     ) {
+        self.lastFocused = lastFocused
+        self.lastTurnEdge = lastTurnEdge
+        self.replyRequest = replyRequest
         self.createdAt = createdAt
         self.localID = localID
         self.cliSessionID = cliSessionID
@@ -44,6 +55,14 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             return string
         }
         let parent = text(json["spawnedFrom"]?["sessionId"]).flatMap { HookRequestPolicy.isHostSessionID($0) ? $0 : nil }
+        func date(_ key: String) -> Date? { json[key]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) } }
+        // 응답 요약은 마지막 응답에 대한 것일 때만 씁니다 (요약은 응답이 끝나고 몇 초 뒤에 생김)
+        var replyRequest: Bool?
+        if let summary = json["postTurnSummary"], case .object = summary, let last = text(json["lastAssistantUuid"]),
+            text(summary["summarizes_uuid"]) ?? text(json["postTurnSummaryFor"]) == last
+        {
+            replyRequest = text(summary["status_category"]) == "blocked" && text(summary["needs_action"]) != nil
+        }
         return DesktopSessionRecord(
             localID: localID,
             cliSessionID: text(json["cliSessionId"]),
@@ -52,8 +71,11 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             parentLocalID: parent,
             title: text(json["title"]),
             isArchived: json["isArchived"]?.boolValue ?? false,
-            lastActivity: json["lastActivityAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) },
-            createdAt: json["createdAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) }
+            lastActivity: date("lastActivityAt"),
+            createdAt: date("createdAt"),
+            lastFocused: date("lastFocusedAt"),
+            lastTurnEdge: date("lastTurnEdgeAt"),
+            replyRequest: replyRequest
         )
     }
 
@@ -281,11 +303,15 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
 /// - 관계: 부모(`spawnedFrom`)를 따라 올라가며 조상의 CLI 세션 id를 모읍니다 (보관한 부모 포함, 사무실에 없는 부모는 리듀서가 건너뜀).
 /// - 순서: 최근에 활동한 행이 먼저(위 행, 작은 메인 번호), 행 안에서는 부모가 먼저, 그다음 만든 순서.
 /// - 서브에이전트는 훅으로만 알 수 있어 앉히지 않습니다.
+/// - 본 때 (M6(4)): `desktopAppActive`(데스크톱 앱이 맨 앞)이면 가장 최근에 연 세션을 "지금 보는 세션"으로 칩니다.
 public enum DesktopResidents {
-    public static func roll(from list: [DesktopSessionRecord], readAt: Date) -> ResidentRoll {
+    public static func roll(from list: [DesktopSessionRecord], readAt: Date, desktopAppActive: Bool = false) -> ResidentRoll {
         var records: [String: DesktopSessionRecord] = [:]
         for record in list { records[record.localID] = record }
         let open = records.values.filter { !$0.isArchived }
+        let focused = desktopAppActive
+            ? open.filter { $0.lastFocused != nil }.max { ($0.lastFocused!, $0.localID) < ($1.lastFocused!, $1.localID) }?.localID
+            : nil
 
         struct Entry {
             var record: DesktopSessionRecord
@@ -311,7 +337,8 @@ public enum DesktopResidents {
             }
             let resident = ResidentSession(
                 session: SessionID(cli), hostSession: record.localID, ancestors: ancestors, rootCwd: root.folder ?? record.folder,
-                title: record.title, lastActivity: record.lastActivity)
+                title: record.title, lastActivity: record.lastActivity, lastFocused: record.lastFocused,
+                isFocused: record.localID == focused, lastTurnEdge: record.lastTurnEdge, replyRequest: record.replyRequest)
             entries.append(Entry(record: record, resident: resident, group: group, depth: ancestors.count))
         }
 

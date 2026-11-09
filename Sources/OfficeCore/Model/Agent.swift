@@ -131,6 +131,16 @@ public enum JobTitle: Hashable, Sendable {
     }
 }
 
+/// 응답을 끝낸 세션이 사용자에게 바라는 것 (M6(4), 설계서 §6.2). 머리 위 배지와 현황·미니 사무실이 같이 씁니다.
+///
+/// - `reply` 답변 필요: 응답이 질문·결정 요청으로 끝남 (데스크톱 앱의 응답 요약이 "막힘", 또는 마지막 문장이 질문).
+///   쉬러 가지 않고 자기 책상에서 기다리며 파란 "?" 배지를 답니다.
+/// - `unread` 확인 안 함: 응답이 끝난 뒤 사용자가 아직 그 세션을 보지 않음. 쉼 단계는 그대로 밟고 ✉ 배지를 답니다.
+/// 승인 대기("!", 응답 도중 막힘)와는 겹치지 않습니다: 배지는 응답이 끝난(쉬는) 세션에만 붙습니다.
+public enum SessionCue: String, Hashable, Sendable {
+    case unread, reply
+}
+
 /// 압축 전 활동 (`Agent.beforeCompacting`)
 struct CompactionOrigin: Hashable, Sendable {
     var activity: Activity
@@ -204,6 +214,8 @@ public struct Agent: Identifiable, Hashable, Sendable {
     let serial: Int
     /// 압축(정리 중)을 시작하기 전 활동과 그 시각. 압축이 끝나면 이것으로 되돌립니다 (M6(2)).
     var beforeCompacting: CompactionOrigin? = nil
+    /// 응답을 끝낸 세션 직원의 표시 (답변 필요·확인 안 함, M6(4)). 서브에이전트와 응답 중인 세션은 nil.
+    public internal(set) var cue: SessionCue? = nil
 
     /// 화면에 보이는 이름: 언제나 직함 ("메인1", "서브2"). 에이전트 종류는 `profile.agentType` (신원 카드에만)
     public var displayName: String { title.label }
@@ -273,4 +285,9 @@ public struct Part: Hashable, Sendable {
     public internal(set) var lastPromptAt: Date?
     /// 응답을 끝낸 때(Stop). 다음 요청이 오면 지웁니다 (미니 사무실 "완료한 세션", M5(4))
     public internal(set) var completedAt: Date?
+    /// 사용자가 이 세션을 마지막으로 본 때 (M6(4)): 데스크톱 앱에서 그 세션을 연 때(`lastFocusedAt`, 지금 보고 있으면 지금),
+    /// 새 요청을 보낸 때, 사무실·미니에서 그 캐릭터를 누른 때. `completedAt`보다 이르면 "확인 안 함"입니다.
+    public internal(set) var seenAt: Date?
+    /// 마지막 응답이 사용자의 답을 바라는지 (M6(4)). Stop의 마지막 문장으로 정하고, 데스크톱 앱의 응답 요약이 오면 그것을 따릅니다.
+    public internal(set) var replyRequested = false
 }

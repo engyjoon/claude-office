@@ -4,6 +4,8 @@ import Foundation
 public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
     case arriving, thinking, reading, editing, running, browsing, planning, reporting, usingTool
     case delegating, waitingForPermission, waitingForInput, idle, compacting
+    /// 응답을 끝냈고 내 답을 기다림 / 아직 확인하지 않은 응답 (M6(4), `SessionCue`)
+    case awaitingReply, unread
 
     public var label: String {
         switch self {
@@ -21,6 +23,8 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
         case .waitingForInput: "입력 대기"
         case .idle: "쉬는 중"
         case .compacting: "정리 중"
+        case .awaitingReply: "답변 필요"
+        case .unread: "새 응답"
         }
     }
 
@@ -28,7 +32,8 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
     public var tone: Tone {
         switch self {
         case .waitingForPermission: .attention
-        case .idle, .waitingForInput, .arriving: .calm
+        case .awaitingReply: .reply
+        case .idle, .waitingForInput, .arriving, .unread: .calm
         case .reading, .browsing, .planning: .reading
         case .running: .running
         default: .working
@@ -37,6 +42,17 @@ public enum RosterStatus: String, Hashable, Sendable, CaseIterable {
 
     public enum Tone: String, Hashable, Sendable {
         case working, reading, running, attention, calm
+        /// 답변 필요 (파랑, M6(4))
+        case reply
+    }
+
+    /// 직원의 상태: 응답을 끝낸 세션의 표시(답변 필요·새 응답)가 있으면 그것, 아니면 활동
+    static func from(_ agent: Agent) -> RosterStatus {
+        switch agent.cue {
+        case .reply?: .awaitingReply
+        case .unread?: .unread
+        case nil: from(agent.activity)
+        }
     }
 
     static func from(_ activity: Activity) -> RosterStatus {
@@ -192,9 +208,9 @@ public struct Roster: Hashable, Sendable {
             mainName: mainName,
             agentType: agent.role == .member ? agent.profile.agentType : nil,
             kind: agent.profile.kind,
-            status: RosterStatus.from(agent.activity),
+            status: RosterStatus.from(agent),
             detail: privacy == .detailed ? detail(for: agent) : nil,
-            since: agent.activitySince,
+            since: agent.cue != nil ? part?.completedAt ?? agent.activitySince : agent.activitySince,
             appearance: agent.profile.appearance,
             teamName: team.name,
             session: agent.session,

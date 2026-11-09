@@ -73,7 +73,8 @@ public enum HookParser {
         case "Notification":
             return notificationKind(payload)
         case "Stop":
-            return .turnEnded(failed: false)
+            // 마지막 응답이 질문으로 끝났는지만 보고 본문은 버립니다 (M6(4) "답변 필요")
+            return .turnEnded(failed: false, asksUser: ReplyRequest.asksUser(payload["last_assistant_message"]?.stringValue))
         case "StopFailure":
             return .turnEnded(failed: true)
         case "SubagentStart":

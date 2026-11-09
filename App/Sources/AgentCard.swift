@@ -305,6 +305,9 @@ private struct TimelineRow: View {
         case .attention:
             text.foregroundColor = Palette.ink  // 어두운 모드에서도 흰 글자가 되지 않게
             text.backgroundColor = Palette.attention
+        case .reply:
+            text.foregroundColor = Palette.ink
+            text.backgroundColor = Palette.reply
         case .error: text.foregroundColor = .red
         }
         if let since = item.since, let elapsed = StatusLine.elapsed(now.timeIntervalSince(since)) {

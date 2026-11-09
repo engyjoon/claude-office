@@ -201,7 +201,8 @@ struct RosterRowView: View {
         if let detail = row.detail { parts.append(detail) }
         if parts.isEmpty, let title = row.sessionTitle { parts.append(title) }
         let minutes = Int(now.timeIntervalSince(row.since) / 60)
-        if minutes >= 1, row.status == .waitingForInput || row.status == .idle || row.status == .waitingForPermission {
+        let quiet: Set<RosterStatus> = [.waitingForInput, .idle, .waitingForPermission, .awaitingReply, .unread]
+        if minutes >= 1, quiet.contains(row.status) {
             parts.append("\(row.status.label) \(minutes)분")
         }
         if parts.isEmpty, let term = TerminalFocuser.displayName(for: row.term) {

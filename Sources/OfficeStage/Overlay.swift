@@ -55,6 +55,8 @@ public struct OverlayOptions: Hashable, Sendable {
 public struct OverlayItem: Hashable, Sendable, Identifiable {
     public enum Kind: String, Hashable, Sendable {
         case bubble, pill, emote, effect
+        /// 답변 필요·확인 안 함 배지 (M6(4))
+        case badge
     }
 
     public var id: String
@@ -79,6 +81,8 @@ public struct OverlayItem: Hashable, Sendable, Identifiable {
 public enum Overlay {
     /// 발 위치에서 머리 위 기준점까지 (머리 꼭대기 -85 바로 위)
     public static let headTop = -90.0
+    /// 발 위치에서 배지 가운데까지 (머리 왼쪽 위, M6(4))
+    public static let badgeOffset = MapPoint(-25, -86)
     static let gap = 3.0
     static let pillHeight = 17.0
     static let maxPillCharacters = 28
@@ -171,7 +175,20 @@ public enum Overlay {
                 shapes: OverlayArt.emote(emote)))
         }
 
-        // 4) 효과
+        // 4) 배지 (M6(4)): 머리 왼쪽 위에 가만히. 오른쪽 위는 Zz·♪ 자리라 겹치지 않고, 계속 움직이지 않아 쉬는 장면의
+        //    그리기 빈도를 올리지 않습니다 (나타날 때 0.2초만 커짐). 승인 대기 "!"(왼쪽)와는 같은 사람에게 동시에 붙지 않습니다.
+        for actor in actors {
+            guard let badge = actor.badge else { continue }
+            var side = badgeOffset
+            if pillTops[actor.id] != nil { side = MapPoint(-30, -68) }
+            let appear = min(max((time - actor.badgeShownAt) / 0.2, 0), 1)
+            items.append(OverlayItem(
+                id: "badge:\(actor.id.raw)", kind: .badge, agent: actor.id,
+                origin: actor.position + side, scale: 0.4 + 0.6 * appear, opacity: appear,
+                shapes: OverlayArt.badge(badge)))
+        }
+
+        // 5) 효과
         for effect in stage.effects {
             let progress = effect.progress(at: time)
             switch effect.kind {
@@ -481,6 +498,29 @@ public enum OverlayArt {
                 .path("M-4.2,-5 L4.2,-5 L0.8,0 L4.2,5 L-4.2,5 L-0.8,0 Z", fill: .swatch(.sky), width: 1.2),
                 .path("M-2.2,-3.6 L2.2,-3.6 L0,-0.8 Z", fill: .swatch(.butter), outline: false),
                 .path("M-3.4,4.6 Q0,1.4 3.4,4.6 Z", fill: .swatch(.butter), outline: false),
+            ]
+        }
+    }
+
+    /// 답변 필요·확인 안 함 배지 (원점: 배지 가운데, M6(4)).
+    /// 답변 필요 = 파란 말풍선에 흰 "?" (승인 대기 "!"의 주황 원과 색·모양이 다름),
+    /// 확인 안 함 = 흰 원 안 편지 ✉ + 파란 점 (데스크톱 앱 사이드바의 안 읽음 점과 같은 뜻).
+    public static func badge(_ cue: SessionCue) -> [ArtShape] {
+        let blue = Paint.color(ArtColor(0x5B8DEF))
+        switch cue {
+        case .reply:
+            return [
+                .path("M-4,7 L-8,13.5 L2,7 Z", fill: blue),
+                .rect(-11.5, -11, 23, 19, r: 8, fill: blue),
+                .line("M-3.6,7 L1.4,7", width: 2.6, color: blue),
+                .text("?", 0, -1.5, size: 14, bold: true, color: .swatch(.white), baseline: .central),
+            ]
+        case .unread:
+            return [
+                .circle(0, 0, 10.5, fill: .swatch(.white)),
+                .rect(-6, -4.5, 12, 9, r: 1.5, fill: .swatch(.sky), width: 1.4),
+                .path("M-6,-3.8 L0,1 L6,-3.8", width: 1.4),
+                ArtShape(.circle(center: MapPoint(8, -8), radius: 3.4), fill: .color(ArtColor(0x4A8FE0)), stroke: .swatch(.white), lineWidth: 1.3),
             ]
         }
     }

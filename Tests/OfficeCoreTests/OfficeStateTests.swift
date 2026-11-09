@@ -254,7 +254,10 @@ struct M0FindingsTests {
         let reported = beats.filter { if case .reported = $0 { true } else { false } }
         #expect(reported.count == 1)
         #expect(state.agents.values.filter { $0.role == .member }.map(\.profile.agentType) == ["Explore"])
-        guard case .turnEnded = beats.last else { Issue.record("\(beats)"); return }
+        // 응답 끝 다음에는 "확인 안 함" 표시가 붙습니다 (M6(4))
+        guard case .turnEnded = beats.dropLast().last, case .cueChanged(let lead) = beats.last, lead.cue == .unread else {
+            Issue.record("\(beats)"); return
+        }
     }
 
     @Test("SubagentHandback은 보고 정리 연출이 되고, 메시지 내용은 보여주지 않는다")

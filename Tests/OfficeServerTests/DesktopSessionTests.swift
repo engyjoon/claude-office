@@ -185,6 +185,50 @@ struct DesktopResidentTests {
         #expect(byID["orphan"]?.ancestors == [SessionID("gone")] && byID["orphan"]?.rootCwd == "/w/gone")
     }
 
+    @Test("본 때·응답 경계·응답 요약을 읽는다 (요약은 마지막 응답의 것일 때만, M6(4))")
+    func parsesSeenAndSummary() throws {
+        func parse(_ json: String) throws -> DesktopSessionRecord {
+            try #require(DesktopSessionRecord.parse(Data(json.utf8), localID: "local_x"))
+        }
+        let blocked = try parse(#"""
+            {"cliSessionId":"c","lastFocusedAt":1794191168772,"lastTurnEdgeAt":1794191338079,"lastAssistantUuid":"u2",
+             "postTurnSummary":{"status_category":"blocked","needs_action":"A안과 B안 중 고르기","summarizes_uuid":"u2"}}
+            """#)
+        #expect(blocked.lastFocused == Date(timeIntervalSince1970: 1_794_191_168.772))
+        #expect(blocked.lastTurnEdge == Date(timeIntervalSince1970: 1_794_191_338.079))
+        #expect(blocked.replyRequest == true)
+        let done = try parse(#"""
+            {"cliSessionId":"c","lastAssistantUuid":"u2","postTurnSummaryFor":"u2",
+             "postTurnSummary":{"status_category":"completed","needs_action":""}}
+            """#)
+        #expect(done.replyRequest == false)
+        // 지난 응답의 요약, 결정할 것이 비어 있는 막힘, 요약 없음
+        let stale = try parse(#"{"cliSessionId":"c","lastAssistantUuid":"u3","postTurnSummary":{"status_category":"blocked","needs_action":"x","summarizes_uuid":"u2"}}"#)
+        #expect(stale.replyRequest == nil)
+        let empty = try parse(#"{"cliSessionId":"c","lastAssistantUuid":"u2","postTurnSummary":{"status_category":"blocked","needs_action":"","summarizes_uuid":"u2"}}"#)
+        #expect(empty.replyRequest == false)
+        #expect(try parse(#"{"cliSessionId":"c"}"#).replyRequest == nil)
+    }
+
+    @Test("데스크톱 앱이 맨 앞이면 가장 최근에 연 세션을 지금 보는 세션으로 친다")
+    func focusedResident() {
+        func seen(_ id: String, _ cli: String, _ focused: Double?) -> DesktopSessionRecord {
+            var value = record(id, cli: cli, activity: 100)
+            value.lastFocused = focused.map { Date(timeIntervalSince1970: $0) }
+            value.lastTurnEdge = Date(timeIntervalSince1970: 90)
+            value.replyRequest = true
+            return value
+        }
+        let list = [seen("local_a", "a", 50), seen("local_b", "b", 80), seen("local_c", "c", nil)]
+        let active = DesktopResidents.roll(from: list, readAt: Date(), desktopAppActive: true)
+        #expect(active.residents.filter(\.isFocused).map(\.session.raw) == ["b"])
+        let byID = Dictionary(uniqueKeysWithValues: active.residents.map { ($0.session.raw, $0) })
+        #expect(byID["a"]?.lastFocused == Date(timeIntervalSince1970: 50))
+        #expect(byID["a"]?.lastTurnEdge == Date(timeIntervalSince1970: 90) && byID["a"]?.replyRequest == true)
+        // 다른 앱이 앞에 있으면 아무도 지금 보고 있지 않음
+        #expect(DesktopResidents.roll(from: list, readAt: Date()).residents.allSatisfy { !$0.isFocused })
+    }
+
     @Test("정보 파일에서 만든 시각을 읽는다")
     func parsesCreatedAt() throws {
         let data = Data(#"{"cliSessionId":"c","cwd":"/w","createdAt":1794138247307,"lastActivityAt":1794138947335}"#.utf8)

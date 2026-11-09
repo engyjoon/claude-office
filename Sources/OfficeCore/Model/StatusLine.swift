@@ -25,6 +25,8 @@ public struct StatusLine: Hashable, Sendable {
         case muted
         /// 승인 대기 (노랑)
         case attention
+        /// 답변 필요 (파랑, M6(4))
+        case reply
         /// 오류·거부 (빨강)
         case error
     }
@@ -199,7 +201,7 @@ public struct StatusLine: Hashable, Sendable {
         let groups = agentGroups(agent.id, journal: journal, words: words)
         var lines = groups.suffix(lineCount).map { Line(segment: words.agentSegment($0)) }
         if lines.isEmpty {
-            lines = [Line(segment: Segment(text: RosterStatus.from(agent.activity).label, tone: .muted))]
+            lines = [Line(segment: Segment(text: RosterStatus.from(agent).label, tone: .muted))]
         }
         let team = state.teams[agent.teamID]
         lines[0].colorIndex = team?.colorIndex
@@ -253,7 +255,7 @@ public struct StatusLine: Hashable, Sendable {
         return StatusLine(mode: .office, lines: lines)
     }
 
-    /// 행 하나의 줄: 승인 대기 → 일하는 중이면 그 행의 가장 최근 일 → 조용하면 쉬는 중
+    /// 행 하나의 줄: 승인 대기 → 답변 필요 → 일하는 중이면 그 행의 가장 최근 일 → 새 응답 → 조용하면 쉬는 중
     static func rowLine(_ team: Team, state: OfficeState, journal: ActivityJournal, words: Words, showsFolder: Bool) -> Line {
         let people = state.agents(in: team.id)
         let main = people.first(where: \.isMain) ?? people.first
@@ -261,6 +263,7 @@ public struct StatusLine: Hashable, Sendable {
             colorIndex: team.colorIndex, folder: showsFolder ? shortFolder(team.name) : nil, head: main?.displayName,
             segment: Segment(text: "", tone: .muted))
         let entries = journal.entries.filter { $0.team == team.id }
+        func completed(_ agent: Agent) -> Date { state.parts[agent.session]?.completedAt ?? agent.activitySince }
         /// 메인이 한 일은 그냥, 서브가 한 일은 "서브2가 …"
         func spoken(_ segment: Segment, by agent: AgentID, title: String) -> Segment {
             guard agent != main?.id else { return segment }
@@ -275,6 +278,10 @@ public struct StatusLine: Hashable, Sendable {
             line.segment = spoken(
                 Segment(text: RosterStatus.waitingForPermission.label, tone: .attention, since: waiter.activitySince),
                 by: waiter.id, title: waiter.displayName)
+        } else if let asker = people.filter({ $0.cue == .reply }).min(by: { completed($0) < completed($1) }) {
+            // 응답을 끝내고 내 답을 기다림 (M6(4))
+            line.segment = spoken(
+                Segment(text: RosterStatus.awaitingReply.label, tone: .reply, at: completed(asker)), by: asker.id, title: asker.displayName)
         } else if let busy = people.first(where: { RosterStatus.from($0.activity).tone != .calm }) {
             if let group = groups(entries, words: words).last {
                 line.segment = spoken(words.agentSegment(group), by: group.first.agent, title: group.first.title)
@@ -283,6 +290,9 @@ public struct StatusLine: Hashable, Sendable {
                 line.segment = spoken(
                     Segment(text: RosterStatus.from(busy.activity).label, since: busy.activitySince), by: busy.id, title: busy.displayName)
             }
+        } else if let reader = people.filter({ $0.cue == .unread }).max(by: { completed($0) < completed($1) }) {
+            // 아직 확인하지 않은 응답 (M6(4))
+            line.segment = spoken(Segment(text: RosterStatus.unread.label, at: completed(reader)), by: reader.id, title: reader.displayName)
         } else if let main {
             let status = RosterStatus.from(main.activity)
             line.segment = status == .arriving

@@ -32,10 +32,10 @@ struct MiniOfficeTests {
          on("SubagentStart", #""agent_id":"\#(agent)","agent_type":"general-purpose""#, session)]
     }
 
-    func next(_ h: FloorHarness, _ previous: MiniFocus, pinned: TeamID? = nil, acknowledged: [SessionID: Date] = [:], autoSwitch: Bool = true,
+    func next(_ h: FloorHarness, _ previous: MiniFocus, pinned: TeamID? = nil, autoSwitch: Bool = true,
               after seconds: Double = 0) -> MiniFocus {
         MiniFocus.next(
-            previous: previous, state: h.engine.state, pinned: pinned, acknowledged: acknowledged, autoSwitch: autoSwitch,
+            previous: previous, state: h.engine.state, pinned: pinned, autoSwitch: autoSwitch,
             now: h.epoch.addingTimeInterval(h.now + seconds))
     }
 
@@ -177,7 +177,7 @@ struct MiniOfficeTests {
         #expect(MiniCast.needsAnswer(h.engine.state.main(of: h.team("m"))!))
     }
 
-    @Test("보여 줄 행: 답변 필요 > 고정 > 완료(10분, 확인 전) > 가장 마지막에 요청")
+    @Test("보여 줄 행: 답변 필요 > 고정 > 확인 안 한 응답 > 가장 마지막에 요청")
     func focusPriority() throws {
         var h = FloorHarness()
         #expect(next(h, .empty).team == nil)
@@ -210,10 +210,10 @@ struct MiniOfficeTests {
         focus = next(h, focus)
         #expect(focus.team == m1 && focus.reason == .completed)
 
-        // 확인했거나 10분이 지나면 완료로 보지 않음 → 가장 마지막에 요청한 행
-        let done = try #require(h.engine.state.parts[SessionID("m1")]?.completedAt)
-        #expect(next(h, focus, acknowledged: [SessionID("m1"): done]).team == m3)
-        #expect(next(h, focus, after: MiniFocus.completionWindow + 1).team == m3)
+        // 확인 안 한 응답은 시간이 지나도 그대로이고(M6(4)), 확인하면(캐릭터를 누름) 가장 마지막에 요청한 행
+        #expect(next(h, focus, after: 3600).team == m1)
+        _ = h.engine.acknowledge(SessionID("m1"), at: h.epoch.addingTimeInterval(h.now))
+        #expect(next(h, focus).team == m3)
 
         // 완료한 메인에 다음 요청을 보내면 가장 마지막에 요청한 행
         h.hook(prompt("m1"), at: 8)
