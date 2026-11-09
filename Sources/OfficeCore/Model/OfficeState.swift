@@ -42,7 +42,7 @@ public enum Beat: Hashable, Sendable {
 /// - 메인 = 사용자가 직접 연 세션. 데스크톱 정보에 부모(`spawnedFrom`)가 없거나 부모가 사무실에 없으면 새 행을 열고 메인이 됩니다.
 ///   같은 폴더에서 직접 연 두 번째 세션, 터미널 CLI 세션도 각자 메인입니다.
 /// - 서브 = 그 메인이 띄운 세션(조상이 그 행에 있는 세션)과, 그 행의 세션들이 부른 모든 서브에이전트.
-/// - 행 = 메인 하나 + 서브들. 책상은 0번(메인)부터 사람 수만큼, 빈 책상 없이 (`Seat`).
+/// - 행 = 메인 하나 + 서브들. 책상은 0번(메인)부터 사람 수만큼, 빈 책상 없이 (`Seat`). 서브 번호 = 책상 번호 (M6(14)).
 /// - 메인이 퇴근하면 그 행에서 가장 먼저 온 서브 세션이 메인으로 승진합니다. 사람이 모두 떠난 행은 닫힙니다.
 /// - 부모가 늦게 나타나면(하위 세션이 먼저 이벤트를 보냄, 정보 파일이 늦게 생김) 부모가 메인 자리를 넘겨받거나,
 ///   따로 열렸던 행을 부모의 행에 합칩니다.
@@ -368,9 +368,9 @@ public struct OfficeState: Sendable {
         } else if let child = sortedTeams.compactMap({ main(of: $0.id) }).first(where: { parts[$0.session]?.ancestors.contains(event.session) == true }) {
             // 이 세션이 띄운 세션이 먼저 와서 메인 자리에 있음 → 메인 자리를 넘겨받고, 먼저 온 세션은 서브가 됩니다
             teamID = child.teamID
-            let (number, desk) = (freeSubNumber(in: teamID), nextDesk(in: teamID))
+            let desk = nextDesk(in: teamID)
             update(child.id) {
-                $0.number = number
+                $0.number = desk
                 $0.seat = Seat(desk: desk)
             }
             demoted = child.id
@@ -517,15 +517,8 @@ public struct OfficeState: Sendable {
         return id
     }
 
-    /// 비어 있는 가장 작은 서브 번호 (1부터, 행마다 따로)
-    private func freeSubNumber(in team: TeamID) -> Int {
-        let used = Set(agents.values.filter { $0.teamID == team }.map(\.number))
-        var number = 1
-        while used.contains(number) { number += 1 }
-        return number
-    }
-
-    /// 오른쪽 끝에 붙일 책상 번호 (책상은 빈자리 없이 0번부터 이어지므로 사람 수와 같음)
+    /// 오른쪽 끝에 붙일 책상 번호 (책상은 빈자리 없이 0번부터 이어지므로 사람 수와 같음).
+    /// 서브 번호는 언제나 책상 번호와 같으므로 새 서브의 번호이기도 합니다 (M6(14)).
     private func nextDesk(in team: TeamID) -> Int {
         (agents.values.filter { $0.teamID == team }.map(\.seat.desk).max() ?? -1) + 1
     }
@@ -561,11 +554,10 @@ public struct OfficeState: Sendable {
     private mutating func merge(_ source: TeamID, into target: TeamID, beats: inout [Beat]) {
         let movers = agents(in: source)
         for agent in movers {
-            let number = freeSubNumber(in: target)
             let desk = nextDesk(in: target)
             update(agent.id) {
                 $0.teamID = target
-                $0.number = number
+                $0.number = desk
                 $0.seat = Seat(desk: desk)
             }
         }
@@ -579,7 +571,10 @@ public struct OfficeState: Sendable {
 
     /// 직함을 다시 정하고, 바뀐 사람마다 비트를 냅니다.
     /// 메인은 사무실 전체에서 1명이면 "메인", 여럿이면 "메인N". 서브는 행마다 1명이면 "서브", 여럿이면 "서브N".
-    private mutating func relabel(promoted: AgentID? = nil, force: Set<AgentID> = [], beats: inout [Beat]) {
+    /// `reseated`(옮겨 앉은 사람)는 직함이 그대로여도 `reseated` 비트를 냅니다 (자리와 직함을 한 비트로).
+    private mutating func relabel(
+        promoted: AgentID? = nil, force: Set<AgentID> = [], reseated: Set<AgentID> = [], beats: inout [Beat]
+    ) {
         let people = agents.values.sorted { $0.serial < $1.serial }
         var subCounts: [TeamID: Int] = [:]
         for agent in people where agent.number > 0 { subCounts[agent.teamID, default: 0] += 1 }
@@ -588,21 +583,29 @@ public struct OfficeState: Sendable {
             let title: JobTitle = agent.number == 0
                 ? .main(several ? teams[agent.teamID].map(\.mainNumber) : nil)
                 : .sub((subCounts[agent.teamID] ?? 0) > 1 ? agent.number : nil)
-            guard agent.title != title || force.contains(agent.id) else { continue }
+            guard agent.title != title || force.contains(agent.id) || reseated.contains(agent.id) else { continue }
             update(agent.id) { $0.title = title }
-            beats.append(agent.id == promoted ? .promoted(agents[agent.id]!) : .retitled(agents[agent.id]!))
+            let changed = agents[agent.id]!
+            beats.append(agent.id == promoted ? .promoted(changed) : reseated.contains(agent.id) ? .reseated(changed) : .retitled(changed))
         }
     }
 
-    /// 가운데 빈 책상을 오른쪽 끝 사람으로 메웁니다 (빈 책상 없음). 옮긴 사람마다 `reseated` 비트를 냅니다.
-    private mutating func compactDesks(in team: TeamID, beats: inout [Beat]) {
+    /// 가운데 빈 책상을 오른쪽 끝 사람으로 메웁니다 (빈 책상 없음). 옮긴 사람은 그 책상 번호를 서브 번호로 받습니다
+    /// (M6(14): 서브 번호 = 책상 번호, 서브3·서브4 중 서브3이 빠지면 서브4가 3번 책상으로 옮겨 서브3).
+    /// 옮긴 사람을 돌려주며, 비트는 뒤따르는 `relabel(reseated:)`가 새 직함과 함께 냅니다.
+    private mutating func compactDesks(in team: TeamID) -> Set<AgentID> {
+        var moved: Set<AgentID> = []
         for _ in 0..<64 {
             let people = agents(in: team)
             let used = Set(people.map(\.seat.desk))
-            guard let last = people.last, let hole = (1..<max(last.seat.desk, 1)).first(where: { !used.contains($0) }) else { return }
-            update(last.id) { $0.seat = Seat(desk: hole) }
-            beats.append(.reseated(agents[last.id]!))
+            guard let last = people.last, let hole = (1..<max(last.seat.desk, 1)).first(where: { !used.contains($0) }) else { break }
+            update(last.id) {
+                $0.seat = Seat(desk: hole)
+                $0.number = hole
+            }
+            moved.insert(last.id)
         }
+        return moved
     }
 
     private mutating func endSession(_ session: SessionID, beats: inout [Beat]) {
@@ -631,8 +634,8 @@ public struct OfficeState: Sendable {
         if !agents.values.contains(where: { $0.teamID == team }), let closed = teams.removeValue(forKey: team) {
             beats.append(.teamClosed(closed))
         }
-        relabel(promoted: promoted, force: promoted.map { [$0] } ?? [], beats: &beats)
-        compactDesks(in: team, beats: &beats)
+        let moved = compactDesks(in: team)
+        relabel(promoted: promoted, force: promoted.map { [$0] } ?? [], reseated: moved, beats: &beats)
     }
 
     // MARK: - 서브에이전트
@@ -702,8 +705,7 @@ public struct OfficeState: Sendable {
         let delegator = member.delegatedBy.flatMap { agents[$0] }
         beats.append(.reported(member: member, to: delegator))
         removeAgent(memberID)
-        relabel(beats: &beats)
-        compactDesks(in: member.teamID, beats: &beats)
+        relabel(reseated: compactDesks(in: member.teamID), beats: &beats)
 
         if let delegatorID = delegator?.id, agents[delegatorID]?.activity == .delegating,
             !agents.values.contains(where: { $0.delegatedBy == delegatorID })
@@ -718,9 +720,9 @@ public struct OfficeState: Sendable {
         role: Role, profile: AgentProfile, teamID: TeamID, session: SessionID, asMain: Bool,
         delegatedBy: AgentID?, task: String?, toolUseID: String?, background: Bool, term: String?, at now: Date
     ) -> AgentID {
-        // 메인은 0번(메인 책상), 서브는 빈 서브 번호와 오른쪽 끝 책상을 받습니다
-        let number = asMain ? 0 : freeSubNumber(in: teamID)
-        let seat = asMain ? Seat.main : Seat(desk: nextDesk(in: teamID))
+        // 메인은 0번(메인 책상), 서브는 오른쪽 끝 책상과 그 책상 번호를 서브 번호로 받습니다 (M6(14))
+        let number = asMain ? 0 : nextDesk(in: teamID)
+        let seat = Seat(desk: number)
         // 다른 사람의 표시("서브" → "서브1" 등)는 뒤따르는 relabel이 바꿉니다
         let title: JobTitle
         if asMain {

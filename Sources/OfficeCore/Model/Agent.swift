@@ -110,7 +110,8 @@ public struct AgentProfile: Hashable, Sendable {
 /// - 메인 = 사용자가 직접 연 세션 (데스크톱 세션 정보에 `spawnedFrom`이 없는 세션, 터미널 CLI 세션). 사무실에 메인이 하나면 "메인",
 ///   여럿이면 "메인1", "메인2"… (번호는 방이 열릴 때 비어 있는 가장 작은 번호로 정해 고정).
 /// - 서브 = 그 메인이 띄운 세션(후손 세션)과, 메인·서브 세션이 부른 모든 서브에이전트(기본·직접 만든 에이전트).
-///   메인마다 따로 번호를 매겨 서브가 하나면 "서브", 둘 이상이면 "서브1", "서브2"… (출근 때 고정, 빈 번호 재사용).
+///   메인마다 따로 번호를 매겨 서브가 하나면 "서브", 둘 이상이면 "서브1", "서브2"…. 서브 번호는 책상 번호와 같아서
+///   언제나 왼쪽부터 1..n이고, 가운데 서브가 빠져 오른쪽 끝 사람이 그 책상으로 옮기면 그 사람의 번호도 바뀝니다 (M6(14)).
 /// 에이전트 종류(code-reviewer, Explore …)는 화면의 이름에 쓰지 않고 신원 카드에만 보여 줍니다.
 public enum JobTitle: Hashable, Sendable {
     /// 메인 번호. 사무실에 메인이 하나뿐이면 nil ("메인")
@@ -192,7 +193,7 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var teamID: TeamID
     /// 세션 (데스크톱 앱이 같은 세션의 CLI 세션 id를 바꾸면 따라 바뀜, M5(5))
     public internal(set) var session: SessionID
-    /// 0 = 메인, 1… = 그 행의 서브 번호 (출근 때 정해 고정, 빈 번호 재사용)
+    /// 0 = 메인, 1… = 그 행의 서브 번호. 언제나 책상 번호(`seat.desk`)와 같습니다 (M6(14))
     public internal(set) var number: Int
     /// 직함 ("메인", "메인2", "서브", "서브3"). 승진하거나 메인·서브 수가 1 ↔ 여럿으로 바뀌면 달라집니다.
     public internal(set) var title: JobTitle

@@ -153,20 +153,74 @@ struct RoomTests {
         #expect(name(state, "d") == "메인")
     }
 
-    @Test("서브 번호도 빈 번호를 다시 쓰고, 혼자 남으면 다시 '서브'")
+    @Test("서브 번호는 책상 번호: 가운데가 빠지면 옮겨 앉는 끝 사람이 그 번호를 받고, 혼자 남으면 다시 '서브' (M6(14))")
     func subNumbers() {
         var state = OfficeState()
         _ = apply(&state, session: "m")
         delegate(&state, "m", "t1")
         delegate(&state, "m", "t2")
         delegate(&state, "m", "t3")
-        finish(&state, "m", "t1")
+        finish(&state, "m", "t1")  // t3이 1번 책상으로 옮겨 서브1
         delegate(&state, "m", "t4")
         let numbers = state.agents.values.filter { !$0.isMain }.sorted { $0.serial < $1.serial }.map(\.displayName)
-        #expect(numbers == ["서브2", "서브3", "서브1"])
+        #expect(numbers == ["서브2", "서브1", "서브3"])
+        #expect(rows(state) == [["메인", "서브1", "서브2", "서브3"]])
         finish(&state, "m", "t2")
         finish(&state, "m", "t3")
         #expect(rows(state) == [["메인", "서브"]])
+    }
+
+    @Test("서브 4명 중 서브1·서브3이 빠지면 남은 둘은 왼쪽부터 서브1·서브2, 이름이 바뀌는 사람은 옮겨 앉는 사람뿐 (M6(14))")
+    func renumbersByDesk() throws {
+        var state = OfficeState()
+        _ = apply(&state, session: "m")
+        let team = try #require(state.lead(of: SessionID("m"))?.teamID)
+        for index in 1...4 { delegate(&state, "m", "t\(index)") }
+        let ids = state.agents(in: team).dropFirst().map(\.id)  // 서브1~4
+        #expect(rows(state) == [["메인", "서브1", "서브2", "서브3", "서브4"]])
+
+        // 서브1이 빠짐 → 서브4가 1번 책상으로 옮기며 서브1이 됨. 비트는 옮긴 사람의 reseated 하나 (새 직함을 담음)
+        let beats = finish(&state, "m", "t1")
+        let changed = beats.compactMap { beat -> Agent? in
+            switch beat {
+            case .reseated(let agent), .retitled(let agent): agent
+            default: nil
+            }
+        }
+        #expect(changed.map(\.id) == [ids[3]])
+        #expect(changed.first?.displayName == "서브1")
+        #expect(changed.first?.seat == Seat(desk: 1))
+        #expect(beats.contains { if case .reseated = $0 { true } else { false } })
+        #expect(state.agents[ids[1]]?.displayName == "서브2")
+        #expect(state.agents[ids[2]]?.displayName == "서브3")
+
+        // 서브3(끝 책상)이 빠짐 → 아무도 옮기지 않고 이름도 그대로
+        let tail = finish(&state, "m", "t3")
+        #expect(!tail.contains { if case .reseated = $0 { true } else if case .retitled = $0 { true } else { false } })
+        #expect(rows(state) == [["메인", "서브1", "서브2"]])
+        #expect(state.agents[ids[3]]?.displayName == "서브1")
+        #expect(state.agents[ids[1]]?.displayName == "서브2")
+        for agent in state.agents(in: team) { #expect(agent.number == agent.seat.desk) }
+
+        // 새 서브는 오른쪽 끝 책상 번호
+        delegate(&state, "m", "t5")
+        #expect(rows(state) == [["메인", "서브1", "서브2", "서브3"]])
+    }
+
+    @Test("데스크톱 서브 세션을 보관(퇴근)해도 같은 규칙: 남은 서브는 왼쪽부터 1..n (M6(14))")
+    func renumbersSessionsByDesk() throws {
+        var state = OfficeState()
+        _ = apply(&state, session: "m")
+        for index in 1...4 { _ = apply(&state, session: "c\(index)", hint: child(of: "m")) }
+        #expect(rows(state) == [["메인", "서브1", "서브2", "서브3", "서브4"]])
+        _ = end(&state, "c1")
+        _ = end(&state, "c3")
+        #expect(rows(state) == [["메인", "서브1", "서브2"]])
+        #expect(name(state, "c4") == "서브1")
+        #expect(name(state, "c2") == "서브2")
+        _ = end(&state, "c2")
+        #expect(rows(state) == [["메인", "서브"]])
+        #expect(name(state, "c4") == "서브")
     }
 
     // MARK: - 책상
@@ -215,8 +269,8 @@ struct RoomTests {
         #expect(promoted.first?.seat == .main)
         #expect(name(state, "c1") == "메인1")
         #expect(desks(state, team) == [0, 1, 2])
-        // 서브 번호는 출근 때 정해 고정이라 그대로 (책상만 메움)
-        #expect(state.agents(in: team).map(\.displayName) == ["메인1", "서브3", "서브2"])
+        // 서브 번호는 책상 번호라 빈 책상을 메운 사람이 그 번호를 받음 (M6(14))
+        #expect(state.agents(in: team).map(\.displayName) == ["메인1", "서브1", "서브2"])
         #expect(state.teams.count == 2)
     }
 
