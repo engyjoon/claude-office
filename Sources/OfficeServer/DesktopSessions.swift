@@ -17,6 +17,9 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     public var title: String?
     /// 데스크톱 앱에서 보관(닫음)한 세션
     public var isArchived: Bool
+    /// 부모 대화 위에 잠깐 떠서 답하는 btw 곁질문 세션 (`spawnedFrom.btw`). 데스크톱 앱 사이드바에 보이지 않아
+    /// 보관할 수도 없으므로 열린 세션으로 치지 않습니다 (M6(12): 답을 끝낸 btw가 쉬는 서브로 계속 남았음).
+    public var isSideQuestion: Bool
     /// 마지막 활동 시각 (`lastActivityAt`, 밀리초)
     public var lastActivity: Date?
     /// 만든 시각 (`createdAt`, 밀리초). 같은 행의 서브를 앉히는 순서에 씀.
@@ -32,8 +35,9 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     public init(
         localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?,
         isArchived: Bool = false, lastActivity: Date? = nil, createdAt: Date? = nil, lastFocused: Date? = nil, lastTurnEdge: Date? = nil,
-        replyRequest: Bool? = nil
+        replyRequest: Bool? = nil, isSideQuestion: Bool = false
     ) {
+        self.isSideQuestion = isSideQuestion
         self.lastFocused = lastFocused
         self.lastTurnEdge = lastTurnEdge
         self.replyRequest = replyRequest
@@ -75,9 +79,13 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             createdAt: date("createdAt"),
             lastFocused: date("lastFocusedAt"),
             lastTurnEdge: date("lastTurnEdgeAt"),
-            replyRequest: replyRequest
+            replyRequest: replyRequest,
+            isSideQuestion: json["spawnedFrom"]?["btw"]?.boolValue ?? false
         )
     }
+
+    /// 데스크톱 앱에 열려 있는 세션 (보관하지 않았고 btw 곁질문이 아님)
+    public var isOpen: Bool { !isArchived && !isSideQuestion }
 
     /// 방을 정할 때 쓰는 폴더 (워크트리 세션은 originCwd가 원래 폴더일 수 있어 먼저 봅니다)
     var folder: String? { originCwd ?? cwd }
@@ -159,7 +167,7 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
         return SessionHint(
             hostSession: record.localID, ancestors: ancestors, rootCwd: rootRecord.folder, title: record.title,
             rootHostSession: hasRoot ? rootRecord.localID : nil, rootTitle: hasRoot ? rootRecord.title : nil,
-            rootIsOpen: hasRoot && !rootRecord.isArchived && rootRecord.cliSessionID == ancestors.last?.raw,
+            rootIsOpen: hasRoot && rootRecord.isOpen && rootRecord.cliSessionID == ancestors.last?.raw,
             hostCliSession: record.cliSessionID.map(SessionID.init))
     }
 
@@ -202,7 +210,7 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
         return records
     }
 
-    /// 데스크톱 앱에 열려 있는(보관하지 않은) 세션들의 디렉토리 목록. 폴더 이름순.
+    /// 데스크톱 앱에 열려 있는(보관하지 않았고 btw 곁질문이 아닌) 세션들의 디렉토리 목록. 폴더 이름순.
     public func openFolders() -> [DesktopFolder] {
         Self.openFolders(in: allRecords())
     }
@@ -213,7 +221,7 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
         var records: [String: DesktopSessionRecord] = [:]
         for record in list { records[record.localID] = record }
         var folders: [String: DesktopFolder] = [:]
-        for record in records.values where !record.isArchived {
+        for record in records.values where record.isOpen {
             var root = record
             var visited: Set<String> = [record.localID]
             while let parentID = root.parentLocalID, visited.count <= Self.maxDepth, visited.insert(parentID).inserted,
@@ -298,7 +306,8 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
 
 /// 데스크톱 앱에 열려 있는 세션 중 사무실에 미리 "쉬는 중"으로 앉힐 사람을 고릅니다 (설계서 §5.2, M5(5)). 순수 계산.
 ///
-/// - 대상: 보관하지 않았고(`!isArchived`) 훅과 이어 줄 CLI 세션 id(`cliSessionId`)가 있는 세션. 활동 기간은 따지지 않습니다:
+/// - 대상: 열려 있고(`isOpen`: 보관하지 않았고 btw 곁질문이 아님, M6(12)) 훅과 이어 줄 CLI 세션 id(`cliSessionId`)가 있는 세션.
+///   btw 곁질문은 답하는 동안 훅으로만 서브로 보이고, 답을 끝내면 닫은 세션처럼 퇴근합니다. 활동 기간은 따지지 않습니다:
 ///   데스크톱 앱 사이드바와 디렉토리 드롭다운이 보여 주는 세션과 같게 (2026-11-08 실제 목록: 열린 디렉토리 4개 중 3개가 3~11일 전 활동).
 /// - 관계: 부모(`spawnedFrom`)를 따라 올라가며 조상의 CLI 세션 id를 모읍니다 (보관한 부모 포함, 사무실에 없는 부모는 리듀서가 건너뜀).
 /// - 순서: 최근에 활동한 행이 먼저(위 행, 작은 메인 번호), 행 안에서는 부모가 먼저, 그다음 만든 순서.
@@ -308,7 +317,7 @@ public enum DesktopResidents {
     public static func roll(from list: [DesktopSessionRecord], readAt: Date, desktopAppActive: Bool = false) -> ResidentRoll {
         var records: [String: DesktopSessionRecord] = [:]
         for record in list { records[record.localID] = record }
-        let open = records.values.filter { !$0.isArchived }
+        let open = records.values.filter(\.isOpen)
         let focused = desktopAppActive
             ? open.filter { $0.lastFocused != nil }.max { ($0.lastFocused!, $0.localID) < ($1.lastFocused!, $1.localID) }?.localID
             : nil
@@ -331,7 +340,7 @@ public enum DesktopResidents {
             while let id = parentID, visited.count <= DesktopSessionDirectory.maxDepth, visited.insert(id).inserted,
                   let parent = records[id] {
                 if let parentCli = parent.cliSessionID { ancestors.append(SessionID(parentCli)) }
-                if !parent.isArchived, parent.cliSessionID != nil { group = parent.localID }
+                if parent.isOpen, parent.cliSessionID != nil { group = parent.localID }
                 root = parent
                 parentID = parent.parentLocalID
             }

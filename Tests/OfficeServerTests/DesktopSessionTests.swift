@@ -82,6 +82,9 @@ struct DesktopSessionTests {
         try write(root, "local_d", #"{"cwd":"/w/old","isArchived":true}"#)
         try write(root, "local_e", #"{"title":"폴더 없음"}"#)
         try write(root, "local_f", "{ 깨진 파일")
+        // btw 곁질문은 세지 않습니다 (M6(12))
+        try write(root, "local_h", #"{"cwd":"/w/office","spawnedFrom":{"sessionId":"local_a","btw":true}}"#)
+        try write(root, "local_i", #"{"cwd":"/w/btw-only","spawnedFrom":{"btw":true}}"#)
         let folders = DesktopSessionDirectory(root: root).openFolders()
         #expect(folders.map(\.path) == ["/w/Blog", "/w/office"])
         #expect(folders.map(\.name) == ["Blog", "office"])
@@ -227,6 +230,23 @@ struct DesktopResidentTests {
         #expect(byID["a"]?.lastTurnEdge == Date(timeIntervalSince1970: 90) && byID["a"]?.replyRequest == true)
         // 다른 앱이 앞에 있으면 아무도 지금 보고 있지 않음
         #expect(DesktopResidents.roll(from: list, readAt: Date()).residents.allSatisfy { !$0.isFocused })
+    }
+
+    @Test("btw 곁질문 세션은 열린 세션이 아니다: 미리 앉히지 않고, 사무실에 있으면 퇴근 대상 (M6(12))")
+    func sideQuestion() throws {
+        let btw = try #require(DesktopSessionRecord.parse(Data(#"""
+            {"cliSessionId":"c-btw","cwd":"/w/office","isArchived":false,
+             "spawnedFrom":{"sessionId":"local_main","sideSession":true,"userFork":true,"btw":true,"name":"fork"}}
+            """#.utf8), localID: "local_btw"))
+        #expect(btw.isSideQuestion && !btw.isOpen && btw.parentLocalID == "local_main")
+        let side = try #require(DesktopSessionRecord.parse(Data(#"""
+            {"cliSessionId":"c-side","cwd":"/w/office","spawnedFrom":{"sessionId":"local_main","sideSession":true}}
+            """#.utf8), localID: "local_side"))
+        #expect(!side.isSideQuestion && side.isOpen)
+
+        let roll = DesktopResidents.roll(from: [record("local_main", cli: "c-main", activity: 100), btw, side], readAt: Date())
+        #expect(roll.residents.map(\.session) == [SessionID("c-main"), SessionID("c-side")])
+        #expect(roll.openHostSessions == ["local_main", "local_side"])
     }
 
     @Test("정보 파일에서 만든 시각을 읽는다")

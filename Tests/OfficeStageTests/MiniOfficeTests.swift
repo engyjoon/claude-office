@@ -140,6 +140,48 @@ struct MiniOfficeTests {
         for desk in 0..<h.stage.layout.rows[0].desks { #expect(h.stage.nameplates[team]?[Seat(desk: desk)] != nil) }
     }
 
+    @Test("데스크톱 서브를 보관해도 미니 책상이 늘지 않고 명패 없는 책상이 없다 (M6(12): 칸과 실제 책상 번호가 다를 때)",
+          arguments: [0, 1])
+    func archiveKeepsSlot(slot: Int) throws {
+        var h = Self.band()
+        // 메인 + 데스크톱 서브 4명(실제 책상 1~4). 나중 서브일수록 최근에 활동해서 미니는 서브4·서브3을 1·2번 칸에 앉힘
+        func residents() -> [ResidentSession] {
+            let now = h.epoch.addingTimeInterval(h.now)
+            let subs: [(String, String?, Double)] = ["a", "b", "c", "d"].enumerated().map { ($1, "m", 6000 - Double($0) * 60) }
+            return ([("m", nil, 60)] + subs).map { cli, parent, idle in
+                ResidentSession(
+                    session: SessionID(cli), hostSession: "local_\(cli)", ancestors: parent.map { [SessionID($0)] } ?? [],
+                    rootCwd: "/w/office", title: cli, lastActivity: now.addingTimeInterval(-idle))
+            }
+        }
+        func sync(_ list: [ResidentSession]) {
+            let now = h.epoch.addingTimeInterval(h.now)
+            let roll = ResidentRoll(residents: list, openHostSessions: Set(list.map(\.hostSession)), isReliable: true, readAt: now)
+            h.floor.apply(h.engine.syncResidents(roll, at: now), engine: h.engine)
+        }
+        let list = residents()
+        sync(list)
+        let team = h.team("m")
+        h.select(.only(team))
+        h.run(until: 5)
+        let shown = h.floor.plan.seatMap.sorted { $0.value < $1.value }.map(\.key)
+        #expect(shown.map { h.engine.state.agents[$0]!.seat.desk } == [4, 3])
+        let gone = shown[slot]
+        let session = try #require(h.engine.state.agents[gone]?.session)
+
+        sync(list.filter { $0.session != session })
+        var sawLeaving = false
+        while h.now < 30 {
+            h.run(until: h.now + 0.25)
+            if h.stage.actors[gone] != nil { sawLeaving = true }
+            let desks = h.stage.layout.rows[0].desks
+            #expect(desks == 3, "\(h.now)초: 책상 \(desks)개")
+            for desk in 0..<desks { #expect(h.stage.nameplates[team]?[Seat(desk: desk)] != nil, "\(h.now)초: \(desk)번 책상 명패 없음") }
+        }
+        #expect(sawLeaving && h.stage.actors[gone] == nil)
+        #expect(h.floor.plan.seatMap.count == 2 && h.floor.plan.hiddenCount == 1)
+    }
+
     @Test("칸 다시 매기기: 순서는 그대로, 1부터 빈틈없이")
     func packed() {
         let a = AgentID("a"), b = AgentID("b")

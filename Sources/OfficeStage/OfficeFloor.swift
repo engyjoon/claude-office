@@ -154,8 +154,14 @@ public struct OfficeFloor: Sendable {
         var plan = FloorPlan.band(state: engine.state, selection: selection, journal: engine.journal, previous: self.plan.seatMap, slots: subSlots)
         // 앞 칸이 비면 뒤 칸 서브를 당겨 앉힙니다 (M6(9b)). 퇴근하는 사람(엔진에는 없고 무대에만 남음)이 보고하고
         // 자기 책상에서 물을 마신 뒤 문 밖으로 나갈 때까지 기다립니다. 바로 당기면 그 책상에서 두 사람이 겹칩니다.
-        if !stage.actors.keys.contains(where: { engine.state.agents[$0] == nil }) {
+        let leaving = stage.actors.keys.filter { engine.state.agents[$0] == nil }
+        if leaving.isEmpty {
             plan.seatMap = MiniCast.packed(plan.seatMap)
+        }
+        // 퇴근하는 사람은 무대를 떠날 때까지 앉아 있던 칸을 지킵니다 (M6(12)). 칸이 빠지면 무대가 사무실의 실제 책상 번호로
+        // 돌아가, 그 번호까지 책상이 늘고 오른쪽 끝에 명패 없는 책상이 생겼습니다 (데스크톱 서브가 많은 행에서 보관할 때).
+        for id in leaving {
+            if let seat = self.plan.seatMap[id] { plan.seatMap[id] = seat }
         }
         return plan
     }
