@@ -510,9 +510,10 @@ public enum OverlayArt {
         switch cue {
         case .reply:
             return [
-                .path("M-4,7 L-8,13.5 L2,7 Z", fill: blue),
+                // 꼬리는 머리 쪽(오른쪽 아래)을 가리킵니다 (배지가 머리 왼쪽 위에 있으므로)
+                .path("M4,7 L8,13.5 L-2,7 Z", fill: blue),
                 .rect(-11.5, -11, 23, 19, r: 8, fill: blue),
-                .line("M-3.6,7 L1.4,7", width: 2.6, color: blue),
+                .line("M-1.4,7 L3.6,7", width: 2.6, color: blue),
                 .text("?", 0, -1.5, size: 14, bold: true, color: .swatch(.white), baseline: .central),
             ]
         case .unread:
