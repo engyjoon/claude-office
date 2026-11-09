@@ -301,6 +301,10 @@ struct MiniHeaderView: View {
     private static let ink = Color(hex: 0x3A3247)
     private static let paper = Color(hex: 0xFFF8EC)
     private static let done = Color(hex: 0xCFEBD9)
+    /// 밤 조명일 때 평소 머리줄 (M6(6)): 밤 사무실 벽과 어울리는 남색, 밝은 글자. 승인 대기·답변 필요·새 응답 색은 낮과 같습니다.
+    private static let nightPaper = Color(hex: 0x33365A)
+    private static let nightInk = Color(hex: 0xF1ECE4)
+    private static let nightLine = Color(hex: 0x262842)
     private static let maxChips = 3
 
     var body: some View {
@@ -311,6 +315,7 @@ struct MiniHeaderView: View {
         let line = Self.latest(focus: focus, rows: current?.rows ?? [], waiting: waiting)
         let others = roster.teams.filter { $0.id != current?.id }
             .sorted { Self.rank(focus.tiers[$0.id]) < Self.rank(focus.tiers[$1.id]) }
+        let nightPlain = model.isNight && (line == nil || line?.kind == .normal)
         HStack(spacing: 5) {
             // 글자가 바뀌는 때만 (M6(1)): 답변 대기 "12초째"는 1초마다, "3분 전"은 1분마다
             // 미니가 숨어 있으면 멈춥니다
@@ -319,6 +324,7 @@ struct MiniHeaderView: View {
                     .font(.system(size: 10.5, weight: line?.kind == .normal ? .regular : .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .foregroundStyle(nightPlain ? Self.nightInk : Self.ink)
             }
             .layoutPriority(-1)
             Spacer(minLength: 0)
@@ -338,8 +344,9 @@ struct MiniHeaderView: View {
         .padding(.trailing, CGFloat(MiniOffice.headerHeight))  // ✕ 자리
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            line?.kind == .answer ? Palette.attention : line?.kind == .reply ? Palette.reply : line?.kind == .completed ? Self.done : Self.paper)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xD8CDBE)).frame(height: 1) }
+            line?.kind == .answer ? Palette.attention : line?.kind == .reply ? Palette.reply : line?.kind == .completed ? Self.done
+                : nightPlain ? Self.nightPaper : Self.paper)
+        .overlay(alignment: .bottom) { Rectangle().fill(model.isNight ? Self.nightLine : Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
     }
 

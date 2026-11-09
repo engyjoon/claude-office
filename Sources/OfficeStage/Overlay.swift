@@ -38,12 +38,17 @@ public struct OverlayOptions: Hashable, Sendable {
     public var hovered: AgentID?
     /// 화면에 보이는 영역 (지도 좌표). nil이면 사무실 전체입니다. 말풍선이 이 밖으로 나가지 않게 합니다.
     public var bounds: MapRect?
+    /// 사무실 조명 (M6(6)). 밤에는 잉크색 상태 칩이 어두운 바닥에 묻히지 않게 옅은 테두리를 답니다.
+    public var lighting: Lighting
 
-    public init(privacy: PrivacyLevel = .detailed, displayScale: Double = 1, hovered: AgentID? = nil, bounds: MapRect? = nil) {
+    public init(
+        privacy: PrivacyLevel = .detailed, displayScale: Double = 1, hovered: AgentID? = nil, bounds: MapRect? = nil, lighting: Lighting = .day
+    ) {
         self.privacy = privacy
         self.displayScale = displayScale
         self.hovered = hovered
         self.bounds = bounds
+        self.lighting = lighting
     }
 
     public var tier: OverlayTier { OverlayTier(scale: displayScale) }
@@ -116,7 +121,7 @@ public enum Overlay {
                 }
                 items.append(OverlayItem(
                     id: "pill:zone:\(group.zone.rawValue)", kind: .pill, agent: nil, origin: MapPoint(frame.x, frame.y),
-                    shapes: OverlayArt.pill(text: text, width: width, category: group.category), frame: frame, text: text))
+                    shapes: OverlayArt.pill(text: text, width: width, category: group.category, lighting: options.lighting), frame: frame, text: text))
             }
             for actor in actors where !grouped.contains(actor.id) {
                 guard let pill = actor.pill else { continue }
@@ -131,7 +136,7 @@ public enum Overlay {
                 let origin = MapPoint(frame.x, frame.y)
                 items.append(OverlayItem(
                     id: "pill:\(actor.id.raw)", kind: .pill, agent: actor.id, origin: origin,
-                    shapes: OverlayArt.pill(text: text, width: width, category: pill.category), frame: frame, text: text))
+                    shapes: OverlayArt.pill(text: text, width: width, category: pill.category, lighting: options.lighting), frame: frame, text: text))
             }
         }
 
@@ -435,14 +440,19 @@ public enum OverlayArt {
         ]
     }
 
-    /// 상태 칩. 원점은 칩의 왼쪽 위입니다.
-    public static func pill(text: String, width: Double, category: ToolCategory) -> [ArtShape] {
+    /// 상태 칩. 원점은 칩의 왼쪽 위입니다. 밤에는 흰 30% 테두리를 1pt 답니다 (M6(6)).
+    public static func pill(text: String, width: Double, category: ToolCategory, lighting: Lighting = .day) -> [ArtShape] {
         [
-            ArtShape(.rect(MapRect(0, 0, width, 17), radius: 8.5), fill: .swatch(.ink)),
+            ArtShape(
+                .rect(MapRect(0, 0, width, 17), radius: 8.5), fill: .swatch(.ink),
+                stroke: lighting == .night ? .color(pillNightEdge) : nil, lineWidth: lighting == .night ? 1 : 1.8),
             .circle(10, 8.5, 3, fill: .color(categoryColor(category)), outline: false),
             .text(text, 17, 8.5, size: 9.5, color: .swatch(.white), anchor: .start, baseline: .central),
         ]
     }
+
+    /// 밤 상태 칩 테두리
+    public static let pillNightEdge = ArtColor(0xFFFFFF, alpha: 0.3)
 
     /// 툴 종류 색 (미리보기의 CAT)
     public static func categoryColor(_ category: ToolCategory) -> ArtColor {

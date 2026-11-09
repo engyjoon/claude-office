@@ -10,23 +10,37 @@ public enum OfficeArt {
     ///   - extent: 화면에 보이는 영역(지도 좌표). 사무실보다 넓으면 남는 곳까지 벽과 바닥을 이어 그립니다.
     ///     nil이면 사무실 크기(0, 0, width, height)만 그립니다.
     ///   - lounge: 휴게 공간(소파·안마 의자와 그 러그)을 그릴지. 미니 사무실은 그리지 않습니다 (M5(4) v2).
+    ///   - lighting: 밤이면 벽·바닥·가구를 밤 팔레트로 칠하고, 창밖을 밤하늘로, 휴게 공간에 스탠드를 켭니다 (M6(6)).
+    ///     사람 있는 책상의 불빛은 자리에 따라 바뀌므로 따로 `deskLight(at:)`로 그립니다.
     public static func layers(
-        layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil, lounge: Bool = true
+        layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil, lounge: Bool = true,
+        lighting: Lighting = .day
     ) -> [ArtLayer] {
         var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent, lounge: lounge))]
-        layers += wallFurniture(layout)
         for row in layout.rows {
             let team = teams.first { $0.id == row.team }
             layers += self.row(row, team: team, plates: nameplates[row.team] ?? [:])
         }
         if lounge { layers += self.lounge() }
+        layers = layers.map { $0.lit(lighting) }
+        // 벽 가구는 스스로 밤 색을 칠합니다 (창밖 그림이 낮·밤으로 다름). 바탕 바로 뒤에 둡니다.
+        layers.insert(contentsOf: wallFurniture(layout, lighting: lighting), at: 1)
+        if lighting == .night, lounge {
+            // 소파 옆 스탠드와 그 불빛 (휴게 공간은 늘 켜 둠). 불빛은 바닥·러그 위, 가구 아래.
+            layers.insert(ArtLayer("lounge-light", depth: -.infinity, loungeGlow()), at: 1)
+            layers.append(ArtLayer("floor-lamp", depth: floorLampFoot.y - 2, floorLamp(at: floorLampFoot)))
+        }
         return layers
     }
 
     /// 시간에 따라 움직이는 가구: 안마 의자 등판 롤러, 긴 명령을 기다리는 직원의 모니터 진행 표시.
     /// 매 프레임 다시 계산합니다 (렌더러는 바뀐 경우에만 다시 그리면 됩니다).
     /// - Parameter time: 그림에 쓸 무대 시각 (기본은 지금). 앱은 1/15초 단위로 맞춰 넘겨서 같은 그림(구운 텍스처)이 주기마다 다시 쓰이게 합니다 (M6(1)).
-    public static func liveLayers(stage: Stage, time: Double? = nil) -> [ArtLayer] {
+    public static func liveLayers(stage: Stage, time: Double? = nil, lighting: Lighting = .day) -> [ArtLayer] {
+        liveLayers(stage: stage, time: time).map { $0.lit(lighting) }
+    }
+
+    static func liveLayers(stage: Stage, time: Double?) -> [ArtLayer] {
         let time = time ?? stage.time
         var layers: [ArtLayer] = []
         for (index, seat) in OfficeLayout.massageSeats.enumerated() where !stage.config.commonAreasAtDesk {
@@ -89,10 +103,8 @@ public enum OfficeArt {
         return shapes
     }
 
-    static func wallFurniture(_ layout: OfficeLayout) -> [ArtLayer] {
+    static func wallFurniture(_ layout: OfficeLayout, lighting: Lighting = .day) -> [ArtLayer] {
         var shapes: [ArtShape] = []
-        // 정원 그림 액자 (뒷벽 왼쪽, 가로로 긴 액자)
-        shapes += garden(in: layout.gardenFrame)
         // 벽시계 (액자와 화이트보드 사이)
         let clock = layout.clockCenter
         shapes += [
@@ -118,7 +130,9 @@ public enum OfficeArt {
             .circle(door + 54, 114, 3.5, fill: .swatch(.butter)),
         ]
         shapes += pantry().transformed(offset: MapPoint(layout.pantryX - 908, 0))
-        return [ArtLayer("wall", depth: -.infinity, shapes)]
+        // 풍경 창 (뒷벽 왼쪽, 가로로 긴 액자): 낮에는 정원, 밤에는 밤하늘
+        let window = lighting == .night ? nightWindow(in: layout.gardenFrame) : garden(in: layout.gardenFrame)
+        return [ArtLayer("wall", depth: -.infinity, window + shapes.lit(lighting))]
     }
 
     /// 가로로 긴 녹색 정원 그림 액자: 하늘, 겹친 언덕, 나무, 꽃, 오솔길
@@ -163,6 +177,106 @@ public enum OfficeArt {
         }
         shapes.append(ArtShape(.rect(MapRect(ix, iy, iw, ih), radius: 3), stroke: .swatch(.ink), lineWidth: 1.2))
         return shapes
+    }
+
+    // MARK: - 밤 (M6(6))
+
+    /// 밤 풍경 창: 남색 하늘, 별, 초승달, 어두운 언덕, 먼 마을 불빛. 별은 반짝이지 않습니다 (계속 다시 그리지 않게).
+    static func nightWindow(in frame: MapRect) -> [ArtShape] {
+        let x = frame.x, y = frame.y, w = frame.width, h = frame.height
+        let ix = x + 7, iy = y + 7, iw = w - 14, ih = h - 14
+        let sky = ArtColor(0x27315E)
+        var shapes: [ArtShape] = [
+            ArtShape.rect(x, y, w, h, r: 6, fill: .swatch(.woodDark)).lit(.night),
+            .rect(ix, iy, iw, ih, r: 3, fill: .color(sky), outline: false),
+            .rect(ix, iy + ih * 0.55, iw, ih * 0.45, fill: .color(ArtColor(0x33407A)), outline: false, opacity: 0.6),
+        ]
+        // 별: 창 폭에 따라 늘어나는 고정 배치 (같은 창이면 늘 같은 자리)
+        let count = max(8, Int(iw / 20))
+        for index in 0..<count {
+            let fx = (Double(index) + 0.5) / Double(count) + (Double(StableHashLite.value("star-x\(index)") % 60) / 1000 - 0.03)
+            let fy = 0.08 + Double(StableHashLite.value("star-y\(index)") % 42) / 100
+            let radius = 0.8 + Double(StableHashLite.value("star-r\(index)") % 9) / 10
+            let opacity = 0.6 + Double(StableHashLite.value("star-o\(index)") % 40) / 100
+            shapes.append(.circle(ix + iw * min(max(fx, 0.02), 0.98), iy + 4 + ih * fy, radius, fill: .color(ArtColor(0xFFF6D8)), outline: false, opacity: opacity))
+        }
+        // 초승달 (달 원 위에 하늘색 원을 겹침)
+        let moon = MapPoint(ix + iw * 0.86, iy + 15)
+        shapes += [
+            ArtShape(.circle(center: moon, radius: 8), fill: .color(ArtColor(0xFFF1B8)), stroke: .color(NightPalette.color(Swatch.ink.color)), lineWidth: 1.1),
+            .circle(moon.x + 4, moon.y - 3, 7, fill: .color(sky), outline: false),
+        ]
+        // 언덕 (뒤 → 앞)
+        shapes += [
+            .path("M\(ix),\(iy + ih * 0.66) C\(ix + iw * 0.25),\(iy + ih * 0.40) \(ix + iw * 0.55),\(iy + ih * 0.70) \(ix + iw * 0.75),\(iy + ih * 0.50) "
+                + "C\(ix + iw * 0.88),\(iy + ih * 0.42) \(ix + iw),\(iy + ih * 0.56) \(ix + iw),\(iy + ih * 0.56) L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
+                  fill: .color(ArtColor(0x2F4E57)), outline: false),
+            .path("M\(ix),\(iy + ih * 0.84) C\(ix + iw * 0.30),\(iy + ih * 0.66) \(ix + iw * 0.62),\(iy + ih * 0.90) \(ix + iw),\(iy + ih * 0.72) "
+                + "L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
+                  fill: .color(ArtColor(0x253F49)), outline: false),
+        ]
+        // 먼 마을 불빛
+        for (fx, fy) in [(0.18, 0.78), (0.21, 0.80), (0.52, 0.84), (0.55, 0.82), (0.83, 0.76), (0.90, 0.80)] {
+            shapes.append(.rect(ix + iw * fx, iy + ih * fy, 2.4, 2.4, fill: .color(ArtColor(0xFFD27A)), outline: false))
+        }
+        shapes.append(ArtShape(.rect(MapRect(ix, iy, iw, ih), radius: 3), stroke: .color(NightPalette.color(Swatch.ink.color)), lineWidth: 1.2))
+        return shapes
+    }
+
+    /// 은은한 불빛: 같은 중심의 반투명 타원을 겹쳐 가운데가 밝고 가장자리로 갈수록 옅어지게 합니다 (렌더러에 그라데이션이 없어도 됨)
+    static func glow(_ center: MapPoint, rx: Double, ry: Double, color: ArtColor, opacity: Double, rings: Int = 14) -> [ArtShape] {
+        (0..<rings).map { ring in
+            let scale = 1 - Double(ring) / Double(rings) * 0.85
+            return .ellipse(center.x, center.y, rx * scale, ry * scale, fill: .color(color), opacity: opacity)
+        }
+    }
+
+    static let lampLight = ArtColor(0xFFD98A)
+    static let screenLight = ArtColor(0x9FE6FF)
+
+    /// 사람 있는 책상의 불빛 (밤): 따뜻한 스탠드 빛 웅덩이와 노트북 화면의 푸른 빛. (x, y)는 앉은 직원의 발 위치입니다.
+    /// 바닥·러그 위, 의자·책상·직원 아래에 그립니다.
+    public static func deskLight(at seat: MapPoint) -> [ArtShape] {
+        glow(MapPoint(seat.x, seat.y - 34), rx: 82, ry: 62, color: lampLight, opacity: 0.045)
+            + glow(MapPoint(seat.x - 27, seat.y - 50), rx: 30, ry: 22, color: screenLight, opacity: 0.08, rings: 8)
+    }
+
+    /// 불을 켤 책상: 그 책상 자리에 서거나 앉아 있는(걷는 중이 아닌) 직원이 있는 책상의 자리(발 위치)
+    public static func litDesks(stage: Stage) -> [MapPoint] {
+        let standing = stage.actors.values.filter { !$0.isWalking }.map(\.position)
+        var lit: [MapPoint] = []
+        for row in stage.layout.rows {
+            for desk in 0..<row.desks {
+                let seat = MapPoint(OfficeLayout.deskX(desk), row.deskY)
+                if standing.contains(where: { $0.distance(to: seat) < 2 }) { lit.append(seat) }
+            }
+        }
+        return lit
+    }
+
+    /// 소파 옆 스탠드 자리 (두 소파 사이, 발 위치)
+    static var floorLampFoot: MapPoint {
+        let sofas = OfficeLayout.sofas
+        return MapPoint((sofas[0].maxX + sofas[1].x) / 2, 212)
+    }
+
+    static func loungeGlow() -> [ArtShape] {
+        let sofas = OfficeLayout.sofaArea
+        let massage = OfficeLayout.massageArea
+        return glow(MapPoint(floorLampFoot.x, 196), rx: sofas.width * 0.5, ry: 64, color: lampLight, opacity: 0.035)
+            + glow(MapPoint(massage.x + massage.width / 2, massage.y + massage.height / 2 - 10), rx: massage.width * 0.55, ry: 56, color: lampLight, opacity: 0.026)
+    }
+
+    /// 스탠드: 받침, 기둥, 켜진 갓 (밤에만)
+    static func floorLamp(at foot: MapPoint) -> [ArtShape] {
+        let x = foot.x, y = foot.y
+        let ink = Paint.color(NightPalette.color(Swatch.ink.color))
+        return [
+            ArtShape(.rect(MapRect(x - 1.5, y - 92, 3, 90), radius: 0), fill: .color(ArtColor(0x7A6E8E)), stroke: ink, lineWidth: 1),
+            ArtShape(.ellipse(center: MapPoint(x, y - 2), rx: 10, ry: 3.5), fill: .color(ArtColor(0x7A6E8E)), stroke: ink, lineWidth: 1.2),
+            ArtShape(.path(VectorPath.parse("M\(x - 14),\(y - 90) L\(x + 14),\(y - 90) L\(x + 9),\(y - 110) L\(x - 9),\(y - 110) Z")),
+                     fill: .color(ArtColor(0xFFE3A3)), stroke: ink, lineWidth: 1.4),
+        ]
     }
 
     /// 탕비 코너 (오른쪽 벽): 냉장고, 정수기, 프린터

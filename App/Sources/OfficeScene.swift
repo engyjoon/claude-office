@@ -10,6 +10,8 @@ final class StageStore {
     var stage: Stage { floor.stage }
     /// 말풍선·상태 칩에 보여줄 내용 수준 (설정의 표시 수준)
     var privacy: PrivacyLevel = .detailed
+    /// 사무실 조명 (M6(6)). 바꿀 때는 씬의 `setLighting`을 거쳐 크로스페이드합니다.
+    var lighting: Lighting = .day
 }
 
 /// SpriteKit 사무실 화면 (설계서 §8).
@@ -39,6 +41,13 @@ final class OfficeScene: SKScene {
     private let liveFurniture = SKNode()
     private var shownLiveLayers: [ArtLayer] = []
     private var shownLiveHeight = 0.0
+    /// 밤에 사람 있는 책상의 불빛 (M6(6)). 바닥 바로 위, 가구 아래. 자리가 바뀔 때만 다시 만듭니다.
+    private let deskLights = SKNode()
+    private var shownDeskLights: (seats: [MapPoint], height: Double)?
+    /// 조명이 바뀌는 순간 덮어 두었다가 서서히 지우는 이전 화면 한 장
+    private var fadingSnapshot: SKSpriteNode?
+    /// 지금 칠한 배경색의 조명
+    private var shownBackground: Lighting?
     /// 말풍선·상태 칩·아이콘·효과 층 (가구와 직원 모두의 위)
     private let overlayLayer = SKNode()
     private var overlays: [String: OverlayNode] = [:]
@@ -74,6 +83,8 @@ final class OfficeScene: SKScene {
         anchorPoint = .zero
         backgroundColor = Swatch.floor.color.skColor
         addChild(world)
+        deskLights.zPosition = -99_999
+        world.addChild(deskLights)
         world.addChild(furniture)
         world.addChild(liveFurniture)
         overlayLayer.zPosition = 1_000_000
@@ -135,6 +146,32 @@ final class OfficeScene: SKScene {
                 resumedAt = now
             }
         }
+    }
+
+    /// 조명 전환 크로스페이드 길이 (초)
+    static let lightingFade = 0.6
+
+    /// 조명을 바꿉니다 (M6(6)). 보이는 중이면 지금 화면을 한 장 찍어 위에 덮고, 다음 장에서 가구를 새 조명으로 다시 구운 뒤
+    /// 0.6초 동안 덮은 장을 서서히 지웁니다. 그동안 그리기 빈도는 모델이 "자리 잡는 중"(30fps)으로 올립니다.
+    /// 안 보이면 바로 바꿉니다 (다음에 보일 때 새 조명으로 구움).
+    func setLighting(_ lighting: Lighting) {
+        guard store.lighting != lighting else { return }
+        if pace != .paused, let view, view.window != nil, size.width > 1, size.height > 1,
+            let texture = view.texture(from: self, crop: CGRect(origin: .zero, size: size))
+        {
+            fadingSnapshot?.removeFromParent()
+            let snapshot = SKSpriteNode(texture: texture, size: size)
+            snapshot.anchorPoint = .zero
+            snapshot.position = .zero
+            snapshot.zPosition = 2_000_000
+            addChild(snapshot)
+            fadingSnapshot = snapshot
+            snapshot.run(.sequence([.fadeOut(withDuration: Self.lightingFade), .removeFromParent()])) { [weak self, weak snapshot] in
+                if self?.fadingSnapshot === snapshot { self?.fadingSnapshot = nil }
+            }
+        }
+        store.lighting = lighting
+        furnitureKey = nil
     }
 
     /// 잔잔함·잠잠함 단계에서 한 장을 그립니다 (모델이 무대를 흘린 뒤 부름). 직전 장에서 한 장 간격이 지나지 않았으면 건너뜁니다.
@@ -229,6 +266,12 @@ final class OfficeScene: SKScene {
             rebuildFurnitureIfNeeded(stage, extent: extent)
         }
         rebuildLiveFurnitureIfNeeded(stage)
+        rebuildDeskLightsIfNeeded(stage)
+        let lighting = store.lighting
+        if shownBackground != lighting {
+            shownBackground = lighting
+            backgroundColor = Swatch.floor.color.lit(lighting).skColor
+        }
 
         var present = Set<AgentID>()
         for actor in stage.sortedActors {
@@ -245,7 +288,7 @@ final class OfficeScene: SKScene {
                 world.addChild(node)
                 characters[actor.id] = node
             }
-            node.apply(actor, time: stage.time, sceneHeight: height, blinkDuration: blinkDuration)
+            node.apply(actor, time: stage.time, sceneHeight: height, blinkDuration: blinkDuration, lighting: lighting)
         }
         for (id, node) in characters where !present.contains(id) {
             characters[id] = nil
@@ -263,7 +306,8 @@ final class OfficeScene: SKScene {
         // 띠: 잘라 보여 주는 영역 안에 말풍선을 가둡니다 (왼쪽 둘레 여백은 빼고)
         case .band: visible = MapRect(0, extent.y, extent.width + extent.x, extent.height)
         }
-        let options = OverlayOptions(privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible)
+        let options = OverlayOptions(
+            privacy: store.privacy, displayScale: world.xScale, hovered: hoveredAgent, bounds: visible, lighting: store.lighting)
         var present = Set<String>()
         for (index, item) in Overlay.items(for: stage, options: options).enumerated() {
             present.insert(item.id)
@@ -287,7 +331,7 @@ final class OfficeScene: SKScene {
 
     private func rebuildLiveFurnitureIfNeeded(_ stage: Stage) {
         let time = (stage.time / Self.liveFurnitureStep).rounded(.down) * Self.liveFurnitureStep
-        let layers = OfficeArt.liveLayers(stage: stage, time: time)
+        let layers = OfficeArt.liveLayers(stage: stage, time: time, lighting: store.lighting)
         // 지도 높이가 바뀌면(창 크기 조절) 위아래를 뒤집는 기준이 달라지므로 그림이 같아도 다시 만듭니다
         // (M5(4) 화면 확인: 창을 키우면 안마 의자 롤러가 의자 한참 아래에 남아 있었음)
         let height = stage.layout.height
@@ -301,6 +345,20 @@ final class OfficeScene: SKScene {
             node.position = CGPoint(x: 0, y: height)
             node.zPosition = layer.depth
             liveFurniture.addChild(node)
+        }
+    }
+
+    /// 밤에 사람 있는 책상의 불빛 (M6(6)). 바닥을 다시 굽지 않고 책상마다 작은 텍스처(캐시에서 다시 씀)만 바꿉니다.
+    private func rebuildDeskLightsIfNeeded(_ stage: Stage) {
+        let seats = store.lighting == .night ? OfficeArt.litDesks(stage: stage) : []
+        let height = stage.layout.height
+        if let shown = shownDeskLights, shown.seats == seats, shown.height == height { return }
+        shownDeskLights = (seats, height)
+        deskLights.removeAllChildren()
+        for seat in seats {
+            let node = ArtNodes.node(for: OfficeArt.deskLight(at: seat), colors: nil)
+            node.position = CGPoint(x: 0, y: height)
+            deskLights.addChild(node)
         }
     }
 
@@ -403,6 +461,7 @@ final class OfficeScene: SKScene {
         var layout: OfficeLayout
         var teams: [Team]
         var nameplates: [TeamID: [Seat: String]]
+        var lighting: Lighting
     }
 
     private var furnitureKey: FurnitureKey?
@@ -416,6 +475,8 @@ final class OfficeScene: SKScene {
         furniture.removeAllChildren()
         liveFurniture.removeAllChildren()
         shownLiveLayers = []
+        deskLights.removeAllChildren()
+        shownDeskLights = nil
         furnitureKey = nil
         PerfProbe.shared?.count("\(probeName).released")
     }
@@ -427,14 +488,15 @@ final class OfficeScene: SKScene {
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
         let key = FurnitureKey(
             fit: [extent.x, extent.width, extent.height].map { Int(($0 / 4).rounded()) }, layout: stage.layout, teams: teams,
-            nameplates: stage.nameplates)
+            nameplates: stage.nameplates, lighting: store.lighting)
         guard key != furnitureKey else { return }
         furnitureKey = key
 
         furniture.removeAllChildren()
         let height = stage.layout.height
         let layers = OfficeArt.layers(
-            layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk)
+            layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
+            lighting: store.lighting)
 
         // 가구는 비트맵으로 구워 둡니다 (M6(1)). 깊이가 같은 층(한 행의 책상들, 의자들, 바닥·벽·표지)은 한 장으로 합칩니다:
         // 깊이가 같으면 SpriteKit도 넣은 순서대로 그리므로 순서가 같고, 그릴 노드 수가 줄어 매 프레임 순회 비용이 줄어듭니다.
@@ -477,7 +539,9 @@ final class CharacterNode: SKNode {
     private var shownStar: Bool?
     private let leftLeg: SKNode
     private let rightLeg: SKNode
-    private let shadow: SKNode
+    /// 발밑 그림자 (밤에는 옅은 빛 웅덩이, M6(6))
+    private let shadow = SKNode()
+    private var shownShadow: Lighting?
     /// 소파·안마 의자에 앉은 다리. 몸의 숨쉬기·떨림을 따르지 않고, 가구 앞판보다 앞에 그립니다.
     private let seatedLegs = SKNode()
     private var shownSeat: LoungeSeat??
@@ -522,7 +586,6 @@ final class CharacterNode: SKNode {
         selectionRing.isHidden = true
         leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors)
         rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors)
-        shadow = ArtNodes.node(for: CharacterArt.shadow, colors: colors)
         leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
         rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
         super.init()
@@ -571,9 +634,15 @@ final class CharacterNode: SKNode {
         fatalError("init(coder:)는 쓰지 않습니다")
     }
 
-    func apply(_ actor: StageActor, time: Double, sceneHeight: Double, blinkDuration: Double) {
+    func apply(_ actor: StageActor, time: Double, sceneHeight: Double, blinkDuration: Double, lighting: Lighting = .day) {
         position = CGPoint(x: actor.position.x, y: sceneHeight - actor.position.y)
         zPosition = actor.position.y
+
+        if shownShadow != lighting {
+            shownShadow = lighting
+            shadow.removeAllChildren()
+            shadow.addChild(ArtNodes.node(for: CharacterArt.shadow(lighting), colors: colors))
+        }
 
         let star = actor.agent.isMain
         if shownStar != star {

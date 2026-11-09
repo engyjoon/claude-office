@@ -38,6 +38,16 @@ public enum CharacterArt {
 
     public static let shadow: [ArtShape] = [.ellipse(0, 0, 17, 4.5, fill: .swatch(.shadow))]
 
+    /// 발밑 그림자. 밤에는 옅은 빛 웅덩이로 바꿔, 어두운 바닥에서도 짙은 피부·머리 직원의 윤곽이 묻히지 않게 합니다 (M6(6)).
+    public static func shadow(_ lighting: Lighting) -> [ArtShape] {
+        guard lighting == .night else { return shadow }
+        let light = ArtColor(0xFFE3A3)
+        return [
+            .ellipse(0, 0, 24, 6.5, fill: .color(light), opacity: 0.16),
+            .ellipse(0, 0, 17, 4.5, fill: .color(light), opacity: 0.26),
+        ]
+    }
+
     public static let leftLeg: [ArtShape] = [.rect(-10, -17, 8.5, 17, r: 4, fill: .pants)]
     public static let rightLeg: [ArtShape] = [.rect(1.5, -17, 8.5, 17, r: 4, fill: .pants)]
 

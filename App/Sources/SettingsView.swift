@@ -143,6 +143,29 @@ struct GeneralSettings: View {
                 }
             }
 
+            Section {
+                Picker("사무실 조명", selection: Binding(get: { model.lightingMode }, set: { model.setLightingMode($0) })) {
+                    ForEach(LightingMode.allCases, id: \.self) { mode in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mode.title)
+                            Footnote(mode.detail)
+                        }
+                        .padding(.vertical, 2)
+                        .tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                LabeledContent("지금") {
+                    Text(model.isNight ? "밤 (저녁 조명)" : "낮")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("사무실 조명")
+            } footer: {
+                Footnote("밤에는 벽·바닥·가구를 어둡게 하고 창밖을 밤하늘로 바꿔요. 사람 있는 책상만 스탠드와 화면 불빛이 켜져요. 직원과 말풍선은 낮 색 그대로예요. 사무실 창과 미니 사무실에 모두 적용돼요.")
+            }
+
             Section("앱 정보") {
                 LabeledContent("버전", value: Self.version)
                 HStack {

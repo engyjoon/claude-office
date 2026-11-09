@@ -124,3 +124,28 @@ struct HookTestScenarioTests {
         #expect(HookTestScenario.withoutTestNotices(actions) == actions)
     }
 }
+
+@Suite("사무실 조명 설정 (M6(6))")
+struct LightingModeTests {
+    @Test("기본은 시스템 모양 따라, 저장하고 다시 읽는다")
+    func roundTrip() {
+        let store = MemoryStore()
+        #expect(LightingMode(store: store) == .system)
+        LightingMode.evening.save(to: store)
+        #expect(LightingMode(store: store) == .evening)
+        #expect(LightingMode(store: MemoryStore([LightingMode.settingsKey: "nonsense"])) == .system)
+    }
+
+    @Test("밤 판정: 시스템 모양, 19시~7시, 항상 낮·밤")
+    func decision() {
+        #expect(LightingMode.system.isNight(systemDark: true, hour: 12))
+        #expect(!LightingMode.system.isNight(systemDark: false, hour: 23))
+        #expect(LightingMode.evening.isNight(systemDark: false, hour: 19))
+        #expect(LightingMode.evening.isNight(systemDark: false, hour: 0))
+        #expect(LightingMode.evening.isNight(systemDark: false, hour: 6))
+        #expect(!LightingMode.evening.isNight(systemDark: true, hour: 7))
+        #expect(!LightingMode.evening.isNight(systemDark: true, hour: 18))
+        #expect(!LightingMode.alwaysDay.isNight(systemDark: true, hour: 23))
+        #expect(LightingMode.alwaysNight.isNight(systemDark: false, hour: 12))
+    }
+}

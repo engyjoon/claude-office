@@ -48,6 +48,9 @@ final class AppModel {
     /// 동작 줄이기 설정과 macOS 손쉬운 사용 값 (설계서 §10, M5(8))
     private(set) var motionSettings: MotionSettings
     private(set) var systemReduceMotion = false
+    /// 사무실 조명을 켜는 기준과 지금 밤인지 (M6(6), 설정 → 일반)
+    private(set) var lightingMode: LightingMode
+    private(set) var isNight = false
     /// 사무실 창에서 클릭해 고른 직원 (신원 카드에 보여줍니다)
     private(set) var selectedAgent: AgentID?
     /// 효과음 설정 (설계서 §11.3). 설정 창과 메뉴바에서 바꿉니다.
@@ -124,6 +127,7 @@ final class AppModel {
         SettingsMigration.migrate(UserDefaults.standard)
         let saved = PrivacyLevel(store: UserDefaults.standard)
         motionSettings = MotionSettings(store: UserDefaults.standard)
+        lightingMode = LightingMode(store: UserDefaults.standard)
         privacy = saved
         engine = OfficeEngine(privacy: saved)
         let sound = SoundSettings(defaults: .standard)
@@ -176,8 +180,11 @@ final class AppModel {
         startTicking()
         startDirectoryRefresh()
         miniPanel = MiniOfficePanelController(model: self)
-        // 앱(NSApp)이 준비된 뒤에 미니를 띄웁니다 (init 때는 NSApp이 아직 없음)
-        DispatchQueue.main.async { [weak self] in self?.syncMiniPanel() }
+        // 앱(NSApp)이 준비된 뒤에 미니를 띄웁니다 (init 때는 NSApp이 아직 없음). 조명도 시스템 모양을 읽을 수 있을 때 정합니다.
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshLighting()
+            self?.syncMiniPanel()
+        }
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -287,6 +294,7 @@ final class AppModel {
         if tickAccumulator >= 0.25 - 1e-3 {
             tickAccumulator = 0
             record(engine.tick(at: now))
+            refreshLighting(now: now)
             refreshMiniFocus(now: now)
             syncMiniPanel()
             // 30초 넘게 안 보이는 장면은 가구 텍스처를 놓습니다 (닫힌 사무실 창이 미니만 보일 때 메모리를 잡고 있지 않게)
@@ -705,6 +713,28 @@ final class AppModel {
         motionSettings = settings
         settings.save(to: UserDefaults.standard)
         applyMotion()
+    }
+
+    func setLightingMode(_ mode: LightingMode) {
+        lightingMode = mode
+        mode.save(to: UserDefaults.standard)
+        refreshLighting()
+    }
+
+    /// 지금 밤인지 다시 판정해 두 장면에 알립니다 (M6(6)). 0.25초 tick마다 부르지만 계산은 시스템 모양·시각 읽기뿐이고,
+    /// 바뀐 순간에만 장면이 크로스페이드하며 가구를 다시 굽습니다. 따로 타이머를 두지 않아 잠자기·시계 변경 뒤에도 맞습니다.
+    private func refreshLighting(now: Date = Date()) {
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let hour = Calendar.current.component(.hour, from: now)
+        let night = lightingMode.isNight(systemDark: dark, hour: hour)
+        let lighting: Lighting = night ? .night : .day
+        guard night != isNight || stageStore.lighting != lighting else { return }
+        isNight = night
+        officeScene.setLighting(lighting)
+        miniScene.setLighting(lighting)
+        // 크로스페이드 동안 30fps로 그립니다
+        settleUntil = max(settleUntil, now.addingTimeInterval(OfficeScene.lightingFade + 0.1))
+        updatePacing(now: now)
     }
 
     /// 지금 동작을 줄이는지 (설정과 macOS 손쉬운 사용 값으로 정함)

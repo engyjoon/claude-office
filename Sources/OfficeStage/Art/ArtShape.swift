@@ -17,7 +17,73 @@ public struct ArtColor: Hashable, Sendable {
     public var hex: String { String(format: "#%06X", rgb) }
 }
 
-/// 사무실 공통 색 (설계서 §9.2 주간 팔레트, 미리보기와 같은 값). 야간 모드는 M6에서 추가합니다.
+/// 사무실 조명 (M6(6), 설계서 §9.2). 밤에는 벽·바닥·가구만 밤 팔레트로 칠하고, 직원·말풍선·칩·배지는 낮 색 그대로 둡니다
+/// (실내 조명 아래 있는 것처럼).
+public enum Lighting: String, Hashable, Sendable, CaseIterable {
+    case day, night
+}
+
+/// 밤 팔레트 (M6(6) A안 "저녁 조명"). 낮 색을 받아 밤 색을 돌려줍니다.
+///
+/// - 벽·바닥·러그·하늘처럼 넓은 면은 손으로 고른 색(`overrides`)을 씁니다.
+/// - 그 밖의 가구 색(나무, 금속, 의자, 소파, 가전 …)은 밤 톤(#232846)과 45% 섞습니다. 그림 데이터에 직접 쓴 색도 같은 규칙을 거칩니다.
+/// - 명패·표지는 밝게 남겨 이름이 읽히게 하고, 화면 불빛(`screenGlow`)은 그대로 빛나게 둡니다.
+/// - 그림 데이터 단계에서 `.swatch`를 `.color(밤색)`으로 바꿔 두므로, 앱의 굽기 캐시(도형이 키)가 낮·밤 텍스처를 저절로 구분합니다.
+public enum NightPalette {
+    public static let tone = ArtColor(0x232846)
+    public static let mixAmount = 0.45
+
+    /// 낮 색(RGB) → 밤 색
+    static let overrides: [UInt32: UInt32] = [
+        Swatch.wall.color.rgb: 0x3E4468,
+        Swatch.wallTrim.color.rgb: 0x363C5E,
+        Swatch.baseboard.color.rgb: 0x2C2D49,
+        Swatch.floor.color.rgb: 0x5B4F63,
+        Swatch.floorLine.color.rgb: 0x52465A,
+        Swatch.plate.color.rgb: 0xEFE7DA,
+        Swatch.plateInk.color.rgb: 0x4A3F57,
+        Swatch.ink.color.rgb: 0x221D2C,
+        Swatch.sky.color.rgb: 0x2E3A6A,
+        Swatch.screenGlow.color.rgb: Swatch.screenGlow.color.rgb,
+        Swatch.rugA.color.rgb: 0x3F5E66,
+        Swatch.rugB.color.rgb: 0x6A4A5E,
+        Swatch.rugC.color.rgb: 0x4A4472,
+        Swatch.rugD.color.rgb: 0x66593F,
+        0xD4E2F2: 0x3A4670,  // 안마 구역 러그
+    ]
+
+    public static func color(_ day: ArtColor) -> ArtColor {
+        if let night = overrides[day.rgb] { return ArtColor(night, alpha: day.alpha) }
+        return day.mixed(with: tone, amount: mixAmount)
+    }
+
+    /// 칠할 색을 밤 색으로. 직원 부위 색(피부·머리·옷)은 가구에 쓰지 않으므로 그대로 둡니다.
+    public static func paint(_ paint: Paint) -> Paint {
+        switch paint {
+        case .swatch(let swatch): .color(color(swatch.color))
+        case .color(let day): .color(color(day))
+        case .skin, .hair, .top, .pants: paint
+        }
+    }
+}
+
+extension ArtColor {
+    /// 조명에 맞춘 색 (낮이면 그대로)
+    public func lit(_ lighting: Lighting) -> ArtColor {
+        lighting == .night ? NightPalette.color(self) : self
+    }
+
+    /// 다른 색과 섞기 (amount 0 = 이 색, 1 = 다른 색). 불투명도는 이 색 그대로입니다.
+    public func mixed(with other: ArtColor, amount: Double) -> ArtColor {
+        func channel(_ shift: UInt32) -> UInt32 {
+            let a = Double((rgb >> shift) & 0xFF), b = Double((other.rgb >> shift) & 0xFF)
+            return UInt32((a * (1 - amount) + b * amount).rounded()) << shift
+        }
+        return ArtColor(channel(16) | channel(8) | channel(0), alpha: alpha)
+    }
+}
+
+/// 사무실 공통 색 (설계서 §9.2 주간 팔레트, 미리보기와 같은 값). 밤 색은 `NightPalette`가 이 값에서 만듭니다 (M6(6)).
 public enum Swatch: String, Hashable, Sendable, CaseIterable {
     case ink, shadow, wall, wallTrim, baseboard, floor, floorLine
     case wood, woodTop, woodDark, metal, metalDot, screenGlow
@@ -161,7 +227,29 @@ public struct ArtShape: Hashable, Sendable {
     }
 }
 
+extension ArtShape {
+    /// 조명에 맞춘 색으로 (낮이면 그대로)
+    public func lit(_ lighting: Lighting) -> ArtShape {
+        guard lighting == .night else { return self }
+        var copy = self
+        copy.fill = fill.map(NightPalette.paint)
+        copy.stroke = stroke.map(NightPalette.paint)
+        return copy
+    }
+}
+
+extension ArtLayer {
+    public func lit(_ lighting: Lighting) -> ArtLayer {
+        guard lighting == .night else { return self }
+        return ArtLayer(name, depth: depth, shapes.lit(lighting))
+    }
+}
+
 extension Array where Element == ArtShape {
+    public func lit(_ lighting: Lighting) -> [ArtShape] {
+        lighting == .night ? map { $0.lit(lighting) } : self
+    }
+
     public func transformed(scale: Double = 1, offset: MapPoint = .zero) -> [ArtShape] {
         map { $0.transformed(scale: scale, offset: offset) }
     }

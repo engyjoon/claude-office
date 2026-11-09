@@ -6,7 +6,8 @@ import OfficeCore
 public enum SVGRenderer {
     /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
     /// `crop`을 주면 그 지도 영역만 잘라 그립니다 (미니 사무실, 말풍선도 그 안에 가둠).
-    public static func render(stage: Stage, overlay: OverlayOptions? = .init(), crop: MapRect? = nil) -> String {
+    /// `lighting`이 밤이면 가구를 밤 팔레트로, 사람 있는 책상에 불을 켜고, 발밑 그림자를 빛 웅덩이로 그립니다 (M6(6)).
+    public static func render(stage: Stage, overlay: OverlayOptions? = .init(), crop: MapRect? = nil, lighting: Lighting = .day) -> String {
         let layout = stage.layout
         // 사무실 둘레에 여백을 두고(앱과 같음), 여백에는 벽·바닥만 이어 그립니다
         let pad = OfficeLayout.padding
@@ -14,13 +15,19 @@ public enum SVGRenderer {
         let (width, height) = (extent.width, extent.height)
         var overlay = overlay
         if crop != nil, overlay != nil, overlay?.bounds == nil { overlay?.bounds = extent }
+        overlay?.lighting = lighting
         var body = ""
         let layers = OfficeArt.layers(
-            layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk)
-            + OfficeArt.liveLayers(stage: stage)
+            layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
+            lighting: lighting)
+            + OfficeArt.liveLayers(stage: stage, lighting: lighting)
 
-        for layer in layers where layer.depth == -.infinity {
+        // 맨 뒤 층: 바탕(바닥·러그) → 책상 불빛 → 나머지 (앱도 같은 순서)
+        for (index, layer) in layers.enumerated() where layer.depth == -.infinity {
             body += layer.shapes.map { element($0, colors: nil) }.joined()
+            if index == 0, lighting == .night {
+                body += OfficeArt.litDesks(stage: stage).flatMap(OfficeArt.deskLight(at:)).map { element($0, colors: nil) }.joined()
+            }
         }
         enum Item {
             case layer(ArtLayer)
@@ -42,7 +49,7 @@ public enum SVGRenderer {
         for item in items {
             switch item {
             case .layer(let layer): body += layer.shapes.map { element($0, colors: nil) }.joined()
-            case .actor(let actor): body += character(actor, time: stage.time)
+            case .actor(let actor): body += character(actor, time: stage.time, lighting: lighting)
             case .legs(let actor, let seat): body += seatedLegs(actor, seat)
             }
         }
@@ -65,7 +72,7 @@ public enum SVGRenderer {
         return "<g class=\"\(item.kind.rawValue)\" transform=\"\(transform)\"\(opacity)>" + item.shapes.map { element($0, colors: nil) }.joined() + "</g>"
     }
 
-    static func character(_ actor: StageActor, time: Double) -> String {
+    static func character(_ actor: StageActor, time: Double, lighting: Lighting = .day) -> String {
         let pose = RigAnimator.pose(for: actor, time: time)
         let colors = CharacterArt.colors(for: actor.agent.profile.appearance)
         let appearance = actor.agent.profile.appearance
@@ -95,7 +102,7 @@ public enum SVGRenderer {
         inner += group("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
         let scaleX = pose.mirrored ? -1.0 : 1.0
         return "<g transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
-            + (seated ? "" : CharacterArt.shadow.map { element($0, colors: colors) }.joined())
+            + (seated ? "" : CharacterArt.shadow(lighting).map { element($0, colors: colors) }.joined())
             + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g></g>"
     }
 

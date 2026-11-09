@@ -103,3 +103,57 @@ public struct MotionSettings: Hashable, Sendable {
         return alwaysReduce ? "지금: 줄이는 중 (앱에서 항상 켬)" : "지금: 줄이는 중 (시스템 설정을 따름)"
     }
 }
+
+/// 사무실 조명을 켜는 기준 (M6(6), 설정 → 일반 "사무실 조명"). 밤이면 사무실 장면을 저녁 조명으로 그립니다.
+public enum LightingMode: String, Hashable, Sendable, CaseIterable {
+    /// macOS 모양(라이트·다크)을 따름. 직원 패널·현황 줄과 늘 맞고, macOS "자동" 모양이면 해 질 녘에 저절로 바뀝니다.
+    case system
+    /// 해 질 녘~새벽 (위치 정보 없이 고정 시각 19시~7시)
+    case evening
+    case alwaysDay
+    case alwaysNight
+
+    public static let settingsKey = "office.lighting"
+    /// 해 질 녘 모드에서 밤이 시작하는 시각과 끝나는 시각 (시)
+    public static let nightStartHour = 19
+    public static let nightEndHour = 7
+
+    public init(store: SettingsStore) {
+        self = (store.object(forKey: Self.settingsKey) as? String).flatMap(LightingMode.init(rawValue:)) ?? .system
+    }
+
+    public func save(to store: SettingsStore) {
+        store.set(rawValue, forKey: Self.settingsKey)
+    }
+
+    /// 지금 밤인지
+    /// - Parameters:
+    ///   - systemDark: macOS가 다크 모양인지
+    ///   - hour: 지금 시각의 시 (0~23, 사용자 달력 기준)
+    public func isNight(systemDark: Bool, hour: Int) -> Bool {
+        switch self {
+        case .system: systemDark
+        case .evening: hour >= Self.nightStartHour || hour < Self.nightEndHour
+        case .alwaysDay: false
+        case .alwaysNight: true
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .system: "시스템 모양 따라"
+        case .evening: "해 질 녘~새벽 (19시~7시)"
+        case .alwaysDay: "항상 낮"
+        case .alwaysNight: "항상 밤"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .system: "macOS가 다크 모드면 밤이에요. 시스템 설정 → 모양을 \"자동\"으로 두면 해 질 녘에 맞춰 바뀌어요."
+        case .evening: "다크 모드와 상관없이 저녁 7시부터 아침 7시까지 밤이에요."
+        case .alwaysDay: "늘 밝은 낮 사무실이에요."
+        case .alwaysNight: "늘 불을 켠 저녁 사무실이에요."
+        }
+    }
+}
