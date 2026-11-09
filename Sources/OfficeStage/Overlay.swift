@@ -120,7 +120,7 @@ public enum Overlay {
             }
             for actor in actors where !grouped.contains(actor.id) {
                 guard let pill = actor.pill else { continue }
-                let label = options.privacy == .summary ? pill.category.summaryLabel : pill.text
+                let label = options.privacy == .summary ? pill.summary : pill.text
                 let text = truncate(label, maxPillCharacters)
                 let width = TextMetrics.width(text, size: 9.5) + 26
                 let anchor = actor.position + MapPoint(0, headTop)

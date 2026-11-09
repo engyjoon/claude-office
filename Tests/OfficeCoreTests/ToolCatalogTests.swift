@@ -27,7 +27,7 @@ struct ToolCatalogTests {
         #expect(subject("Grep", ["pattern": "TODO"]) == "\"TODO\"")
         #expect(subject("Agent", ["description": "RouterConfig 리뷰", "subagent_type": "code-reviewer"]) == "RouterConfig 리뷰")
         #expect(subject("TodoWrite", ["todos": [1, 2, 3]]) == "할 일 3개")
-        #expect(subject("mcp__github__create_issue", [:]) == "github · create_issue")
+        #expect(subject("mcp__github__create_issue", [:]) == nil)  // MCP 문구는 MCPNames (M6(5))
         #expect(subject("Edit", [:]) == nil)
     }
 

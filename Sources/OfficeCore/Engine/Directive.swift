@@ -85,6 +85,15 @@ public struct Bubble: Hashable, Sendable {
 public struct StatusPill: Hashable, Sendable {
     public var category: ToolCategory
     public var text: String
+    /// 요약 수준에서 보일 말: 보통 종류 이름("파일 읽는 중"), MCP는 "브라우저 사용 중"·"할 일 목록 정리" (M6(5)).
+    /// 설정을 요약으로 바꾸면 화면(Overlay)이 칩을 다시 받지 않고 이 말로 바꿔 그립니다.
+    public var summary: String
+
+    public init(category: ToolCategory, text: String, summary: String? = nil) {
+        self.category = category
+        self.text = text
+        self.summary = summary ?? category.summaryLabel
+    }
 }
 
 public enum Prop: String, Hashable, Sendable {

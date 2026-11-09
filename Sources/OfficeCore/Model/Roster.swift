@@ -221,11 +221,14 @@ public struct Roster: Hashable, Sendable {
 
     static func detail(for agent: Agent) -> String? {
         switch agent.activity {
+        case .working(let call) where call.category == .mcp:
+            return MCPNames.text(call.name, detailed: true)  // "브라우저 페이지 이동" (M6(5))
         case .working(let call) where call.category != .report:
             return call.subject ?? call.name
         case .waitingForPermission(let call):
             guard let call else { return "승인이 필요해요" }
             if call.asksUser { return call.waitRequest }
+            if call.category == .mcp { return MCPNames.text(call.name, detailed: true) }
             return call.subject.map { "\(call.name) · \($0)" } ?? call.name
         default:
             return agent.role == .member ? agent.task : nil

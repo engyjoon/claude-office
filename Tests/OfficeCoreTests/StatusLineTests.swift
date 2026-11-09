@@ -377,18 +377,13 @@ struct StatusLineTests {
 
     // MARK: - 문구 다듬기
 
-    @Test("MCP 도구는 사람이 읽는 말로, 모르는 것은 도구 이름만")
+    @Test("MCP 도구는 사람이 읽는 말로 (자세한 경우는 MCPNamesTests)")
     func mcpNames() {
         #expect(MCPNames.label("mcp__ccd_turn__update_plan", detailed: true) == "할 일 목록 정리")
         #expect(MCPNames.label("mcp__ccd_turn__update_plan", detailed: false) == "할 일 목록 정리")
-        #expect(MCPNames.label("mcp__ccd_session__start_session", detailed: true) == "새 세션 시작")
         #expect(MCPNames.label("mcp__Claude_Browser__navigate", detailed: true) == "브라우저")
-        #expect(MCPNames.detail("mcp__Claude_Browser__navigate") == "navigate")
+        #expect(MCPNames.detail("mcp__Claude_Browser__navigate") == "페이지 이동")
         #expect(MCPNames.detail("mcp__ccd_turn__update_plan") == nil)
-        #expect(MCPNames.label("mcp__1a59c906-04da__create_issue", detailed: true) == "create_issue")
-        #expect(MCPNames.detail("mcp__1a59c906-04da__create_issue") == nil)
-        // 요약·비공개에서 모르는 도구는 이름 대신 "MCP"
-        #expect(MCPNames.label("mcp__1a59c906-04da__create_issue", detailed: false) == "MCP")
         #expect(MCPNames.split("mcp__srv__a__b")! == ("srv", "a__b"))
     }
 
@@ -401,7 +396,7 @@ struct StatusLineTests {
         }
         office.send(hook.tool("PreToolUse", "mcp__claude-in-chrome__navigate", id: "n1", input: ["url": "https://x.dev"]))
         let texts = office.line(level, selected: office.main).lines.map(\.segment.text)
-        #expect(texts == ["할 일 목록 정리 2개", level == .detailed ? "Chrome navigate" : "Chrome"])
+        #expect(texts == ["할 일 목록 정리 2개", level == .detailed ? "Chrome 페이지 이동" : "Chrome"])
         let timeline = AgentTimeline.make(agent: office.main, state: office.engine.state, journal: office.engine.journal, privacy: level)
         #expect(timeline.items.map(\.text) == texts)
         for text in texts { #expect(!text.contains("ccd_turn") && !text.contains("mcp__")) }

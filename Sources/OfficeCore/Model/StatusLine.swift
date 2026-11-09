@@ -353,11 +353,11 @@ public struct StatusLine: Hashable, Sendable {
             }
         }
 
-        /// 상세면 "Edit auth.ts", "브라우저 navigate", 아니면 "Edit", "브라우저"
+        /// 상세면 "Edit auth.ts", "브라우저 페이지 이동", 아니면 "Edit", "브라우저"
         func toolText(_ call: ToolCall) -> String {
+            if call.category == .mcp { return MCPNames.text(call.name, detailed: detailed) }
             guard detailed, call.category != .report else { return toolLabel(call) }
-            let subject = call.category == .mcp ? MCPNames.detail(call.name) : call.subject
-            guard let subject, !subject.isEmpty else { return toolLabel(call) }
+            guard let subject = call.subject, !subject.isEmpty else { return toolLabel(call) }
             return "\(toolLabel(call)) \(subject)"
         }
 

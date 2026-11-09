@@ -876,21 +876,23 @@ public struct Choreographer: Sendable {
     }
 
     private func pill(for call: ToolCall) -> StatusPill? {
+        // MCP는 사전의 말 (M6(5)): 상세 "브라우저 페이지 이동", 요약 "브라우저 사용 중"
+        let summary = call.category == .mcp ? MCPNames.summary(call.name) ?? call.category.summaryLabel : call.category.summaryLabel
         switch privacy {
         case .detailed:
             let text: String
             if call.category == .report {
                 text = call.category.summaryLabel  // 넘기는 메시지 내용은 보여주지 않습니다
             } else if call.category == .mcp {
-                text = "MCP · \(call.subject ?? call.name)"
+                text = MCPNames.short(call.name, detailed: true)
             } else if let subject = call.subject {
                 text = "\(call.name) · \(subject)"
             } else {
                 text = call.name
             }
-            return StatusPill(category: call.category, text: text)
+            return StatusPill(category: call.category, text: text, summary: summary)
         case .summary:
-            return StatusPill(category: call.category, text: call.category.summaryLabel)
+            return StatusPill(category: call.category, text: summary, summary: summary)
         case .hidden:
             return nil
         }
@@ -902,6 +904,11 @@ public struct Choreographer: Sendable {
         guard privacy == .detailed, let call else { return ("permission.generic", [:]) }
         if call.category == .shell, let subject = call.subject {
             return ("permission.shell", ["subject": ToolCatalog.truncate(subject, 18)])
+        }
+        if call.category == .mcp {
+            // "할 일 목록 정리 해도 될까요?" / "브라우저 써도 될까요?" (M6(5))
+            if MCPNames.isAction(call.name) { return ("permission.action", ["action": MCPNames.label(call.name, detailed: true)]) }
+            return ("permission.mcp", ["tool": MCPNames.label(call.name, detailed: true)])
         }
         return ("permission.tool", ["tool": call.name])
     }
