@@ -71,6 +71,17 @@ public enum MiniCast {
         return cast
     }
 
+    /// 칸 번호를 1부터 빈틈없이 다시 매깁니다 (순서는 그대로).
+    /// 앞 칸 서브가 퇴근하면 뒤 칸 서브가 당겨 앉습니다 (M6(9b): 사무실의 "빈 책상 없음"과 같게. 명패 없는 빈 책상이 남았음).
+    /// 퇴근하는 사람이 아직 무대에 있을 때는 부르지 않습니다 (`OfficeFloor`): 그 사람이 자기 책상에서 마무리하는 동안 겹치지 않게.
+    public static func packed(_ cast: [AgentID: Seat]) -> [AgentID: Seat] {
+        var packed: [AgentID: Seat] = [:]
+        for (index, id) in cast.sorted(by: { ($0.value.desk, $0.key) < ($1.value.desk, $1.key) }).map(\.key).enumerated() {
+            packed[id] = Seat(desk: index + 1)
+        }
+        return packed
+    }
+
     /// 0 = 답변 대기, 1 = 일하는 중, 2 = 쉬는 중
     static func urgency(_ agent: Agent) -> Int {
         needsAnswer(agent) ? 0 : isResting(agent) ? 2 : 1

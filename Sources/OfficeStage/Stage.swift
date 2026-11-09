@@ -430,7 +430,8 @@ public struct Stage: Sendable {
     }
 
     /// 앉힐 책상을 바꿉니다. 바뀐 사람이 예전 칸에 있거나 가는 중이면 새 칸으로 옮깁니다 (걷던 중이면 새 칸으로 걷고, 아니면 바로).
-    public mutating func setSeatMap(_ map: [AgentID: Seat]) {
+    /// - Parameter walking: 예전 칸에 있는 사람도 일어나 새 칸으로 걸어가 하던 자세를 잇습니다 (미니에서 칸을 당겨 앉을 때, M6(9b))
+    public mutating func setSeatMap(_ map: [AgentID: Seat], walking: Bool = false) {
         guard map != seatMap else { return }
         let old = seatMap
         seatMap = map
@@ -441,6 +442,14 @@ public struct Stage: Sendable {
             guard before != after, let place = actor.place, place.team == agent.teamID, place.seat == before else { continue }
             if actor.isWalking {
                 walk(id, to: .seat(agent.teamID, agent.seat))
+            } else if walking {
+                // 새 칸 자리는 `seatMap`으로 풀리므로 자기 좌석으로 걸으면 됩니다. 하던 일(지시 대기열)이 끝난 뒤 옮깁니다.
+                var steps: [Directive] = []
+                if actor.seated { steps.append(Directive(id, .stand)) }
+                steps.append(Directive(id, .walk(to: .seat(agent.teamID, agent.seat))))
+                if actor.seated { steps.append(Directive(id, .sit)) }
+                steps.append(Directive(id, .pose(actor.pose)))
+                enqueue(steps)
             } else {
                 release(id)
                 let target = layout.seat(agent.teamID, after)

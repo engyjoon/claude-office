@@ -98,6 +98,56 @@ struct MiniOfficeTests {
         #expect(h.stage.actors.values.allSatisfy { MiniOffice.extent().contains($0.position) })
     }
 
+    @Test("M6(9b): 1번 칸 서브가 퇴근하면, 문 밖으로 나간 뒤 2번 칸 서브가 걸어서 1번 책상으로 옮겨 앉는다 (명패 없는 빈 책상 없음)")
+    func packsAfterLeaving() throws {
+        var h = Self.band()
+        h.hook(start("m"))
+        let team = h.team("m")
+        h.select(.only(team))
+        h.hook(prompt("m"), at: 0.5)
+        for (index, agent) in ["g1", "g2"].enumerated() {
+            for json in delegate("m", "a\(index + 1)", agent: agent) { h.hook(json, at: 1 + Double(index)) }
+        }
+        h.hook(edit("m", "e1", agent: "g1"), at: 4)
+        h.hook(toolHook("PreToolUse", "Read", "m", "r2", agent: "g2"), at: 5)
+        h.run(until: 12)
+        // 서브1 = member-2(칸 1), 서브2 = member-3(칸 2)
+        let g1 = AgentID("member-2"), g2 = AgentID("member-3")
+        #expect(h.floor.plan.seatMap[g1] == Seat(desk: 1))
+        #expect(h.floor.plan.seatMap[g2] == Seat(desk: 2))
+
+        h.hook(on("SubagentStop", #""agent_id":"g1","agent_type":"general-purpose""#, "m"), at: 14)
+        h.hook(on("PostToolUse", #""tool_name":"Agent","tool_use_id":"a1","tool_input":{"subagent_type":"general-purpose"},"tool_response":{"status":"completed"}"#, "m"), at: 14.2)
+        // 퇴근하는 서브1이 무대에 있는 동안: 칸은 그대로라 서브1이 마무리하는 1번 책상에서 겹치지 않음
+        var moved = false
+        var walked = false
+        while h.now < 45 {
+            h.run(until: h.now + 0.25)
+            let leaving = h.stage.actors[g1] != nil
+            if leaving { #expect(h.floor.plan.seatMap[g2] == Seat(desk: 2)) }
+            if h.floor.plan.seatMap[g2] == Seat(desk: 1) {
+                moved = true
+                #expect(!leaving)
+            }
+            if moved, h.stage.actors[g2]?.isWalking == true { walked = true }
+        }
+        #expect(moved && walked)
+        let actor = try #require(h.stage.actors[g2])
+        #expect(actor.position == h.stage.layout.seat(team, Seat(desk: 1)).final)
+        #expect(actor.seated && actor.pose == .reading)
+        #expect(h.stage.layout.rows[0].desks == 2)
+        // 모든 책상에 명패
+        for desk in 0..<h.stage.layout.rows[0].desks { #expect(h.stage.nameplates[team]?[Seat(desk: desk)] != nil) }
+    }
+
+    @Test("칸 다시 매기기: 순서는 그대로, 1부터 빈틈없이")
+    func packed() {
+        let a = AgentID("a"), b = AgentID("b")
+        #expect(MiniCast.packed([b: Seat(desk: 2)]) == [b: Seat(desk: 1)])
+        #expect(MiniCast.packed([a: Seat(desk: 2), b: Seat(desk: 1)]) == [b: Seat(desk: 1), a: Seat(desk: 2)])
+        #expect(MiniCast.packed([:]).isEmpty)
+    }
+
     @Test("칸이 남으면 쉬는 서브도 보여 주고, 일하는 서브가 오면 쉬는 서브가 칸을 내줌")
     func restingFillsEmptySlots() throws {
         var h = Self.band()

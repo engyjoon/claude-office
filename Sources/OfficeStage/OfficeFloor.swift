@@ -150,9 +150,14 @@ public struct OfficeFloor: Sendable {
     }
 
     private func makePlan(_ engine: OfficeEngine) -> FloorPlan {
-        isBand
-            ? FloorPlan.band(state: engine.state, selection: selection, journal: engine.journal, previous: plan.seatMap, slots: subSlots)
-            : FloorPlan.make(state: engine.state, selection: selection, capacity: capacity)
+        guard isBand else { return FloorPlan.make(state: engine.state, selection: selection, capacity: capacity) }
+        var plan = FloorPlan.band(state: engine.state, selection: selection, journal: engine.journal, previous: self.plan.seatMap, slots: subSlots)
+        // 앞 칸이 비면 뒤 칸 서브를 당겨 앉힙니다 (M6(9b)). 퇴근하는 사람(엔진에는 없고 무대에만 남음)이 보고하고
+        // 자기 책상에서 물을 마신 뒤 문 밖으로 나갈 때까지 기다립니다. 바로 당기면 그 책상에서 두 사람이 겹칩니다.
+        if !stage.actors.keys.contains(where: { engine.state.agents[$0] == nil }) {
+            plan.seatMap = MiniCast.packed(plan.seatMap)
+        }
+        return plan
     }
 
     // MARK: - 지시 흘리기
@@ -169,7 +174,8 @@ public struct OfficeFloor: Sendable {
             stage.remove(id)
         }
         syncTeams(state)
-        stage.setSeatMap(next.seatMap)
+        // 미니에서 칸을 당겨 앉을 때는 걸어서 옮깁니다 (M6(9b))
+        stage.setSeatMap(next.seatMap, walking: isBand)
 
         var spawned = Set<AgentID>()
         for directive in directives {
