@@ -84,6 +84,18 @@ struct AccessibilityTextTests {
         #expect(AccessibilityText.statusLines(.empty, now: now) == "내용 없음")
     }
 
+    @Test("미니 머리줄은 화면 문구와 다른 메인 칩을 값으로 읽는다 (M6(7b))")
+    func miniHeader() {
+        let chips = [
+            AccessibilityText.miniChip(main: "메인2", tier: "답변 기다림"), AccessibilityText.miniChip(main: "메인3", tier: nil),
+        ]
+        #expect(AccessibilityText.miniHeader(status: "서브3: 생각 중 · 방금", chips: chips, more: 1)
+            == "서브3: 생각 중 · 방금. 다른 메인: 메인2, 답변 기다림 · 메인3 · 외 1개")
+        #expect(AccessibilityText.miniHeader(status: "메인: 쉬는 중 · 3분 전", chips: []) == "메인: 쉬는 중 · 3분 전")
+        #expect(AccessibilityText.miniHeader(status: "", chips: ["메인2"]) == "다른 메인: 메인2")
+        #expect(AccessibilityText.miniHeader(status: nil, chips: []) == "내용 없음")
+    }
+
     @Test("승인 대기·답변 필요는 처음 생길 때 한 번만 알린다")
     func announcer() {
         var announcer = AccessibilityAnnouncer()

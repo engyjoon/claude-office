@@ -328,29 +328,37 @@ struct MiniHeaderView: View {
         let others = roster.teams.filter { $0.id != current?.id }
             .sorted { Self.rank(focus.tiers[$0.id]) < Self.rank(focus.tiers[$1.id]) }
         let nightPlain = model.isNight && (line == nil || line?.kind == .normal)
-        HStack(spacing: 5) {
-            // 글자가 바뀌는 때만 (M6(1)): 답변 대기 "12초째"는 1초마다, "3분 전"은 1분마다
-            // 미니가 숨어 있으면 멈춥니다
-            TimelineView(NextChangeSchedule { [line, live = model.miniVisible] in live ? Self.nextChange(line, after: $0) : nil }) { context in
-                Text(current == nil ? "아직 출근한 직원이 없어요" : statusText(line, waitingCount: waiting.count, now: context.date))
+        let shown = Array(others.prefix(Self.maxChips))
+        let extra = max(others.count - Self.maxChips, 0)
+        // 글자가 바뀌는 때만 (M6(1)): 답변 대기 "12초째"는 1초마다, "3분 전"은 1분마다
+        // 미니가 숨어 있으면 멈춥니다. 칩까지 안에 두는 것은 VoiceOver 값이 화면 문구와 같은 시각을 쓰게 하려고 (M6(7b))
+        TimelineView(NextChangeSchedule { [line, live = model.miniVisible] in live ? Self.nextChange(line, after: $0) : nil }) { context in
+            let headline = current == nil ? "아직 출근한 직원이 없어요" : statusText(line, waitingCount: waiting.count, now: context.date)
+            HStack(spacing: 5) {
+                Text(headline)
                     .font(.system(size: 10.5, weight: line?.kind == .normal ? .regular : .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(nightPlain ? Self.nightInk : Self.ink)
+                    .layoutPriority(-1)
+                Spacer(minLength: 0)
+                ForEach(shown) { team in
+                    chip(team, tier: focus.tiers[team.id] ?? .none)
+                }
+                if extra > 0 {
+                    Text("+\(extra)")
+                        .font(.system(size: 9.5))
+                        .padding(.horizontal, 4)
+                        .background(Capsule().fill(.white))
+                        .overlay(Capsule().stroke(contrast == .increased ? Self.ink : Color(hex: 0xCFC6D9)))
+                }
             }
-            .layoutPriority(-1)
-            Spacer(minLength: 0)
-            ForEach(others.prefix(Self.maxChips)) { team in
-                chip(team, tier: focus.tiers[team.id] ?? .none)
-            }
-            if others.count > Self.maxChips {
-                Text("+\(others.count - Self.maxChips)")
-                    .font(.system(size: 9.5))
-                    .padding(.horizontal, 4)
-                    .background(Capsule().fill(.white))
-                    .overlay(Capsule().stroke(contrast == .increased ? Self.ink : Color(hex: 0xCFC6D9)))
-                    .accessibilityLabel("다른 메인 \(others.count - Self.maxChips)개 더")
-            }
+            // VoiceOver (M6(7b)): 라벨 "미니 사무실 머리줄", 값 = 화면 문구 + 다른 메인 칩("메인2, 답변 기다림")
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel("미니 사무실 머리줄")
+            .accessibilityValue(AccessibilityText.miniHeader(
+                status: headline, chips: shown.map { Self.chipLabel($0, tier: focus.tiers[$0.id] ?? .none) }, more: extra))
         }
         .foregroundStyle(Self.ink)
         .padding(.leading, 10)
@@ -361,9 +369,6 @@ struct MiniHeaderView: View {
                 : nightPlain ? Self.nightPaper : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(model.isNight ? Self.nightLine : Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
-        // VoiceOver (M6(7)): "미니 사무실 머리줄" + 상태 문구, 다른 메인 칩은 "메인2, 답변 기다림"처럼 말로
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("미니 사무실 머리줄")
     }
 
     /// 다른 메인 칩 순서: 답변 필요 → 완료 → 그 밖
@@ -384,11 +389,6 @@ struct MiniHeaderView: View {
         case .completed: ("✉", Self.done, 0x5DBB7A)
         default: ("", .white, 0xCFC6D9)
         }
-        let spoken: String? = switch tier {
-        case .answer: "답변 기다림"
-        case .completed: "새 응답"
-        default: nil
-        }
         return HStack(spacing: 3) {
             Circle().fill(Palette.team(team.colorIndex)).frame(width: 6, height: 6)
             Text(icon + (number.isEmpty ? "메인" : number))
@@ -398,8 +398,16 @@ struct MiniHeaderView: View {
         .background(Capsule().fill(fill))
         .overlay(Capsule().stroke(contrast == .increased ? Self.ink : Color(hex: stroke), lineWidth: contrast == .increased ? 1.2 : 1))
         .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(AccessibilityText.miniChip(main: team.mainName, tier: spoken))
+    }
+
+    /// 칩을 말로: "메인2, 답변 기다림" / "메인3, 새 응답" / "메인1"
+    private static func chipLabel(_ team: RosterTeam, tier: MiniFocus.Tier) -> String {
+        let spoken: String? = switch tier {
+        case .answer: "답변 기다림"
+        case .completed: "새 응답"
+        default: nil
+        }
+        return AccessibilityText.miniChip(main: team.mainName, tier: spoken)
     }
 
     /// 머리줄에 보여 줄 한 사람: 답변을 기다리는 사람이 있으면 가장 오래 기다린 사람, 아니면 가장 마지막으로 상태가 바뀐 사람

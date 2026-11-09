@@ -109,6 +109,16 @@ public enum AccessibilityText {
         tier.map { "\(main), \($0)" } ?? main
     }
 
+    /// 미니 사무실 머리줄 값 (M6(7b)): 화면 문구 + 다른 메인 칩.
+    /// "서브3: 생각 중 · 방금. 다른 메인: 메인2, 답변 기다림 · 메인3 · 외 1개"
+    public static func miniHeader(status: String?, chips: [String], more: Int = 0) -> String {
+        var parts: [String] = []
+        if let status = clean(status) { parts.append(status) }
+        let others = chips.compactMap(clean) + (more > 0 ? ["외 \(more)개"] : [])
+        if !others.isEmpty { parts.append("다른 메인: " + others.joined(separator: " · ")) }
+        return parts.isEmpty ? "내용 없음" : parts.joined(separator: ". ")
+    }
+
     private static func clean(_ text: String?) -> String? {
         guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         return text

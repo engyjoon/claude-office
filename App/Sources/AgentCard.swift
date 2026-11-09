@@ -303,8 +303,9 @@ private struct TimelineRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .help(item.text(now: now))
+        // help는 묶은 뒤에 (M6(7b)): 묶기 전에 붙이면 안쪽 Text마다 붙어 AXHelp가 두 번 겹쳐 읽힘
         .accessibilityElement(children: .combine)
+        .help(item.text(now: now))
     }
 
     private func styled(now: Date) -> AttributedString {
