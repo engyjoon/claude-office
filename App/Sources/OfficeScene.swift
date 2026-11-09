@@ -68,6 +68,10 @@ final class OfficeScene: SKScene {
     var onViewportChange: ((CGSize) -> Void)?
     /// 띠에서 끌어 창을 옮긴 뒤 (모서리에 붙이기)
     var onWindowDragged: (() -> Void)?
+    /// 띠에서 오른쪽 클릭·Ctrl+클릭 (M6(11)): 누른 직원(빈 곳이면 nil)과 이벤트. 미니 패널이 메뉴를 엽니다.
+    var onContextMenu: ((AgentID?, NSEvent) -> Void)?
+    /// 띠에서 직원 요소의 VoiceOver 메뉴 보기 (M6(11))
+    var onAccessibilityMenu: ((AgentID) -> Bool)?
     private var reportedSize: CGSize?
     var selectedAgent: AgentID? {
         didSet {
@@ -464,6 +468,11 @@ final class OfficeScene: SKScene {
     override func mouseDown(with event: NSEvent) {
         let point = event.location(in: world)
         let hit = character(at: point)
+        if case .band = framing, event.modifierFlags.contains(.control), let onContextMenu {
+            cancelPendingClick()
+            onContextMenu(hit, event)
+            return
+        }
         if case .band = framing, let window = view?.window {
             if event.clickCount >= 2, let pending = pendingClick {
                 pending.work.cancel()
@@ -495,6 +504,13 @@ final class OfficeScene: SKScene {
             return
         }
         onSelect?(hit)
+    }
+
+    /// 미니 오른쪽 클릭 (M6(11)): 누른 직원과 함께 메뉴. 사무실 창은 예전처럼 아무 일도 하지 않습니다.
+    override func rightMouseDown(with event: NSEvent) {
+        guard case .band = framing, let onContextMenu else { return super.rightMouseDown(with: event) }
+        cancelPendingClick()
+        onContextMenu(character(at: event.location(in: world)), event)
     }
 
     /// 미니에서 캐릭터 한 번 누름을 확정하기까지 기다리는 시간 (시스템 더블클릭 간격, 너무 길면 0.4초)

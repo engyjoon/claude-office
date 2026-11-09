@@ -104,6 +104,7 @@ final class AppModel {
     @ObservationIgnored private var miniPanel: MiniOfficePanelController?
     /// 사무실 창 열기 (SwiftUI 장면의 openWindow. 메뉴바 아이콘이 나타날 때 등록)
     @ObservationIgnored private var openOfficeWindowAction: (() -> Void)?
+    @ObservationIgnored private var openSettingsAction: (() -> Void)?
     @ObservationIgnored private let soundPlayer: SoundPlayer
     @ObservationIgnored private let notifier = Notifier()
     @ObservationIgnored private var lastFrame = Date()
@@ -656,7 +657,7 @@ final class AppModel {
         miniSettings = settings
         settings.save(to: .standard)
         if settings.enabled != old.enabled { syncMiniPanel() }
-        if settings.opacity != old.opacity { miniPanel?.setOpacity(settings.opacity) }
+        if settings.opacity != old.opacity || settings.hoverOpaque != old.hoverOpaque { miniPanel?.refreshAlpha() }
         if settings.autoSwitch != old.autoSwitch { refreshMiniFocus() }
     }
 
@@ -718,6 +719,17 @@ final class AppModel {
     /// SwiftUI 장면의 창 열기 동작을 받아 둡니다 (메뉴바 아이콘·메뉴가 나타날 때)
     func registerOpenWindow(_ action: OpenWindowAction) {
         openOfficeWindowAction = { action(id: WindowID.office) }
+    }
+
+    /// SwiftUI 설정 창 열기 동작을 받아 둡니다 (미니 오른쪽 클릭 메뉴 "설정…", M6(11))
+    func registerOpenSettings(_ action: OpenSettingsAction) {
+        openSettingsAction = { action() }
+    }
+
+    func openSettingsWindow() {
+        NSApp.activate()
+        openSettingsAction?()
+        SettingsWindow.bringToFront()
     }
 
     func openOfficeWindow() {

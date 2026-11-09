@@ -404,6 +404,7 @@ struct MiniOfficeSettingsView: View {
                             .frame(width: 40, alignment: .trailing)
                     }
                 }
+                Toggle("마우스를 올리면 진하게", isOn: mini(\.hoverOpaque))
                 LabeledContent("위치") {
                     Button("기본 위치로 (화면 오른쪽 아래)") { model.resetMiniPosition() }
                         .disabled(!model.miniSettings.enabled)
@@ -411,7 +412,7 @@ struct MiniOfficeSettingsView: View {
             } header: {
                 Text("모양과 위치")
             } footer: {
-                Footnote("미니는 끌어서 옮길 수 있고, 디스플레이마다 위치를 기억해요.")
+                Footnote("미니는 끌어서 옮길 수 있고, 디스플레이마다 위치를 기억해요. 미니를 오른쪽 클릭하면 위치(네 구석)와 투명도를 바로 바꿀 수 있어요.")
             }
         }
         .formStyle(.grouped)

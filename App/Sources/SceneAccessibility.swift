@@ -50,6 +50,18 @@ final class CharacterAccessibilityElement: NSAccessibilityElement {
         return true
     }
 
+    /// 메뉴 보기 (VO+Shift+M, M6(11)): 미니에서만 그 직원 메뉴(오른쪽 클릭과 같음)
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let scene, scene.isBand, let show = scene.onAccessibilityMenu else { return false }
+        return show(agent)
+    }
+
+    /// 사무실 창 직원에는 메뉴가 없으므로 메뉴 보기 동작을 내놓지 않습니다
+    override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+        if selector == #selector(accessibilityPerformShowMenu) { return scene?.isBand == true }
+        return super.isAccessibilitySelectorAllowed(selector)
+    }
+
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
         guard let focus = row?.focusLabel else { return nil }
         return [NSAccessibilityCustomAction(name: AccessibilityText.moveActionName(focusLabel: focus)) { [weak self] in
