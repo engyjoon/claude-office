@@ -102,6 +102,10 @@ make uninstall
 - 훅 페이로드 수집 안내 (M0): [docs/M0-capture.md](docs/M0-capture.md)
 - 맥에서 빌드하고 확인하기 (M2): [docs/M2-build.md](docs/M2-build.md)
 
+## 라이선스
+
+[MIT 라이선스](LICENSE)입니다. 저작권 표시와 라이선스 문구를 함께 두면 누구나 자유롭게 쓰고, 고치고, 다시 배포할 수 있습니다. 아무 보증 없이 있는 그대로 제공합니다.
+
 ## 진행 상황
 
 <details>
