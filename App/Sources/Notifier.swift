@@ -29,6 +29,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// 권한을 묻는 동안 쌓아 둔 알림
     private var queued: [OfficeNotice] = []
     private var requesting = false
+    /// 보냈고 아직 코어가 지우지 않은 알림 식별자
+    private var live: Set<String> = []
+    /// 알림 센터에 남아 있는지 확인하는 중인 제목 바꿈 (식별자 → 가장 새 알림, M6(14))
+    private var retitling: [String: OfficeNotice] = [:]
 
     override init() {
         super.init()
@@ -93,10 +97,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func apply(_ actions: [NoticeAction]) {
         for action in actions {
             switch action {
+            case .post(let notice) where notice.onlyIfDelivered:
+                retitle(notice)
             case .post(let notice):
                 post(notice)
             case .remove(let ids):
                 queued.removeAll { ids.contains($0.id) }
+                live.subtract(ids)
+                ids.forEach { retitling[$0] = nil }
                 center.removeDeliveredNotifications(withIdentifiers: ids)
                 center.removePendingNotificationRequests(withIdentifiers: ids)
             }
@@ -114,6 +122,32 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             requestAuthorization()
         default:
             break  // 거부됨: 메뉴바 배지와 사무실 연출만
+        }
+    }
+
+    /// 직함이 바뀐 알림 (M6(14)): 알림 센터에 아직 남아 있을 때만 같은 식별자로 조용히 바꿉니다.
+    /// 사용자가 지운 알림은 되살리지 않고, 권한을 묻는 동안 쌓아 둔 알림이면 그 제목만 바꿉니다.
+    private func retitle(_ notice: OfficeNotice) {
+        if let index = queued.firstIndex(where: { $0.id == notice.id }) {
+            queued[index].title = notice.title
+            return
+        }
+        guard live.contains(notice.id), authorization == .authorized || authorization == .provisional else { return }
+        let checking = retitling[notice.id] != nil
+        retitling[notice.id] = notice
+        guard !checking else { return }
+        center.getDeliveredNotifications { delivered in
+            let ids = Set(delivered.map(\.request.identifier))
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let latest = self.retitling.removeValue(forKey: notice.id), self.live.contains(notice.id) else { return }
+                    if ids.contains(notice.id) {
+                        self.deliver(latest)
+                    } else {
+                        self.live.remove(notice.id)  // 사용자가 지움
+                    }
+                }
+            }
         }
     }
 
@@ -137,6 +171,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if let term = notice.term { info["term"] = term }
         if let host = notice.hostSession { info["hostSession"] = host }
         content.userInfo = info
+        live.insert(notice.id)
         center.add(UNNotificationRequest(identifier: notice.id, content: content, trigger: nil))
     }
 

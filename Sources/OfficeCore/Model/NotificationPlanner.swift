@@ -27,8 +27,8 @@ public struct OfficeNotice: Identifiable, Hashable, Sendable {
     /// 알림 식별자. 같은 대기·같은 세션의 알림은 같은 식별자라 알림 센터에서 서로 바꿔 끼우고 지울 수 있습니다.
     public let id: String
     public let kind: Kind
-    /// "메인1 승인 대기", "서브2 응답 완료"
-    public let title: String
+    /// "메인1 승인 대기", "서브2 응답 완료". 맨 앞 낱말이 그 사람의 직함입니다 (직함이 바뀌면 이것만 바꿔 다시 보냄, M6(14))
+    public var title: String
     /// 디렉토리 이름 ("claude-office")
     public let subtitle: String
     /// "Bash npm test · 승인이 필요해요" (요약·비공개: "Bash · 승인이 필요해요")
@@ -40,7 +40,9 @@ public struct OfficeNotice: Identifiable, Hashable, Sendable {
     /// Claude 데스크톱 앱 세션 id (`local_…`). 있으면 알림을 눌렀을 때 데스크톱 앱을 앞으로 가져옵니다.
     public let hostSession: String?
     /// 이미 띄운 알림의 내용만 보강 (소리·배너 없이 조용히 바꿈)
-    public let isUpdate: Bool
+    public var isUpdate: Bool
+    /// 알림 센터에 아직 남아 있을 때만 바꿈 (사용자가 지운 알림을 되살리지 않게). 직함이 바뀐 알림에 씁니다 (M6(14))
+    public var onlyIfDelivered: Bool = false
 }
 
 public enum NoticeAction: Hashable, Sendable {
@@ -62,6 +64,8 @@ public enum NoticeAction: Hashable, Sendable {
 /// - 응답 완료(Stop): 설정에서 켰을 때만. 세션마다 식별자가 하나라 새 완료 알림이 이전 것을 바꿉니다.
 ///   그 세션에 새 요청이 오거나 세션이 끝나면 지웁니다.
 /// - 표시 수준(§7.4): 상세가 아니면 파일명·명령을 숨기고 도구 종류만 씁니다 (현황 줄과 같은 규칙).
+/// - 직함이 바뀌면 (M6(14): 빈 책상으로 옮겨 앉아 서브 번호가 바뀜, 승진, "서브" ↔ "서브1") 띄워 둔 그 사람의 알림 제목도
+///   같은 식별자로 조용히 바꿉니다. 알림 센터에 남아 있을 때만 바꿔(`onlyIfDelivered`) 명패와 알림의 이름이 늘 같습니다.
 public struct NotificationPlanner: Sendable {
     public var settings: NotificationSettings
 
@@ -79,6 +83,8 @@ public struct NotificationPlanner: Sendable {
     /// 답변 필요 알림을 이미 판단한 응답 (세션 → 그 응답이 끝난 때). 같은 응답이면 판정이 바뀌었다 돌아와도
     /// (마지막 문장 → 데스크톱 앱 요약) 다시 띄우지 않습니다.
     private(set) var repliedTurns: [SessionID: Date] = [:]
+    /// 띄워 두고 아직 지우지 않은 알림 (식별자 → 마지막으로 보낸 알림). 직함이 바뀌면 제목을 고쳐 다시 보냅니다 (M6(14))
+    private(set) var shown: [String: OfficeNotice] = [:]
     private var serial = 0
 
     public init(settings: NotificationSettings = .init()) {
@@ -138,7 +144,36 @@ public struct NotificationPlanner: Sendable {
             }
         }
         if !cleared.isEmpty { actions.append(.remove(cleared)) }
+        retitle(state: state, actions: &actions)
         return actions
+    }
+
+    /// 보낸·지운 알림을 기억하고, 띄워 둔 알림 중 그 사람의 직함이 바뀐 것은 제목만 고쳐 조용히 다시 보냅니다 (M6(14)).
+    private mutating func retitle(state: OfficeState, actions: inout [NoticeAction]) {
+        for action in actions {
+            switch action {
+            case .post(let notice): shown[notice.id] = notice
+            case .remove(let ids): for id in ids { shown[id] = nil }
+            }
+        }
+        for (id, notice) in shown.sorted(by: { $0.key < $1.key }) {
+            guard let agent = state.agents[notice.agent],
+                let renamed = Self.retitled(notice, as: agent.title.label)
+            else { continue }
+            shown[id] = renamed
+            actions.append(.post(renamed))
+        }
+    }
+
+    /// 제목의 맨 앞 직함을 바꾼 알림. 이미 그 직함이면 nil
+    static func retitled(_ notice: OfficeNotice, as label: String) -> OfficeNotice? {
+        let parts = notice.title.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let head = parts.first, head != label[...] else { return nil }
+        var renamed = notice
+        renamed.title = parts.count > 1 ? "\(label) \(parts[1])" : label
+        renamed.isUpdate = true
+        renamed.onlyIfDelivered = true
+        return renamed
     }
 
     /// 답변 필요 (M6(4c)): 응답마다 한 번. 질문 도구의 승인 대기 알림이 떠 있거나, 사용자가 데스크톱 앱에서 그 세션을

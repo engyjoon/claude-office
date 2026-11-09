@@ -218,6 +218,77 @@ struct NotificationPlannerTests {
         #expect(posts(office.send(hook.make("SubagentStop", agent: reviewer))).isEmpty)
     }
 
+    // MARK: - 직함이 바뀌면 알림 제목도 (M6(14))
+
+    /// 서브에이전트 넷을 부르고 각자 출근시킴 (서브1~4)
+    func fourSubs(_ office: inout Office) -> [(id: String, type: String)] {
+        let subs = (1...4).map { (id: "g\($0)", type: "worker-\($0)") }
+        for (index, sub) in subs.enumerated() {
+            office.send(hook.tool("PreToolUse", "Agent", id: "t\(index + 1)", input: ["subagent_type": .string(sub.type), "description": "일"]))
+            office.send(hook.make("SubagentStart", agent: sub))
+        }
+        return subs
+    }
+
+    @Test("승인 대기 중인 서브가 빈 책상으로 옮겨 앉아 번호가 바뀌면, 같은 알림의 제목만 조용히 바꾼다")
+    func retitledWhenRenumbered() throws {
+        var office = Office()
+        let subs = fourSubs(&office)
+        office.send(npmTest("PreToolUse", id: "b1", agent: subs[3]))
+        let asked = try #require(posts(office.send(npmTest("PermissionRequest", agent: subs[3]))).first)
+        #expect(asked.title == "서브4 승인 대기")
+
+        // 서브1이 퇴근 → 서브4가 1번 책상으로 옮겨 서브1
+        let actions = office.send(hook.make("SubagentStop", agent: subs[0]))
+        let renamed = try #require(posts(actions).first)
+        #expect(posts(actions).count == 1)
+        #expect(renamed.id == asked.id)
+        #expect(renamed.title == "서브1 승인 대기")
+        #expect(renamed.body == asked.body)
+        #expect(renamed.isUpdate && renamed.onlyIfDelivered)
+        #expect(removed(actions).isEmpty)
+        #expect(office.engine.state.agents[renamed.agent]?.displayName == "서브1")
+
+        // 끝 책상(서브3)이 퇴근하면 아무도 바뀌지 않음 → 알림도 그대로
+        #expect(posts(office.send(hook.make("SubagentStop", agent: subs[2]))).isEmpty)
+        // 둘만 남았다가 하나가 퇴근해 "서브1" → "서브"가 되어도 따라감
+        let alone = try #require(posts(office.send(hook.make("SubagentStop", agent: subs[1]))).first)
+        #expect(alone.title == "서브 승인 대기")
+        // 대기가 풀려 지운 알림은 다시 바꾸지 않음
+        office.send(hook.tool("PostToolUse", "Bash", id: "b1", input: ["command": "npm test"], agent: subs[3], extra: [("tool_response", [:])]))
+        office.send(hook.tool("PreToolUse", "Agent", id: "t9", input: ["subagent_type": "worker-9", "description": "일"]))
+        #expect(!posts(office.send(hook.make("SubagentStart", agent: (id: "g9", type: "worker-9")))).contains { $0.id == asked.id })
+    }
+
+    @Test("데스크톱 서브 세션의 답변 대기·응답 완료 알림도 번호가 바뀌면 따라간다")
+    func sessionNoticesRetitled() throws {
+        var office = Office(settings: NotificationSettings(permission: true, completion: true, reply: true))
+        let main = Hook(session: "m")
+        office.send(main.make("SessionStart", ["source": "startup"]))
+        let children = (1...3).map { Hook(session: "c\($0)") }
+        for child in children {
+            office.send(child.make("SessionStart", ["source": "startup"]), hint: SessionHint(hostSession: "local_\(child.session)", ancestors: [SessionID("m")]))
+        }
+        office.send(children[2].make("UserPromptSubmit", ["prompt": "x"]))
+        let done = try #require(posts(office.send(children[2].make("Stop"))).first)
+        #expect(done.title == "서브3 응답 완료")
+        // 서브1 세션이 끝남 → 서브3이 1번 책상으로 옮겨 서브1
+        let renamed = try #require(posts(office.send(children[0].make("SessionEnd", ["reason": "other"]))).first { $0.id == done.id })
+        #expect(renamed.title == "서브1 응답 완료")
+        #expect(renamed.isUpdate && renamed.onlyIfDelivered)
+    }
+
+    @Test("제목의 맨 앞 직함만 바꾼다")
+    func retitledHelper() throws {
+        let notice = OfficeNotice(
+            id: "n", kind: .permission, title: "서브4 질문 답 대기", subtitle: "w", body: "b", agent: AgentID("m-1"),
+            session: SessionID("s"), term: nil, hostSession: nil, isUpdate: false)
+        #expect(NotificationPlanner.retitled(notice, as: "서브4") == nil)
+        let renamed = try #require(NotificationPlanner.retitled(notice, as: "서브1"))
+        #expect(renamed.title == "서브1 질문 답 대기")
+        #expect(renamed.isUpdate && renamed.onlyIfDelivered)
+    }
+
     // MARK: - 답변 필요 (M6(4c))
 
     func ask(_ text: String = "A안과 B안 중 어느 쪽으로 할까요?") -> JSONValue {
