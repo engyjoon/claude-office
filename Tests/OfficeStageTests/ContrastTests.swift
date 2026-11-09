@@ -26,7 +26,7 @@ struct ContrastTests {
         #expect(OverlayArt.badge(.unread, contrast: true)[0].lineWidth > OverlayArt.badge(.unread)[0].lineWidth)
     }
 
-    @Test("명패·행 표지·+N 테두리만 굵어진다")
+    @Test("명패·+N 테두리만 굵어지고, 행 표지(행 색 칩)는 스스로 2.2pt가 된다")
     func plates() {
         var h = FloorHarness()
         h.hook(hook("SessionStart", session: "m"))
@@ -34,10 +34,16 @@ struct ContrastTests {
         let team = h.stage.sortedTeams[0]
         let layout = OfficeLayout(rooms: [OfficeLayout.Room(team: team.id, desks: 2, hidden: 3)])
         let plates: [TeamID: [Seat: String]] = [team.id: [.main: "★ 메인", Seat(desk: 1): "서브"]]
-        let normal = OfficeArt.layers(layout: layout, teams: [team], nameplates: plates)
-        let boosted = OfficeArt.layers(layout: layout, teams: [team], nameplates: plates, contrast: true)
+        let isSign = { (layer: ArtLayer) in layer.name.hasPrefix("row-sign-") }
+        let allNormal = OfficeArt.layers(layout: layout, teams: [team], nameplates: plates)
+        let allBoosted = OfficeArt.layers(layout: layout, teams: [team], nameplates: plates, contrast: true)
+        let sign = { (layers: [ArtLayer]) in layers.first(where: isSign)!.shapes[0].lineWidth }
+        #expect(sign(allNormal) == 1.4)
+        #expect(sign(allBoosted) == 2.2)
+        let normal = allNormal.filter { !isSign($0) }
+        let boosted = allBoosted.filter { !isSign($0) }
         let plateWidths = { (layers: [ArtLayer]) in layers.flatMap(\.shapes).filter { $0.fill == .swatch(.plate) && $0.stroke != nil }.map(\.lineWidth) }
-        #expect(plateWidths(normal).count == 4)  // 명패 2, 행 표지, +N
+        #expect(plateWidths(normal).count == 3)  // 명패 2, +N
         #expect(plateWidths(boosted).allSatisfy { $0 == 2.2 })
         // 다른 가구 테두리는 그대로
         let others = { (layers: [ArtLayer]) in layers.flatMap(\.shapes).filter { $0.fill != .swatch(.plate) }.map(\.lineWidth) }

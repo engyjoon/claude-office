@@ -18,13 +18,21 @@ public enum OfficeArt {
         lighting: Lighting = .day, contrast: Bool = false
     ) -> [ArtLayer] {
         var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent, lounge: lounge))]
+        var signs: [ArtLayer] = []
         for row in layout.rows {
             let team = teams.first { $0.id == row.team }
             layers += self.row(row, team: team, plates: nameplates[row.team] ?? [:])
+            if let team {
+                signs.append(ArtLayer(
+                    "row-sign-\(row.team.raw)", depth: -.infinity,
+                    sign(team.name, at: MapPoint(OfficeLayout.deskX(0), row.deskY), color: team.colorIndex, lighting: lighting, contrast: contrast)))
+            }
         }
         if lounge { layers += self.lounge() }
         if contrast { layers = layers.map(boostPlates) }
         layers = layers.map { $0.lit(lighting) }
+        // 행 표지는 스스로 조명·대비를 맞춥니다 (밤에도 행 색을 밝게 둠, M6(8)). 깊이 −∞ 층들 가운데 나중에 두어 바닥·러그 위에 그립니다.
+        layers += signs
         // 벽 가구는 스스로 밤 색을 칠합니다 (창밖 그림이 낮·밤으로 다름). 바탕 바로 뒤에 둡니다.
         layers.insert(contentsOf: wallFurniture(layout, lighting: lighting), at: 1)
         if lighting == .night, lounge {
@@ -338,13 +346,14 @@ public enum OfficeArt {
     }
 
     /// 폭에 맞지 않으면 뒤를 잘라 "…"을 붙입니다. 돌려주는 폭은 어림값입니다.
-    static func fitted(_ text: String, size: Double, maxWidth: Double) -> (String, Double) {
-        let full = estimatedWidth(text, size: size)
+    static func fitted(_ text: String, size: Double, maxWidth: Double, measure: ((String) -> Double)? = nil) -> (String, Double) {
+        let measure = measure ?? { estimatedWidth($0, size: size) }
+        let full = measure(text)
         if full <= maxWidth { return (text, full) }
         var cut = text
-        while !cut.isEmpty, estimatedWidth(cut + "…", size: size) > maxWidth { cut.removeLast() }
+        while !cut.isEmpty, measure(cut + "…") > maxWidth { cut.removeLast() }
         let result = cut + "…"
-        return (result, estimatedWidth(result, size: size))
+        return (result, measure(result))
     }
 
     /// 책상 하나: 의자(직원 뒤, 깊이 y-1)와 책상(직원 앞, 깊이 y+3). (x, y)는 앉은 직원의 발 위치입니다.
@@ -377,7 +386,8 @@ public enum OfficeArt {
 
     // MARK: - 행
 
-    /// 행 하나: 책상(사람 수만큼, 0번 = 메인), 메인 책상 아래 폴더 이름 표지, 숨긴 사람이 있으면 행 끝 "+N"
+    /// 행 하나: 책상(사람 수만큼, 0번 = 메인), 숨긴 사람이 있으면 행 끝 "+N".
+    /// 메인 책상 아래 폴더 이름 표지는 조명을 스스로 맞추므로 `layers`가 따로 붙입니다 (`sign`).
     static func row(_ row: OfficeLayout.Row, team: Team?, plates: [Seat: String]) -> [ArtLayer] {
         var layers: [ArtLayer] = []
         let y = row.deskY
@@ -386,26 +396,54 @@ public enum OfficeArt {
                 "\(row.team.raw)-\(desk)", x: OfficeLayout.deskX(desk), y: y, chair: desk + (team?.colorIndex ?? 0),
                 plate: plates[Seat(desk: desk)], plant: desk == 0)
         }
-        if let team {
-            layers.append(ArtLayer("row-sign-\(row.team.raw)", depth: -.infinity, sign(team.name, at: MapPoint(OfficeLayout.deskX(0), y), color: team.colorIndex)))
-        }
         if row.hidden > 0 {
             layers.append(ArtLayer("row-more-\(row.team.raw)", depth: -.infinity, more(row.hidden, at: MapPoint(row.endX + 26, y - 18))))
         }
         return layers
     }
 
-    /// 행 표지 (메인 책상 바로 아래): 메인 색 점 + 폴더 이름
-    static func sign(_ label: String, at desk: MapPoint, color: Int) -> [ArtShape] {
-        let (text, textWidth) = fitted(label, size: 9, maxWidth: 110)
-        let width = textWidth + 26
+    /// 행 표지 글자 크기 (M6(8): 9pt 보통 → 10.5pt 굵게)
+    static let signFontSize = 10.5
+    /// 행 표지 글자 최대 폭 (넘으면 "…", 굵은 글자 기준 영문 약 22자)
+    static let signMaxTextWidth = 136.0
+    /// 행 표지 높이와 위치 (책상 앞판 아래 끝 deskY+3에서 4pt 아래부터)
+    static let signHeight = 20.0
+    static let signTop = 7.0
+    /// 행 표지 글자 앞 여백 (폴더 아이콘 자리)과 뒤 여백
+    static let signTextInset = 20.0
+    static let signTrailing = 10.0
+
+    /// 행 표지 (메인 책상 바로 아래, M6(8) 행 색 칩): 행 색 바탕 + 폴더 아이콘 + 굵은 폴더 이름.
+    /// 행 러그와 같은 색이라 어느 줄의 폴더인지 이어 보이고, 모서리를 6으로 줄여 상태 칩(알약)과 모양을 달리합니다.
+    /// 밤에도 행 색은 낮 색 그대로 두고(명패처럼 밝게), 테두리·글자만 밤 잉크로 칠합니다. 이미 조명을 맞춘 색이므로 `lit`을 거치지 않습니다.
+    static func sign(_ label: String, at desk: MapPoint, color: Int, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
+        let (text, textWidth) = fitted(label, size: signFontSize, maxWidth: signMaxTextWidth) {
+            TextMetrics.width($0, size: signFontSize, bold: true)
+        }
+        let width = textWidth + signTextInset + signTrailing
         let x = desk.x - OfficeLayout.deskWidth / 2
+        let top = desk.y + signTop
+        let middle = top + signHeight / 2
+        let night = lighting == .night
+        let ink: Paint = night ? .color(NightPalette.color(Swatch.ink.color)) : .swatch(.ink)
+        let paper: Paint = night ? .color(NightPalette.color(Swatch.plate.color)) : .swatch(.plate)
+        let swatch = Swatch.teamColors[color % Swatch.teamColors.count]
+        let fill: Paint = night ? .color(swatch.color) : .swatch(swatch)
         return [
-            .rect(x, desk.y + 9, width, 16, r: 8, fill: .swatch(.plate), width: 1.2),
-            .circle(x + 9, desk.y + 17, 3.5, fill: .swatch(Swatch.teamColors[color % 4]), width: 1),
-            .text(text, x + 16, desk.y + 17.5, size: 9, color: .swatch(.ink), anchor: .start, baseline: .central),
+            ArtShape(.rect(MapRect(x, top, width, signHeight), radius: 6), fill: fill, stroke: ink, lineWidth: contrast ? 2.2 : 1.4),
+            folderIcon(center: MapPoint(x + 11, middle + 0.3), ink: ink, fill: paper),
+            .text(text, x + signTextInset, middle + plateTextDrop, size: signFontSize, bold: true, color: ink, anchor: .start, baseline: .central),
         ]
     }
+
+    /// 폴더 아이콘 (폭 10, 높이 7.4): 왼쪽 위 탭이 있는 서류철
+    static func folderIcon(center c: MapPoint, ink: Paint, fill: Paint) -> ArtShape {
+        let x = c.x - 5, y = c.y - 3.6
+        return .path(
+            "M\(n(x)) \(n(y)) h3.6 l1.3 1.4 h5.1 v5.8 h-10 z", fill: fill, width: 1.1, stroke: ink)
+    }
+
+    static func n(_ value: Double) -> String { VectorPath.format(value) }
 
     /// 대비 증가 (M6(7)): 명패 바탕(`plate`)을 쓴 도형(책상 명패, 행 표지, "+N")의 잉크 테두리를 2.2pt로
     static func boostPlates(_ layer: ArtLayer) -> ArtLayer {
