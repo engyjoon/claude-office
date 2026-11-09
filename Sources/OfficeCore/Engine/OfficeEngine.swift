@@ -64,6 +64,14 @@ public struct OfficeEngine: Sendable {
     }
 
     public mutating func tick(at now: Date) -> [Directive] {
-        choreographer.tick(at: now)
+        // 끝 신호 없이 오래 "정리 중"인 세션을 풉니다 (M6(2))
+        var out: [Directive] = []
+        let beats = state.expireCompaction(at: now)
+        if !beats.isEmpty {
+            journal.record(beats, in: state, at: now)
+            pendingNotices += notices.plan(beats, state: state, privacy: privacy)
+            out = choreographer.handle(beats, at: now)
+        }
+        return out + choreographer.tick(at: now)
     }
 }

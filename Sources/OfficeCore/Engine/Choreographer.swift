@@ -86,6 +86,8 @@ public struct Choreographer: Sendable {
         var breaks = 0
         /// 승인 대기 중 띄운 외침 풍선 (화면에 다시 보일 때 그대로 띄웁니다)
         var shout: Bubble?
+        /// 대화를 압축하는 중 (서류 정리 자세). 쉼 단계(`rest`)와 쉬기 시작한 때(`idleSince`)는 그대로 두었다가 끝나면 되돌립니다 (M6(2)).
+        var compacting = false
     }
 
     /// 쉼 단계 (설계서 §6.2): 소파 → 안마 의자 → 잠듦
@@ -317,10 +319,17 @@ public struct Choreographer: Sendable {
                 $0.idleSince = now
                 $0.rest = .none
                 $0.returnAt = nil
+                $0.compacting = false
             }
 
         case .compacting(let agent):
             touch(agent)
+            guard presences[agent.id] != nil else { return }
+            resolveWaiting(agent.id, into: &out)
+            // 정리는 잠깐 하는 뒷정리라 걸어가지 않고 그 자리에서 합니다: 자기 책상이면 책상에서, 소파·안마 의자에서 쉬던 중이면
+            // 그 자리에 앉은 채 잠에서 깨어 서류를 훑어봅니다. Zz·음표·⏳ 같은 이전 표시와 들고 있던 컵은 내립니다.
+            setEmote(agent.id, nil, into: &out)
+            setPill(agent.id, nil, into: &out)
             out.append(Directive(agent.id, .pose(.sorting)))
             out.append(Directive(agent.id, .prop(.documents)))
             out.append(Directive(agent.id, .express(.focus)))
@@ -328,6 +337,34 @@ public struct Choreographer: Sendable {
             modify(agent.id) {
                 $0.shown = .thinking
                 $0.shownAt = now
+                $0.pending = nil
+                $0.returnAt = nil
+                $0.watching = nil
+                $0.shellWatch = nil
+                $0.compacting = true
+            }
+
+        case .compactionEnded(let agent):
+            touch(agent)
+            guard let presence = presences[agent.id], presence.compacting else { return }
+            modify(agent.id) { $0.compacting = false }
+            if agent.isResting {
+                // 쉬던 중 압축: 원래 쉼 단계의 모습으로 돌아가고, 쉼 단계는 쉬기 시작한 때부터 이어서 셉니다
+                modify(agent.id) {
+                    $0.shown = .idle
+                    $0.shownAt = now
+                    $0.idleSince = $0.idleSince ?? agent.activitySince
+                }
+                restoreRest(agent.id, into: &out)
+            } else {
+                // 응답 중 압축: 하던 일로 돌아갑니다
+                wake(agent.id, into: &out)
+                modify(agent.id) { $0.shown = .idle }
+                if case .working(let call) = agent.activity {
+                    show(agent.id, .working(call), at: now, into: &out)
+                } else {
+                    show(agent.id, .thinking, at: now, into: &out)
+                }
             }
 
         case .reported(let member, let lead):
@@ -550,6 +587,7 @@ public struct Choreographer: Sendable {
             $0.pending = nil
             $0.shown = target
             $0.shownAt = now
+            $0.compacting = false
         }
         // 기다리던 긴 명령이 아닌 다른 활동을 보여주면 ⏳를 내립니다
         if let watching = previous.watching {
@@ -593,7 +631,7 @@ public struct Choreographer: Sendable {
             }
 
             var sameCategory = false
-            if case .working(let earlier) = previous.shown, earlier.category == call.category { sameCategory = true }
+            if case .working(let earlier) = previous.shown, earlier.category == call.category, !previous.compacting { sameCategory = true }
             let moved = previous.spot != zone
             move(id, to: zone, into: &out)
             if moved || !sameCategory {
@@ -609,7 +647,7 @@ public struct Choreographer: Sendable {
 
         case .thinking:
             setPill(id, nil, into: &out)
-            if previous.shown != .thinking {
+            if previous.shown != .thinking || previous.compacting {
                 out.append(Directive(id, .pose(.thinking)))
                 out.append(Directive(id, .prop(nil)))
                 out.append(Directive(id, .express(.think)))
@@ -741,6 +779,34 @@ public struct Choreographer: Sendable {
         modify(id) { $0.rest = .none }
     }
 
+    /// 지금 쉼 단계의 모습 (자세·소품·표정·머리 위 표시)을 다시 정합니다. `rest(_:)`가 각 단계에 들어갈 때와 같은 모습입니다.
+    private mutating func restoreRest(_ id: AgentID, into out: inout [Directive]) {
+        guard let presence = presences[id] else { return }
+        switch presence.rest {
+        case .none:
+            move(id, to: seatSpot(presence.agent), into: &out)
+            out.append(Directive(id, .prop(nil)))
+            out.append(Directive(id, .pose(.sitting)))
+            out.append(Directive(id, .express(.neutral)))
+            setEmote(id, nil, into: &out)
+        case .lounge:
+            out.append(Directive(id, .pose(.holdingCup)))
+            out.append(Directive(id, .prop(.cup)))
+            out.append(Directive(id, .express(.happy)))
+            setEmote(id, .note, into: &out)
+        case .massage:
+            out.append(Directive(id, .prop(nil)))
+            out.append(Directive(id, .pose(.massage)))
+            out.append(Directive(id, .express(.happy)))
+            setEmote(id, .note, into: &out)
+        case .nap:
+            out.append(Directive(id, .prop(nil)))
+            out.append(Directive(id, .pose(.sleeping)))
+            out.append(Directive(id, .express(.sleepy)))
+            setEmote(id, .zzz, into: &out)
+        }
+    }
+
     private mutating func resolveWaiting(_ id: AgentID, into out: inout [Directive]) {
         guard let presence = presences[id], presence.waiting else { return }
         out.append(Directive(id, .dismissBubble))
@@ -854,6 +920,7 @@ public struct Choreographer: Sendable {
     }
 
     private func restoredPose(_ presence: Presence) -> Pose {
+        if presence.compacting { return .sorting }
         switch presence.spot {
         case .massageChair: return presence.rest == .nap ? .sleeping : .massage
         case .lounge: return presence.waiting ? .raisingHand : .holdingCup
@@ -867,6 +934,7 @@ public struct Choreographer: Sendable {
 
     private func restoredProp(_ presence: Presence) -> Prop? {
         if presence.waiting { return nil }
+        if presence.compacting { return .documents }
         switch presence.spot {
         case .lounge, .pantry: return .cup
         case .whiteboard: return .marker
@@ -885,6 +953,7 @@ public struct Choreographer: Sendable {
 
     private func restoredExpression(_ presence: Presence) -> FacialExpression {
         if presence.waiting { return .eager }
+        if presence.compacting { return .focus }
         if presence.rest == .nap { return .sleepy }
         if presence.rest > .none { return .happy }
         switch presence.shown {

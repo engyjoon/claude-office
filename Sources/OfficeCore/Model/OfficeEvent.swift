@@ -83,7 +83,10 @@ public struct OfficeEvent: Hashable, Sendable {
         /// Claude Code가 한동안 입력을 기다린다고 알려줄 때 (`idle_prompt`)
         case waitingForInput
         case turnEnded(failed: Bool)
+        /// 대화 압축 시작 (`PreCompact`, 수동 `/compact`·자동 압축 모두)
         case compacting
+        /// 대화 압축 끝 (`PostCompact`). 설치하는 훅 목록에는 아직 없고, 받으면 `SessionStart`(source `compact`)와 같이 처리합니다 (M6(2)).
+        case compactFinished
     }
 
     public var session: SessionID

@@ -27,6 +27,9 @@ public enum Beat: Hashable, Sendable {
     case waitingForInput(Agent)
     case turnEnded(Agent, failed: Bool)
     case compacting(Agent)
+    /// 압축이 끝남 (`SessionStart` source `compact`, `PostCompact`, 또는 오래 풀리지 않아 시간 초과).
+    /// 비트의 `Agent.activity`가 되돌린 활동입니다: 쉬는 중이면 원래 쉼 단계로, 응답 중이면 하던 일로 (M6(2)).
+    case compactionEnded(Agent)
     case reported(member: Agent, to: Agent?)
     case left(Agent)
 }
@@ -105,6 +108,9 @@ public struct OfficeState: Sendable {
         let now = event.at
 
         switch event.kind {
+        case .sessionStarted(source: "compact"?), .compactFinished:
+            finishCompaction(leadID, at: now, timedOut: false, beats: &beats)
+
         case .sessionStarted, .sessionEnded:
             break
 
@@ -232,8 +238,63 @@ public struct OfficeState: Sendable {
             beats.append(.turnEnded(agents[leadID]!, failed: failed))
 
         case .compacting:
-            update(leadID) { $0.setActivity(.compacting, at: now) }
+            update(leadID) {
+                if $0.activity != .compacting {
+                    $0.beforeCompacting = CompactionOrigin(activity: $0.activity, since: $0.activitySince)
+                }
+                $0.setActivity(.compacting, at: now)
+            }
             beats.append(.compacting(agents[leadID]!))
+        }
+        return beats
+    }
+
+    // MARK: - 압축 (정리 중, M6(2))
+
+    /// 이보다 오래 "정리 중"이면 끝 신호를 놓친 것으로 보고 쉬는 상태로 풉니다.
+    public static let compactionTimeout: TimeInterval = 5 * 60
+
+    /// 응답 중인지: 요청을 받은 뒤 아직 Stop이 오지 않음
+    func isResponding(_ session: SessionID) -> Bool {
+        guard let part = parts[session], let prompt = part.lastPromptAt else { return false }
+        return part.completedAt.map { $0 < prompt } ?? true
+    }
+
+    /// 압축을 끝냅니다. 응답 중이 아니면(쉬던 중 수동 `/compact`, 데스크톱 앱의 압축) 압축 전의 쉬는 상태와 그 시각으로 되돌려
+    /// 쉼 단계가 이어지게 하고, 응답 중이면(자동 압축) 압축 전 활동으로 되돌립니다. 시간 초과면 언제나 쉬는 상태로 풉니다.
+    private mutating func finishCompaction(_ id: AgentID, at now: Date, timedOut: Bool, beats: inout [Beat]) {
+        guard let agent = agents[id], agent.activity == .compacting else { return }
+        let origin = agent.beforeCompacting
+        let responding = !timedOut && isResponding(agent.session)
+        update(id) {
+            $0.beforeCompacting = nil
+            if responding {
+                switch origin?.activity {
+                case .working?, .delegating?, .thinking?, .waitingForPermission?:
+                    $0.activity = origin!.activity
+                default:
+                    $0.activity = .thinking
+                }
+                $0.activitySince = now
+            } else if let origin, $0.isResting(origin.activity) {
+                $0.activity = origin.activity == .arriving ? .idle : origin.activity
+                $0.activitySince = origin.since
+            } else {
+                $0.runningTools = []
+                $0.setActivity(.idle, at: now)
+            }
+        }
+        beats.append(.compactionEnded(agents[id]!))
+    }
+
+    /// `compactionTimeout`보다 오래 "정리 중"인 세션을 쉬는 상태로 풉니다 (앱이 화면 주기마다 부름).
+    public mutating func expireCompaction(at now: Date, after limit: TimeInterval = compactionTimeout) -> [Beat] {
+        let stuck = agents.values
+            .filter { $0.activity == .compacting && now.timeIntervalSince($0.activitySince) >= limit }
+            .sorted { $0.serial < $1.serial }
+        var beats: [Beat] = []
+        for agent in stuck {
+            finishCompaction(agent.id, at: now, timedOut: true, beats: &beats)
         }
         return beats
     }
@@ -656,7 +717,9 @@ public struct OfficeState: Sendable {
 
 extension Agent {
     /// 쉬는 중 (응답을 끝냈거나 입력을 기다림, 막 들어옴)
-    var isResting: Bool {
+    var isResting: Bool { isResting(activity) }
+
+    func isResting(_ activity: Activity) -> Bool {
         switch activity {
         case .idle, .waitingForInput, .arriving: true
         default: false
@@ -666,6 +729,7 @@ extension Agent {
     mutating func setActivity(_ activity: Activity, at now: Date) {
         self.activity = activity
         activitySince = now
+        if activity != .compacting { beforeCompacting = nil }
     }
 
     mutating func removeRunning(_ call: ToolCall) {

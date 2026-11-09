@@ -84,6 +84,8 @@ public enum HookParser {
             return .subagentStopped(ref)
         case "PreCompact":
             return .compacting
+        case "PostCompact":
+            return .compactFinished
         default:
             return nil
         }

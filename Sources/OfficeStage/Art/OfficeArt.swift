@@ -323,18 +323,20 @@ public enum OfficeArt {
                 .rect(x + w - 16, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
             ]))
         }
-        // 안마 의자: 등판(직원 뒤) → 롤러(움직임, liveLayers) → 직원 → 앉는 판·팔걸이·발판(앞)
+        // 안마 의자: 등판·팔걸이(직원 뒤) → 롤러(움직임, liveLayers) → 직원 → 앉는 판·발판(앞) → 앉은 다리
+        // 팔걸이는 팔꿈치 높이(발 위치 -30)로 낮춰 직원 뒤에 그립니다: 안마 자세의 팔(30°)이 팔걸이 위에 얹히고, 몸통 옆을 가리지 않습니다.
+        // 앉는 판은 몸통 아랫단(-14)에 살짝만 걸쳐(-16) 배를 덮지 않고, 그 위를 앉은 다리의 허벅지가 덮습니다 (M6(2)).
         for (index, s) in OfficeLayout.massageSeats.enumerated() {
             layers.append(ArtLayer("massage-back-\(index)", depth: s.y - 1, [
                 .rect(s.x - 26, s.y - 98, 52, 80, r: 16, fill: .color(ArtColor(0x6F86A8))),
                 .rect(s.x - 20, s.y - 90, 40, 64, r: 12, fill: .color(ArtColor(0x8EA6C8)), outline: false),
                 .rect(s.x - 18, s.y - 108, 36, 18, r: 9, fill: .color(ArtColor(0x8EA6C8))),
+                .rect(s.x - 37, s.y - 30, 15, 26, r: 7, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x + 22, s.y - 30, 15, 26, r: 7, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x + 26, s.y - 17, 7, 5, r: 2, fill: .swatch(.mint), outline: false),
             ]))
             layers.append(ArtLayer("massage-front-\(index)", depth: s.y + 1, [
-                .rect(s.x - 24, s.y - 22, 48, 18, r: 8, fill: .color(ArtColor(0x8EA6C8))),
-                .rect(s.x - 34, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
-                .rect(s.x + 20, s.y - 44, 14, 40, r: 7, fill: .color(ArtColor(0x6F86A8))),
-                .rect(s.x + 23, s.y - 40, 8, 6, r: 2, fill: .swatch(.mint), outline: false),
+                .rect(s.x - 25, s.y - 16, 50, 13, r: 6, fill: .color(ArtColor(0x8EA6C8))),
                 .rect(s.x - 14, s.y - 4, 28, 12, r: 5, fill: .color(ArtColor(0x6F86A8))),
             ]))
         }

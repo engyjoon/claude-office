@@ -131,6 +131,12 @@ public enum JobTitle: Hashable, Sendable {
     }
 }
 
+/// 압축 전 활동 (`Agent.beforeCompacting`)
+struct CompactionOrigin: Hashable, Sendable {
+    var activity: Activity
+    var since: Date
+}
+
 /// 실제로 무엇을 하고 있는지 (연출 전의 의미 상태)
 public enum Activity: Hashable, Sendable {
     case arriving
@@ -196,6 +202,8 @@ public struct Agent: Identifiable, Hashable, Sendable {
     public internal(set) var consecutiveErrors: Int
     public internal(set) var term: String?
     let serial: Int
+    /// 압축(정리 중)을 시작하기 전 활동과 그 시각. 압축이 끝나면 이것으로 되돌립니다 (M6(2)).
+    var beforeCompacting: CompactionOrigin? = nil
 
     /// 화면에 보이는 이름: 언제나 직함 ("메인1", "서브2"). 에이전트 종류는 `profile.agentType` (신원 카드에만)
     public var displayName: String { title.label }
