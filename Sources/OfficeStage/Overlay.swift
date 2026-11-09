@@ -42,10 +42,12 @@ public struct OverlayOptions: Hashable, Sendable {
     public var lighting: Lighting
     /// 시스템 "대비 증가" (M6(7)): 상태 칩·배지 테두리를 진하게 합니다.
     public var highContrast: Bool
+    /// 고른 직원 (M6(15)). 머리 위(상태 칩이 있으면 칩 위)에 팀 색 ▼를 띄웁니다.
+    public var selected: AgentID?
 
     public init(
         privacy: PrivacyLevel = .detailed, displayScale: Double = 1, hovered: AgentID? = nil, bounds: MapRect? = nil, lighting: Lighting = .day,
-        highContrast: Bool = false
+        highContrast: Bool = false, selected: AgentID? = nil
     ) {
         self.privacy = privacy
         self.displayScale = displayScale
@@ -53,6 +55,7 @@ public struct OverlayOptions: Hashable, Sendable {
         self.bounds = bounds
         self.lighting = lighting
         self.highContrast = highContrast
+        self.selected = selected
     }
 
     public var tier: OverlayTier { OverlayTier(scale: displayScale) }
@@ -66,6 +69,8 @@ public struct OverlayItem: Hashable, Sendable, Identifiable {
         case bubble, pill, emote, effect
         /// 답변 필요·확인 안 함 배지 (M6(4))
         case badge
+        /// 고른 직원 머리 위 ▼ (M6(15))
+        case selection
     }
 
     public var id: String
@@ -92,6 +97,9 @@ public enum Overlay {
     public static let headTop = -90.0
     /// 발 위치에서 배지 가운데까지 (머리 왼쪽 위, M6(4))
     public static let badgeOffset = MapPoint(-25, -86)
+    /// 고른 직원 ▼ 크기 (M6(15)). 끝이 머리(칩) 위 2pt를 가리킵니다.
+    public static let markerSize = MapPoint(18, 11)
+    static let markerGap = 2.0
     static let gap = 3.0
     static let pillHeight = 17.0
     static let maxPillCharacters = 28
@@ -144,6 +152,23 @@ public enum Overlay {
             }
         }
 
+        // 1.5) 고른 직원 ▼ (M6(15)): 머리 바로 위, 상태 칩이 있으면 칩 위. 가구보다 위 층이라 소파·안마 의자·책상에서도 가려지지 않습니다.
+        //      머리 왼쪽 위 배지("?"·✉·"!")와 오른쪽 위 Zz·♪는 가운데를 비워 두므로 겹치지 않습니다. 말풍선은 ▼ 위로 올라갑니다.
+        //      움직이지 않으므로 그리기 빈도를 올리지 않습니다.
+        var markerTops: [AgentID: Double] = [:]
+        if let selected = options.selected, let actor = stage.actors[selected] {
+            let base = pillTops[selected] ?? actor.position.y + headTop
+            var frame = MapRect(actor.position.x - markerSize.x / 2, base - markerGap - markerSize.y, markerSize.x, markerSize.y)
+            frame = clamp(frame, in: area)
+            placed.append(frame)
+            markerTops[selected] = frame.y
+            let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
+            let team = Swatch.teamColors[colorIndex % Swatch.teamColors.count].color
+            items.append(OverlayItem(
+                id: "selection:\(selected.raw)", kind: .selection, agent: selected, origin: MapPoint(frame.x + frame.width / 2, frame.maxY),
+                shapes: OverlayArt.selectionMarker(team: team, lighting: options.lighting, contrast: options.highContrast), frame: frame))
+        }
+
         // 2) 말풍선: 중요한 것(외침)부터, 같은 종류면 앞에 선 직원부터
         if options.privacy != .hidden {
             let speakers = actors
@@ -155,7 +180,7 @@ public enum Overlay {
                 let text = truncate(bubble.text, limit)
                 let style = OverlayArt.BubbleStyle(bubble.kind)
                 let width = TextMetrics.width(text, size: style.fontSize, bold: style.bold) + style.padX * 2
-                var tip = MapPoint(actor.position.x, (pillTops[actor.id] ?? actor.position.y + headTop) - 1)
+                var tip = MapPoint(actor.position.x, (markerTops[actor.id] ?? pillTops[actor.id] ?? actor.position.y + headTop) - 1)
                 var frame = MapRect(tip.x - width / 2, tip.y - 9 - style.height, width, style.height)
                 frame = place(frame, avoiding: placed, in: area)
                 // 화면 위 끝에 밀려 상자가 머리까지 내려오면 꼬리가 아래로 머리를 가리킬 수 없습니다
@@ -632,6 +657,20 @@ public enum OverlayArt {
                 ArtShape(.circle(center: MapPoint(8, -8), radius: 3.4), fill: .color(ArtColor(0x4A8FE0)), stroke: .swatch(.white), lineWidth: 1.3),
             ]
         }
+    }
+
+    /// 고른 직원 머리 위 ▼ (원점: 아래 끝, M6(15)). 팀 색에 잉크 테두리, 바깥에 밝은 테(밤은 따뜻한 흰색)를 둘러
+    /// 낮 크림 바닥·밤 남색 바닥 어디서나 보이게 합니다. 대비 증가면 잉크 테두리를 굵게 합니다.
+    /// 배지("?" 파란 풍선, ✉ 흰 원)·승인 대기 "!"(주황 원)와 모양·색이 겹치지 않습니다.
+    public static func selectionMarker(team: ArtColor, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
+        let size = Overlay.markerSize
+        let w = size.x / 2, h = size.y
+        let d = "M\(n(-w)),\(n(-h)) L\(n(w)),\(n(-h)) L0,0 Z"
+        let edge = Paint.color(lighting == .night ? CharacterArt.nightOutlineEdge : ArtColor(0xFFFFFF))
+        return [
+            .path(d, fill: edge, width: 5, stroke: edge),
+            .path(d, fill: .color(team), width: contrast ? 2.4 : 1.8),
+        ]
     }
 
     /// 종이비행기 (원점: 비행기 가운데, `angle` 방향으로 날아감)

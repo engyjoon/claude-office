@@ -48,6 +48,50 @@ public enum CharacterArt {
         ]
     }
 
+    // MARK: - 고른 직원 외곽선 (M6(15))
+
+    /// 밤에 쓰는 밝은 테 색 (흰색 대신 따뜻한 흰색, 밤 조명 불빛과 어울리게)
+    public static let nightOutlineEdge = ArtColor(0xFFF3D0)
+
+    /// 외곽선 한 겹: 부위 도형을 이 색·굵기로 칠한 실루엣
+    public struct OutlineLayer: Hashable, Sendable {
+        public var color: ArtColor
+        public var width: Double
+    }
+
+    /// 고른 직원 둘레에 까는 외곽선 층 (뒤에서 앞 순서). 부위마다 이 층들을 부위보다 뒤에 깔면,
+    /// 바깥부터 (대비 증가면 잉크) → 밝은 테 → 팀 색 테가 몸 전체 둘레에 생깁니다.
+    /// 굵기는 선 전체 폭이라 도형 가장자리 밖으로 절반씩 나옵니다 (밝은 테 4.5pt, 팀 색 2.75pt, 잉크 6pt).
+    public static func outlineLayers(team: ArtColor, lighting: Lighting, contrast: Bool) -> [OutlineLayer] {
+        var layers: [OutlineLayer] = []
+        if contrast { layers.append(OutlineLayer(color: Swatch.ink.color, width: 12)) }
+        layers.append(OutlineLayer(color: lighting == .night ? nightOutlineEdge : ArtColor(0xFFFFFF), width: 9))
+        layers.append(OutlineLayer(color: team, width: 5.5))
+        return layers
+    }
+
+    /// 부위 도형을 한 색 실루엣으로: 모든 도형을 그 색으로 채우고 굵은 같은 색 선을 두릅니다.
+    /// 반투명 도형(앉은 다리 밑 그림자 같은 것)과 글자는 빼서 테가 엉뚱한 곳에 생기지 않게 합니다.
+    public static func silhouette(_ shapes: [ArtShape], color: ArtColor, width: Double) -> [ArtShape] {
+        shapes.compactMap { shape in
+            if case .text = shape.geometry { return nil }
+            if shape.opacity < 1 { return nil }
+            if case .swatch(let swatch)? = shape.fill, swatch.color.alpha < 1 { return nil }
+            if case .color(let c)? = shape.fill, c.alpha < 1 { return nil }
+            var copy = shape
+            copy.fill = shape.fill == nil ? nil : .color(color)
+            copy.stroke = .color(color)
+            copy.lineWidth = width
+            copy.dash = 0
+            return copy
+        }
+    }
+
+    /// 외곽선용 머리 실루엣: 얼굴 원 + 앞머리 + 액세서리 (표정 효과·눈·입은 얼굴 안이라 빼도 모양이 같습니다)
+    public static func headOutline(_ appearance: Appearance) -> [ArtShape] {
+        face + hairFront(style: appearance.hairStyle) + accessory(appearance.accessory)
+    }
+
     public static let leftLeg: [ArtShape] = [.rect(-10, -17, 8.5, 17, r: 4, fill: .pants)]
     public static let rightLeg: [ArtShape] = [.rect(1.5, -17, 8.5, 17, r: 4, fill: .pants)]
 

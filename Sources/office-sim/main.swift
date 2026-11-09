@@ -17,6 +17,7 @@ import OfficeStage
 //       --mini 390 이면 미니 사무실(폭 390 패널의 한 행 띠: 메인 + 서브 2명, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
 //       --pin <세션>으로 고정할 행을 정할 수 있습니다.
 //       --night 이면 밤 조명으로 그립니다 (M6(6)).
+//       --select 메인1 이면 그 직원을 고른 모습(몸 외곽선 + 머리 위 ▼)으로, --contrast 면 대비 증가로 그립니다 (M6(15)).
 //   office-sim icon [--out 폴더]
 //       앱 아이콘을 SVG로 저장합니다 (64px 이상용 app-icon-full.svg, 16·32px용 app-icon-small.svg). PNG는 make icon.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
@@ -37,7 +38,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390 [--pin 세션]] [--night]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390 [--pin 세션]] [--night] [--select 이름] [--contrast]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
           office-sim icon [--out 폴더]
         """)
@@ -344,7 +345,11 @@ func snapshot(_ arguments: [String]) throws {
         let stage = floor.stage
         let file = folder.appendingPathComponent(String(format: "%@-%06.2fs.svg", base, target))
         let crop = miniWidth.map { MiniOffice.extent(panelWidth: $0) }
-        try SVGRenderer.render(stage: stage, crop: crop, lighting: lighting).write(to: file, atomically: true, encoding: .utf8)
+        // --select <이름>: 그 직원을 고른 것처럼 외곽선과 머리 위 ▼로 (M6(15))
+        let selected = option("--select", in: arguments).flatMap { name in stage.sortedActors.first { $0.agent.displayName == name }?.id }
+        let options = OverlayOptions(highContrast: arguments.contains("--contrast"))
+        try SVGRenderer.render(stage: stage, overlay: options, crop: crop, lighting: lighting, selected: selected)
+            .write(to: file, atomically: true, encoding: .utf8)
         let summary = stage.sortedActors.map { actor in
             "\(actor.agent.displayName)@\(actor.position)\(actor.isWalking ? "→" : "")\(actor.seated ? "(앉음)" : "") \(actor.pose.rawValue)"
         }.joined(separator: ", ")

@@ -7,7 +7,10 @@ public enum SVGRenderer {
     /// `overlay`가 nil이면 말풍선·상태 칩·아이콘·효과를 빼고 그립니다.
     /// `crop`을 주면 그 지도 영역만 잘라 그립니다 (미니 사무실, 말풍선도 그 안에 가둠).
     /// `lighting`이 밤이면 가구를 밤 팔레트로, 사람 있는 책상에 불을 켜고, 발밑 그림자를 빛 웅덩이로 그립니다 (M6(6)).
-    public static func render(stage: Stage, overlay: OverlayOptions? = .init(), crop: MapRect? = nil, lighting: Lighting = .day) -> String {
+    /// `selected`를 주면 그 직원을 앱과 같이 몸 둘레 외곽선과 머리 위 ▼로 그립니다 (M6(15), ▼는 `overlay`가 있을 때만).
+    public static func render(
+        stage: Stage, overlay: OverlayOptions? = .init(), crop: MapRect? = nil, lighting: Lighting = .day, selected: AgentID? = nil
+    ) -> String {
         let layout = stage.layout
         // 사무실 둘레에 여백을 두고(앱과 같음), 여백에는 벽·바닥만 이어 그립니다
         let pad = OfficeLayout.padding
@@ -16,6 +19,13 @@ public enum SVGRenderer {
         var overlay = overlay
         if crop != nil, overlay != nil, overlay?.bounds == nil { overlay?.bounds = extent }
         overlay?.lighting = lighting
+        if let selected { overlay?.selected = selected }
+        let contrast = overlay?.highContrast ?? false
+        func outline(_ actor: StageActor) -> [CharacterArt.OutlineLayer] {
+            guard actor.id == selected else { return [] }
+            let index = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
+            return CharacterArt.outlineLayers(team: Swatch.teamColors[index % Swatch.teamColors.count].color, lighting: lighting, contrast: contrast)
+        }
         var body = ""
         let layers = OfficeArt.layers(
             layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
@@ -49,8 +59,8 @@ public enum SVGRenderer {
         for item in items {
             switch item {
             case .layer(let layer): body += layer.shapes.map { element($0, colors: nil) }.joined()
-            case .actor(let actor): body += character(actor, time: stage.time, lighting: lighting)
-            case .legs(let actor, let seat): body += seatedLegs(actor, seat)
+            case .actor(let actor): body += character(actor, time: stage.time, lighting: lighting, outline: outline(actor))
+            case .legs(let actor, let seat): body += seatedLegs(actor, seat, outline: outline(actor))
             }
         }
         // 말풍선·상태 칩·아이콘은 가구와 직원 모두의 위에 그립니다
@@ -72,7 +82,8 @@ public enum SVGRenderer {
         return "<g class=\"\(item.kind.rawValue)\" transform=\"\(transform)\"\(opacity)>" + item.shapes.map { element($0, colors: nil) }.joined() + "</g>"
     }
 
-    static func character(_ actor: StageActor, time: Double, lighting: Lighting = .day) -> String {
+    /// `outline`이 있으면 같은 자세의 실루엣을 층마다 먼저 그려 몸 둘레에 테를 두릅니다 (앱 CharacterNode와 같은 결과)
+    static func character(_ actor: StageActor, time: Double, lighting: Lighting = .day, outline: [CharacterArt.OutlineLayer] = []) -> String {
         let pose = RigAnimator.pose(for: actor, time: time)
         let colors = CharacterArt.colors(for: actor.agent.profile.appearance)
         let appearance = actor.agent.profile.appearance
@@ -82,9 +93,26 @@ public enum SVGRenderer {
         }
         let head = "translate(0,\(f(CharacterArt.headOrigin.y + pose.headDrop))) rotate(\(f(pose.headRotation)),0,20)"
         let eyes = "translate(0,1) scale(1,\(f(pose.eyeScale))) translate(0,-1)"
-        var inner = ""
-        // 소파·안마 의자에 앉으면 다리는 seatedLegs로 가구 앞에 따로 그립니다
         let seated = actor.loungeSeat != nil
+        // 외곽선: 부위마다 실루엣을 같은 변환으로 (머리는 얼굴 원 + 앞머리 + 액세서리)
+        var silhouettes = ""
+        for layer in outline {
+            func g(_ transform: String, _ shapes: [ArtShape]) -> String {
+                group(transform, CharacterArt.silhouette(shapes, color: layer.color, width: layer.width))
+            }
+            if !seated {
+                silhouettes += g("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
+                silhouettes += g("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
+            }
+            silhouettes += g(head, CharacterArt.hairBack(style: appearance.hairStyle))
+            silhouettes += g("", CharacterArt.body(isLead: actor.agent.isMain))
+            silhouettes += g(head, CharacterArt.headOutline(appearance))
+            silhouettes += g("translate(\(f(CharacterArt.leftShoulder.x)),\(f(CharacterArt.leftShoulder.y))) rotate(\(f(pose.leftArm)))", CharacterArt.arm)
+            silhouettes += g("translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))", CharacterArt.arm + CharacterArt.handProp(actor.prop) + CharacterArt.handGesture(actor.gesture))
+            silhouettes += g("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
+        }
+        var inner = silhouettes
+        // 소파·안마 의자에 앉으면 다리는 seatedLegs로 가구 앞에 따로 그립니다
         if !seated {
             inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
             inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
@@ -106,10 +134,12 @@ public enum SVGRenderer {
             + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g></g>"
     }
 
-    static func seatedLegs(_ actor: StageActor, _ seat: LoungeSeat) -> String {
+    static func seatedLegs(_ actor: StageActor, _ seat: LoungeSeat, outline: [CharacterArt.OutlineLayer] = []) -> String {
         let colors = CharacterArt.colors(for: actor.agent.profile.appearance)
+        let shapes = CharacterArt.seatedLegs(seat)
+        let silhouettes = outline.flatMap { CharacterArt.silhouette(shapes, color: $0.color, width: $0.width) }
         return "<g class=\"seated-legs\" transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
-            + CharacterArt.seatedLegs(seat).map { element($0, colors: colors) }.joined() + "</g>"
+            + (silhouettes + shapes).map { element($0, colors: colors) }.joined() + "</g>"
     }
 
     /// 목록·카드용 얼굴 초상 하나를 SVG로 (앱의 CharacterPortrait와 같은 그림)
