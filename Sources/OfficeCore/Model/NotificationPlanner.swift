@@ -6,10 +6,13 @@ public struct NotificationSettings: Hashable, Sendable {
     public var permission: Bool
     /// 세션 응답이 끝나면(Stop) 알림
     public var completion: Bool
+    /// 응답이 질문·결정 요청으로 끝나 내 답을 기다리기 시작하면 알림 (M6(4c), `SessionCue.reply`)
+    public var reply: Bool
 
-    public init(permission: Bool = true, completion: Bool = false) {
+    public init(permission: Bool = true, completion: Bool = false, reply: Bool = true) {
         self.permission = permission
         self.completion = completion
+        self.reply = reply
     }
 }
 
@@ -17,6 +20,8 @@ public struct NotificationSettings: Hashable, Sendable {
 public struct OfficeNotice: Identifiable, Hashable, Sendable {
     public enum Kind: String, Hashable, Sendable {
         case permission, completion
+        /// 응답을 끝내고 내 답을 기다림 (M6(4c))
+        case reply
     }
 
     /// 알림 식별자. 같은 대기·같은 세션의 알림은 같은 식별자라 알림 센터에서 서로 바꿔 끼우고 지울 수 있습니다.
@@ -50,6 +55,10 @@ public enum NoticeAction: Hashable, Sendable {
 ///   훅(Notification + PermissionRequest)은 리듀서가 이미 비트 하나로 합칩니다. Notification이 먼저 와서 도구를 몰랐다가
 ///   PermissionRequest로 도구를 알게 되면 같은 식별자로 내용만 조용히 바꿉니다.
 /// - 대기가 풀리면(승인 뒤 도구가 끝남, 거부, 새 요청, 응답 끝, 퇴근) 그 알림을 알림 센터에서 지웁니다.
+/// - 답변 필요 (M6(4c)): 응답을 끝낸 세션이 내 답을 기다리기 시작하면(`Beat.cueChanged`, `SessionCue.reply`) 응답마다 한 번.
+///   마지막 문장 판정 뒤 데스크톱 앱 요약이 와서 판정이 바뀌었다 돌아와도 같은 응답이면 다시 띄우지 않습니다. 데스크톱 앱에서 그 세션을
+///   보고 있거나 질문 도구의 승인 대기 알림이 떠 있으면 띄우지 않고, 답하거나(새 요청) 퇴근하거나 답변 필요가 풀리면 지웁니다.
+///   이 응답에는 응답 완료 알림을 따로 띄우지 않습니다. 기본으로 켭니다.
 /// - 응답 완료(Stop): 설정에서 켰을 때만. 세션마다 식별자가 하나라 새 완료 알림이 이전 것을 바꿉니다.
 ///   그 세션에 새 요청이 오거나 세션이 끝나면 지웁니다.
 /// - 표시 수준(§7.4): 상세가 아니면 파일명·명령을 숨기고 도구 종류만 씁니다 (현황 줄과 같은 규칙).
@@ -65,6 +74,11 @@ public struct NotificationPlanner: Sendable {
     private(set) var waiting: [AgentID: Episode] = [:]
     /// 띄운 응답 완료 알림 (세션마다 하나)
     private(set) var completions: [SessionID: String] = [:]
+    /// 띄운 답변 필요 알림 (세션마다 하나)
+    private(set) var replies: [SessionID: String] = [:]
+    /// 답변 필요 알림을 이미 판단한 응답 (세션 → 그 응답이 끝난 때). 같은 응답이면 판정이 바뀌었다 돌아와도
+    /// (마지막 문장 → 데스크톱 앱 요약) 다시 띄우지 않습니다.
+    private(set) var repliedTurns: [SessionID: Date] = [:]
     private var serial = 0
 
     public init(settings: NotificationSettings = .init()) {
@@ -87,6 +101,8 @@ public struct NotificationPlanner: Sendable {
 
             case .turnEnded(let agent, let failed):
                 guard settings.completion, agent.role == .lead else { continue }
+                // 답변 필요 알림을 띄울 응답이면 응답 완료 알림은 띄우지 않습니다 (둘이 겹치지 않게)
+                if settings.reply, state.agents[agent.id]?.cue == .reply { continue }
                 let id = "completion.\(agent.session.raw)"
                 completions[agent.session] = id
                 actions.append(.post(Self.completionNotice(id: id, agent: agent, failed: failed, state: state, privacy: privacy)))
@@ -96,6 +112,11 @@ public struct NotificationPlanner: Sendable {
 
             case .left(let agent) where agent.role == .lead:
                 if let id = completions.removeValue(forKey: agent.session) { actions.append(.remove([id])) }
+                if let id = replies.removeValue(forKey: agent.session) { actions.append(.remove([id])) }
+                repliedTurns[agent.session] = nil
+
+            case .cueChanged(let agent):
+                planReply(agent, state: state, privacy: privacy, into: &actions)
 
             default:
                 continue
@@ -118,6 +139,23 @@ public struct NotificationPlanner: Sendable {
         }
         if !cleared.isEmpty { actions.append(.remove(cleared)) }
         return actions
+    }
+
+    /// 답변 필요 (M6(4c)): 응답마다 한 번. 질문 도구의 승인 대기 알림이 떠 있거나, 사용자가 데스크톱 앱에서 그 세션을
+    /// 보고 있으면 띄우지 않습니다(그 응답은 판단한 것으로 칩니다). 답하거나(새 요청) 답변 필요가 풀리면 지웁니다.
+    private mutating func planReply(_ agent: Agent, state: OfficeState, privacy: PrivacyLevel, into actions: inout [NoticeAction]) {
+        let session = agent.session
+        guard agent.cue == .reply else {
+            if let id = replies.removeValue(forKey: session) { actions.append(.remove([id])) }
+            return
+        }
+        guard settings.reply, let turn = state.parts[session]?.completedAt, repliedTurns[session] != turn else { return }
+        repliedTurns[session] = turn
+        guard waiting[agent.id] == nil, !state.isViewing(session) else { return }
+        if let id = completions.removeValue(forKey: session) { actions.append(.remove([id])) }
+        let id = "reply.\(session.raw)"
+        replies[session] = id
+        actions.append(.post(Self.replyNotice(id: id, agent: agent, state: state, privacy: privacy)))
     }
 
     // MARK: - 문구
@@ -143,6 +181,13 @@ public struct NotificationPlanner: Sendable {
         return notice(
             id: id, kind: .completion, title: "\(agent.title.label) \(failed ? "응답 중단" : "응답 완료")", body: body, agent: agent,
             state: state, isUpdate: false)
+    }
+
+    static func replyNotice(id: String, agent: Agent, state: OfficeState, privacy: PrivacyLevel) -> OfficeNotice {
+        let sessionTitle = privacy == .detailed ? state.parts[agent.session]?.title.flatMap { $0.isEmpty ? nil : $0 } : nil
+        let body = sessionTitle.map { "\($0) · 답을 기다려요" } ?? "응답을 마치고 답을 기다려요"
+        return notice(
+            id: id, kind: .reply, title: "\(agent.title.label) 답변 대기", body: body, agent: agent, state: state, isUpdate: false)
     }
 
     private static func notice(

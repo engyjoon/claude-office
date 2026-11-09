@@ -246,16 +246,19 @@ enum FocusDetector {
 extension NotificationSettings {
     static let permissionKey = "notify.permission"
     static let completionKey = "notify.completion"
+    static let replyKey = "notify.reply"
 
-    /// 저장된 값이 없으면 기본값 (승인 대기 켬, 응답 완료 끔)
+    /// 저장된 값이 없으면 기본값 (승인 대기 켬, 응답 완료 끔, 답변 필요 켬)
     init(defaults: UserDefaults) {
         self.init()
         if defaults.object(forKey: Self.permissionKey) != nil { permission = defaults.bool(forKey: Self.permissionKey) }
         if defaults.object(forKey: Self.completionKey) != nil { completion = defaults.bool(forKey: Self.completionKey) }
+        if defaults.object(forKey: Self.replyKey) != nil { reply = defaults.bool(forKey: Self.replyKey) }
     }
 
     func save(to defaults: UserDefaults) {
         defaults.set(permission, forKey: Self.permissionKey)
         defaults.set(completion, forKey: Self.completionKey)
+        defaults.set(reply, forKey: Self.replyKey)
     }
 }

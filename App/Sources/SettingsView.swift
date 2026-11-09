@@ -397,7 +397,7 @@ struct MiniOfficeSettingsView: View {
 
 // MARK: - 알림
 
-/// 알림 설정 (설계서 §10 알림, M5(3)): 승인 대기·응답 완료 켜기·끄기, 권한 상태, 집중 모드
+/// 알림 설정 (설계서 §10 알림, M5(3)): 승인 대기·답변 필요(M6(4c))·응답 완료 켜기·끄기, 권한 상태, 집중 모드
 struct NotificationSettingsView: View {
     let model: AppModel
 
@@ -408,6 +408,10 @@ struct NotificationSettingsView: View {
                     "승인 대기 알림",
                     detail: "누군가 권한 승인을 기다리기 시작하면 바로 알려요. 대기가 풀리면 알림 센터에서 지워요.",
                     isOn: binding(\.permission))
+                DetailToggle(
+                    "답변 필요 알림",
+                    detail: "세션이 질문이나 결정 요청으로 응답을 마치면 한 번 알려요. 데스크톱 앱에서 그 세션을 보고 있으면 띄우지 않고, 답하면 지워요.",
+                    isOn: binding(\.reply))
                 DetailToggle(
                     "응답 완료 알림",
                     detail: "세션이 응답을 마치면(Stop) 알려요. 세션마다 마지막 하나만 남아요.",

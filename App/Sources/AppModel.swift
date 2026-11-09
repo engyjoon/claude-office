@@ -494,7 +494,7 @@ final class AppModel {
         engine.notificationSettings = settings
         settings.save(to: .standard)
         // 처음 켜는 순간이 "알림이 필요할 때"입니다
-        if (settings.permission || settings.completion), notificationAuthorization == .notDetermined {
+        if (settings.permission || settings.completion || settings.reply), notificationAuthorization == .notDetermined {
             requestNotificationAuthorization()
         }
     }

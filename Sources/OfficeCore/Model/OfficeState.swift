@@ -282,6 +282,12 @@ public struct OfficeState: Sendable {
         }
     }
 
+    /// 사용자가 데스크톱 앱에서 지금 그 세션을 보고 있음 (데스크톱 앱이 맨 앞이고 가장 최근에 연 세션, M6(4c) 알림 생략)
+    public func isViewing(_ session: SessionID) -> Bool {
+        guard let host = parts[session]?.hostSession else { return false }
+        return host == focusedHost
+    }
+
     /// 사용자가 그 세션의 응답을 봤음 (사무실·미니에서 캐릭터를 누름). "확인 안 함"이 풀립니다. "답변 필요"는 답할 때까지 그대로.
     public mutating func acknowledge(_ session: SessionID, at now: Date) -> [Beat] {
         guard parts[session] != nil else { return [] }

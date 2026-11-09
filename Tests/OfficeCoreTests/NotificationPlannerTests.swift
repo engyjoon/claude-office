@@ -217,4 +217,102 @@ struct NotificationPlannerTests {
         office.send(hook.make("SubagentStart", agent: reviewer))
         #expect(posts(office.send(hook.make("SubagentStop", agent: reviewer))).isEmpty)
     }
+
+    // MARK: - 답변 필요 (M6(4c))
+
+    func ask(_ text: String = "A안과 B안 중 어느 쪽으로 할까요?") -> JSONValue {
+        hook.make("Stop", ["last_assistant_message": .string(text)])
+    }
+
+    /// 데스크톱 앱 세션 정보 (응답 요약 판정, 지금 보고 있는지)
+    func desktop(_ office: inout Office, reply: Bool? = nil, viewing: Bool = false) -> [NoticeAction] {
+        let resident = ResidentSession(
+            session: SessionID("s1"), hostSession: "local_s1", rootCwd: hook.cwd, isFocused: viewing, replyRequest: reply)
+        let at = Fixture.epoch.addingTimeInterval(office.clock + 0.5)
+        _ = office.engine.syncResidents(
+            ResidentRoll(residents: [resident], openHostSessions: ["local_s1"], isReliable: true, readAt: at), at: at)
+        return office.engine.drainNotices()
+    }
+
+    @Test("답변 필요 알림은 기본으로 켜져 있고 응답마다 한 번, 답하면 지움")
+    func replyOnce() throws {
+        var office = Office()
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        let asked = posts(office.send(ask()))
+        let notice = try #require(asked.first)
+        #expect(asked.count == 1)
+        #expect(notice.kind == .reply)
+        #expect(notice.title == "메인 답변 대기")
+        #expect(notice.subtitle == "a-sdn-portal")
+        #expect(notice.body == "응답을 마치고 답을 기다려요")
+        #expect(notice.term == "iTerm.app")
+        // 그냥 끝난 응답은 알리지 않음
+        #expect(removed(office.send(hook.make("UserPromptSubmit", ["prompt": "y"]))) == [notice.id])
+        #expect(posts(office.send(hook.make("Stop", ["last_assistant_message": "다 했어요."]))).isEmpty)
+        // 다음 응답이 또 질문이면 다시 한 번
+        office.send(hook.make("UserPromptSubmit", ["prompt": "z"]))
+        #expect(posts(office.send(ask())).map(\.id) == [notice.id])
+    }
+
+    @Test("같은 응답이면 데스크톱 앱 요약으로 판정이 바뀌었다 돌아와도 다시 띄우지 않음")
+    func replySameTurnOnce() {
+        var office = Office()
+        _ = desktop(&office)
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        let first = posts(office.send(ask()))
+        #expect(first.count == 1)
+        #expect(first.first?.hostSession == "local_s1")
+        // 요약이 "완료"라고 하면 답변 필요가 풀려 알림을 지움
+        #expect(removed(desktop(&office, reply: false)) == [first[0].id])
+        // 요약이 다시 "막힘"이어도 같은 응답이라 띄우지 않음
+        #expect(posts(desktop(&office, reply: true)).isEmpty)
+        #expect(office.engine.state.lead(of: SessionID("s1"))?.cue == .reply)
+    }
+
+    @Test("마지막 문장은 질문이 아니어도 요약이 막힘이면 한 번 띄움")
+    func replyFromSummary() {
+        var office = Office()
+        _ = desktop(&office)
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        #expect(posts(office.send(hook.make("Stop", ["last_assistant_message": "정리했어요."]))).isEmpty)
+        let late = posts(desktop(&office, reply: true))
+        #expect(late.map(\.kind) == [.reply])
+    }
+
+    @Test("데스크톱 앱에서 그 세션을 보고 있으면 띄우지 않음 (그 응답은 다시 띄우지 않음)")
+    func replySkippedWhileViewing() {
+        var office = Office()
+        _ = desktop(&office, viewing: true)
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        #expect(posts(office.send(ask())).isEmpty)
+        #expect(office.engine.state.lead(of: SessionID("s1"))?.cue == .reply)
+        // 다른 세션으로 옮겨 가도 이미 본 응답이라 띄우지 않음
+        #expect(posts(desktop(&office, reply: true)).isEmpty)
+    }
+
+    @Test("질문 도구의 승인 대기 알림과 겹치지 않음")
+    func replyDoesNotOverlapQuestionTool() {
+        var office = Office()
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        let question = hook.tool("PreToolUse", "AskUserQuestion", id: "q1", input: ["questions": []])
+        let asked = posts(office.send(question))
+        #expect(asked.map(\.kind) == [.permission])
+        // 질문에 답하지 않은 채 응답이 질문으로 끝나도 답변 필요 알림을 또 띄우지 않고, 질문 알림만 지움
+        let ended = office.send(ask())
+        #expect(posts(ended).isEmpty)
+        #expect(removed(ended) == [asked[0].id])
+    }
+
+    @Test("답변 필요 알림을 끄면 띄우지 않고, 응답 완료 알림을 켜 두면 질문으로 끝난 응답은 답변 필요 하나만")
+    func replySettings() {
+        var off = Office(settings: NotificationSettings(permission: true, completion: false, reply: false))
+        off.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        #expect(posts(off.send(ask())).isEmpty)
+
+        var both = Office(settings: NotificationSettings(permission: true, completion: true, reply: true))
+        both.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        #expect(posts(both.send(ask())).map(\.kind) == [.reply])
+        both.send(hook.make("UserPromptSubmit", ["prompt": "y"]))
+        #expect(posts(both.send(hook.make("Stop"))).map(\.kind) == [.completion])
+    }
 }

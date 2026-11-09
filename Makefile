@@ -60,7 +60,7 @@ serve:
 replay:
 	$(SWIFT) run -q office-sim replay Scenarios/m0-observed.jsonl --speed 2
 
-## 실행 중인 앱으로 승인 대기 알림 시나리오를 1배속 전송 (40초 대기 → 풀림 → 완료 → 퇴근, 약 1분)
+## 실행 중인 앱으로 알림 시나리오를 1배속 전송 (승인 대기 40초 → 풀림 → 완료 → 질문으로 끝난 응답의 답변 대기 → 답함 → 퇴근, 약 1분 반)
 notify-demo:
 	$(SWIFT) run -q office-sim replay Scenarios/notify.jsonl
 
