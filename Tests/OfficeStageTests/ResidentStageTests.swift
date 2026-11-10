@@ -24,7 +24,7 @@ struct ResidentStageTests {
     @Test("앱을 켤 때 우르르 걸어 들어오지 않는다: 제자리에 바로 놓이고 효과음이 없다")
     func noCrowdOnLaunch() throws {
         var h = FloorHarness()
-        settle(&h, roll(h, [("a", "/w/office", 7200), ("b", "/w/blog", 86400 * 3), ("c", "/w/site", 90)]))
+        settle(&h, roll(h, [("a", "/w/office", 7200.0), ("b", "/w/blog", 86400.0 * 3), ("c", "/w/site", 90.0)]))
         h.run(until: 0.5)
         #expect(h.stage.sortedActors.count == 3)
         #expect(h.stage.sortedActors.allSatisfy { !$0.isWalking })
@@ -64,7 +64,8 @@ struct RecentRowsTests {
     func newSessionReplacesOldResident() throws {
         var h = FloorHarness()  // 기본 창 = 3행
         let now = h.epoch
-        let residents = [("a", 60.0), ("b", 86400 * 3), ("c", 86400 * 11), ("d", 86400 * 12)].map {
+        let ages: [(String, Double)] = [("a", 60), ("b", 86400 * 3), ("c", 86400 * 11), ("d", 86400 * 12)]
+        let residents = ages.map {
             ResidentSession(session: SessionID($0.0), hostSession: "local_\($0.0)", rootCwd: "/w/\($0.0)", lastActivity: now.addingTimeInterval(-$0.1))
         }
         let roll = ResidentRoll(residents: residents, openHostSessions: Set(residents.map(\.hostSession)), isReliable: true, readAt: now)

@@ -557,8 +557,8 @@ final class OfficeScene: SKScene {
         let officeWidth = store.stage.layout.width
         let pad = OfficeLayout.padding
         let scale = OfficeLayout.displayScale(viewWidth: view.width - pad * 2, viewHeight: view.height - pad * 2)
-        let left = max(pad * scale, (view.width - officeWidth * scale) / 2)
-        let top = pad * scale
+        let left: Double = max(pad * scale, (Double(view.width) - officeWidth * scale) / 2)
+        let top: Double = pad * scale
         world.setScale(scale)
         world.position = CGPoint(x: left, y: view.height - top - officeHeight * scale)
         return MapRect(-left / scale, -top / scale, view.width / scale, view.height / scale)
