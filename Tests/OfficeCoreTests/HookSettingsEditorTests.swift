@@ -102,4 +102,23 @@ struct AgentDefinitionTests {
         #expect(AgentDefinition.parse(markdown: "# 제목\n본문") == nil)
         #expect(AgentDefinition.parse(markdown: "---\ndescription: x\n---\n") == nil)
     }
+
+    @Test("블록 값(|, >)과 들여 쓴 이어지는 줄, 큰따옴표의 \\n을 읽는다")
+    func multiline() {
+        let block = "---\nname: a\ndescription: |\n  첫 줄\n  둘째 줄\nmodel: opus\n---\n"
+        #expect(AgentDefinition.parse(markdown: block) == AgentDefinition(name: "a", description: "첫 줄\n둘째 줄", model: "opus"))
+        let folded = "---\nname: b\ndescription: >-\n  하나\n  둘\n---\n"
+        #expect(AgentDefinition.parse(markdown: folded)?.description == "하나 둘")
+        let continued = "---\nname: c\ndescription: 앞부분\n  뒷부분\ntools: Read\n---\n"
+        #expect(AgentDefinition.parse(markdown: continued)?.description == "앞부분 뒷부분")
+        let escaped = "---\nname: d\ndescription: \"설명\\n<example>예</example>\"\n---\n"
+        #expect(AgentDefinition.parse(markdown: escaped)?.description == "설명\n<example>예</example>")
+    }
+
+    @Test("카드용 설명은 태그 블록 앞까지, 공백을 하나로 줄인다")
+    func summary() {
+        #expect(AgentDefinition(name: "a", description: "리뷰  담당.\n PR 전에 사용\n<example>긴 예시</example>").summary == "리뷰 담당. PR 전에 사용")
+        #expect(AgentDefinition(name: "a", description: "<example>예시만</example>").summary == nil)
+        #expect(AgentDefinition(name: "a").summary == nil)
+    }
 }

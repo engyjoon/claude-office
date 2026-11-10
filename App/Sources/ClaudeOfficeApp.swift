@@ -63,6 +63,7 @@ struct OfficeWindowView: View {
                         if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
                             AgentCard(
                                 row: row, team: team, privacy: model.privacy, timeline: model.inspectorTimeline,
+                                agentDescription: model.agentDescription(for: row, in: team),
                                 onSelect: { model.select($0) },
                                 onFocus: { model.focusAgent(id) },
                                 onClose: { model.select(nil) })

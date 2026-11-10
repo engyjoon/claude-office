@@ -12,6 +12,8 @@ struct AgentCard: View {
     let team: RosterTeam
     let privacy: PrivacyLevel
     let timeline: AgentTimeline
+    /// 직접 만든 에이전트면 정의 파일(`.claude/agents/*.md`)의 설명 (설계서 §4.5)
+    var agentDescription: String? = nil
     /// 다른 사람으로 고르기 (서브 목록, 소속 메인)
     let onSelect: (AgentID) -> Void
     /// 그 세션의 Claude 앱이나 터미널을 앞으로
@@ -104,8 +106,20 @@ struct AgentCard: View {
                 // 서브에이전트면 어떤 에이전트인지 (화면의 이름에는 쓰지 않고 여기에만 보여 줍니다)
                 GridRow {
                     label("에이전트")
-                    Text("\(agentType) · \(row.kind == .fixed ? "직접 만든 에이전트" : "기본 에이전트")")
-                        .font(.system(size: 12)).lineLimit(2).textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(agentType) · \(row.kind == .fixed ? "직접 만든 에이전트" : "기본 에이전트")")
+                            .font(.system(size: 12)).lineLimit(2).textSelection(.enabled)
+                        if let agentDescription {
+                            // 정의 파일의 설명 (길면 4줄까지, 전체는 마우스를 올리면)
+                            Text(agentDescription)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Self.labelColor)
+                                .lineLimit(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .help(agentDescription)
+                        }
+                    }
                 }
             } else if let title = row.sessionTitle {
                 GridRow {

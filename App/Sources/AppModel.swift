@@ -95,6 +95,8 @@ final class AppModel {
         ?? EndpointFile.defaultURL()
     /// 데스크톱 앱 세션 정보 (방·직함 힌트, 설계서 §4.4)
     let desktopSessions = DesktopSessionDirectory()
+    /// 직접 만든 에이전트의 정의 파일 (신원 카드의 에이전트 설명, 설계서 §4.5)
+    let agentDefinitions = AgentDefinitionDirectory()
     /// 무대 상태 (M3). 사무실 창이 닫혀 있어도 계속 흘러가야 하므로 씬이 아니라 모델이 갱신합니다.
     let stageStore = StageStore()
     let officeScene: OfficeScene
@@ -352,6 +354,12 @@ final class AppModel {
         // 고른 직원이 퇴근하면 카드를 닫습니다
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
         refreshStatusLine()
+    }
+
+    /// 직접 만든 에이전트(서브)면 정의 파일의 설명. 기본 에이전트·세션이거나 정의를 못 찾으면 nil.
+    func agentDescription(for row: RosterRow, in team: RosterTeam) -> String? {
+        guard row.kind == .fixed, let type = row.agentType else { return nil }
+        return agentDefinitions.definition(named: type, near: team.folder)?.summary
     }
 
     func select(_ id: AgentID?) {
