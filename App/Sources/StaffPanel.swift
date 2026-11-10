@@ -156,7 +156,6 @@ private struct DirectoryList: View {
     let model: AppModel
 
     var body: some View {
-        let options = model.directoryOptions
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text("디렉토리").font(.system(size: 13, weight: .bold))
@@ -167,8 +166,7 @@ private struct DirectoryList: View {
             }
             // SwiftUI .menu Picker는 내용 폭만큼만 그려져 가운데에 놓이므로, 행 폭을 그대로 받는 NSPopUpButton을 씁니다.
             DirectoryPopUp(
-                items: [DirectoryPopUp.Item(title: label(nil), path: nil)]
-                    + options.map { DirectoryPopUp.Item(title: label($0), path: $0.path) },
+                items: model.directoryChoices.map { DirectoryPopUp.Item(title: $0.title, path: $0.path) },
                 selection: model.selectedFolder,
                 tooltip: model.selectedFolder ?? "Claude 데스크톱 앱에 열린 모든 디렉토리 (새로 연 디렉토리도 자동으로 보여요)",
                 onSelect: { model.selectFolder($0) })
@@ -182,19 +180,6 @@ private struct DirectoryList: View {
         .padding(.horizontal, 14)
         .padding(.top, 12)
         .padding(.bottom, 10)
-    }
-
-    /// "claude-office · 메인 2 · 7명"
-    private func label(_ folder: DesktopFolder?) -> String {
-        guard let folder else {
-            let people = model.roster.agentCount
-            return people > 0 ? "모두 · \(people)명" : "모두"
-        }
-        let count = model.headcount(folder: folder.path)
-        var text = folder.name
-        if !model.directories.contains(where: { $0.path == folder.path }) { text += " (닫힘)" }
-        if count.people > 0 { text += count.mains > 1 ? " · 메인 \(count.mains) · \(count.people)명" : " · \(count.people)명" }
-        return text
     }
 }
 

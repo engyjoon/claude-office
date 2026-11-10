@@ -507,13 +507,10 @@ final class AppModel {
         selection.all ? nil : selection.folders.sorted().first
     }
 
-    /// 드롭다운에 보여 줄 디렉토리: 데스크톱 앱에 열린 디렉토리 + (닫혔지만) 지금 고른 디렉토리
-    var directoryOptions: [DesktopFolder] {
-        var options = directories
-        if let selected = selectedFolder, !options.contains(where: { $0.path == selected }) {
-            options.append(DesktopFolder(path: selected, sessions: 0))
-        }
-        return options
+    /// 디렉토리 고르기 항목: "모두" + 데스크톱 앱에 열린 디렉토리 + (닫혔지만) 지금 고른 디렉토리.
+    /// 사무실 창 드롭다운과 미니 오른쪽 클릭 메뉴 "디렉토리 ▸"(M6(18))가 같이 씁니다.
+    var directoryChoices: [DirectoryChoice] {
+        DirectoryChoice.list(open: directories, selected: selectedFolder, total: roster.agentCount) { headcount(folder: $0) }
     }
 
     /// 그 디렉토리에서 지금 사무실에 있는 메인 수와 사람 수
