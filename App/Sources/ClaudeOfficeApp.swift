@@ -24,7 +24,7 @@ struct ClaudeOfficeApp: App {
         // 세션 패널을 숨기거나 보일 때만 너비가 패널 폭만큼 바뀝니다.
         .windowResizability(.contentSize)
 
-        Window("Claude Office 이벤트 로그", id: WindowID.eventLog) {
+        Window(EventLogView.title, id: WindowID.eventLog) {
             EventLogView(model: model)
         }
         .defaultSize(width: 680, height: 440)

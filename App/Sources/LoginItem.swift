@@ -67,23 +67,3 @@ final class LoginItem {
         }
     }
 }
-
-/// 설정 창을 앞으로 가져옵니다. 메뉴바 앱(LSUIElement)은 활성화가 끝나기 전에 설정 창이 열리면
-/// 다른 앱 창 뒤에 깔리기 쉬워서, 활성화한 뒤 창이 생길 때까지 몇 번 앞으로 올립니다 (M5(8)).
-enum SettingsWindow {
-    static func bringToFront() {
-        NSApp.activate(ignoringOtherApps: true)
-        for delay in [0.0, 0.1, 0.3, 0.6] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard let window else { return }
-                window.makeKeyAndOrderFront(nil)
-                window.orderFrontRegardless()
-            }
-        }
-    }
-
-    /// SwiftUI `Settings` 장면의 창
-    static var window: NSWindow? {
-        NSApp.windows.first { $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window" && $0.isVisible }
-    }
-}

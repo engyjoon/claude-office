@@ -111,14 +111,15 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             // 키보드 (M6(7)): 드롭다운이 열려 있으면 ⌘O·⌘L·⌘,·⌘Q로 바로 (버튼 Tab 이동은 시스템 "키보드 탐색"을 켰을 때만)
+            // 메뉴바 앱은 창이 다른 앱 뒤에 열리기 쉬워 활성화한 뒤 앞으로 올립니다 (M6(17), `WindowFront`)
             Button("사무실 보기") {
-                NSApp.activate()
-                openWindow(id: WindowID.office)
+                model.openOfficeWindow()
             }
             .keyboardShortcut("o")
             Button("이벤트 로그") {
-                NSApp.activate()
-                openWindow(id: WindowID.eventLog)
+                WindowFront.bring(open: { openWindow(id: WindowID.eventLog) }) {
+                    NSApp.windows.first { $0.title == EventLogView.title && ($0.isVisible || $0.isMiniaturized) }
+                }
             }
             .keyboardShortcut("l")
             Button("설정…") {

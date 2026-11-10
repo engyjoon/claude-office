@@ -730,17 +730,15 @@ final class AppModel {
     }
 
     func openSettingsWindow() {
-        NSApp.activate()
-        openSettingsAction?()
-        SettingsWindow.bringToFront()
+        WindowFront.bring(open: openSettingsAction) { SettingsWindow.window }
     }
 
+    /// 사무실 창을 열고 다른 앱 창 위로 가져옵니다 (미니 누르기·메뉴바 "사무실 보기"·설정, M6(17)).
+    /// 이미 열려 있으면 앞으로, 최소화돼 있으면 Dock에서 꺼내고, 다른 Space에 있으면 지금 Space로 데려옵니다.
     func openOfficeWindow() {
-        NSApp.activate()
-        if let open = openOfficeWindowAction {
-            open()
-        } else if let window = NSApp.windows.first(where: { $0.title == OfficeWindowView.title }) {
-            window.makeKeyAndOrderFront(nil)
+        let open = openOfficeWindowAction ?? { OfficeWindow.window?.makeKeyAndOrderFront(nil) }
+        WindowFront.bring(open: open) {
+            OfficeWindow.window.flatMap { $0.isVisible || $0.isMiniaturized ? $0 : nil }
         }
     }
 

@@ -2,6 +2,8 @@ import SwiftUI
 
 /// 받은 훅과 연출 지시를 시간순으로 보여주는 창. M3에서 사무실 화면이 생기기 전까지 동작을 확인하는 용도입니다.
 struct EventLogView: View {
+    static let title = "Claude Office 이벤트 로그"
+
     let model: AppModel
     @State private var showDirectives = false
 
