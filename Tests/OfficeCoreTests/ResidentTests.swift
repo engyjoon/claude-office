@@ -101,6 +101,30 @@ struct ResidentTests {
         #expect(later.filter { $0.agent == nap.id }.isEmpty)  // 이미 잠든 사람은 그대로
     }
 
+    @Test("자는 서브가 빈 책상을 메우면 바로 새 책상으로 옮겨 이어 잔다 (옛 책상에 남아 빈 책상이 늘어나지 않게)")
+    func sleepingSubFillsHole() throws {
+        // 2026-11-10 실제 증상: btw 세션들이 퇴근한 뒤 서브 명패는 1번 책상에 있는데, 서브는 6번 책상에서 계속 자고 있었음
+        var engine = OfficeEngine(seed: 1)
+        let subs = (1...4).map { resident("C\($0)", "local_c\($0)", ancestors: ["A"], idle: 3600) }
+        let everyone = [resident("A", "local_a", idle: 3600)] + subs
+        _ = engine.syncResidents(roll(everyone), at: at(0))
+        let last = try #require(engine.state.lead(of: SessionID("C4")))
+        #expect(last.seat == Seat(desk: 4))
+        #expect(engine.choreographer.spot(of: last.id) == .seat(last.teamID, Seat(desk: 4)))
+
+        // 앞 서브 셋이 퇴근 → 끝 서브가 1번 책상으로
+        let left = Array(everyone.prefix(1)) + [subs[3]]
+        var directives = engine.syncResidents(roll(left), at: at(1))
+        for step in 1...40 { directives += engine.tick(at: at(1 + Double(step) * 0.25)) }
+        let moved = try #require(engine.state.lead(of: SessionID("C4")))
+        #expect(moved.seat == Seat(desk: 1))
+        #expect(engine.choreographer.spot(of: moved.id) == .seat(moved.teamID, Seat(desk: 1)))
+        // 자던 그대로 새 책상에서 이어 잠
+        let actions = directives.filter { $0.agent == moved.id }.map(\.action)
+        #expect(actions.walks == [.seat(moved.teamID, Seat(desk: 1))])
+        #expect(actions.last(where: { if case .pose = $0 { true } else { false } }) == .pose(.sleeping))
+    }
+
     @Test("다시 맞춰도 같은 사람: 중복 없음, 지시 없음")
     func idempotent() throws {
         var engine = OfficeEngine(seed: 1)

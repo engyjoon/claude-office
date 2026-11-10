@@ -113,10 +113,28 @@ public struct Choreographer: Sendable {
 
     public mutating func handle(_ beats: [Beat], at now: Date) -> [Directive] {
         var out: [Directive] = []
-        for beat in beats {
+        for beat in Self.latestSeatBeats(beats) {
             handle(beat, at: now, into: &out)
         }
         return out
+    }
+
+    /// 한 번에 여러 사람이 퇴근하면 같은 사람이 빈 책상을 차례로 메우며(4 → 3 → 2 → 1) 자리 비트를 여러 번 받습니다.
+    /// 책상마다 들르지 않고 마지막 책상으로 바로 가도록, 같은 사람의 앞선 `retitled`·`reseated`는 버립니다 (뒤 비트가 최신 직함·자리를 담음).
+    static func latestSeatBeats(_ beats: [Beat]) -> [Beat] {
+        func seatChange(_ beat: Beat) -> AgentID? {
+            switch beat {
+            case .retitled(let agent), .reseated(let agent): agent.id
+            default: nil
+            }
+        }
+        var seen: Set<AgentID> = []
+        var kept: [Beat] = []
+        for beat in beats.reversed() {
+            if let id = seatChange(beat), !seen.insert(id).inserted { continue }
+            kept.append(beat)
+        }
+        return kept.reversed()
     }
 
     private mutating func handle(_ beat: Beat, at now: Date, into out: inout [Directive]) {
@@ -739,18 +757,21 @@ public struct Choreographer: Sendable {
     }
 
     /// 자리(책상·행)가 바뀐 직원을 새 자리로 옮깁니다. 자기 책상에 있으면 바로, 다른 곳에 있으면 돌아올 때 새 자리로 갑니다.
+    /// 손을 든 채(승인·질문 대기)면 답을 받은 뒤 옮깁니다(`resolveWaiting`).
+    /// 자는 중이면 바로 옮겨 새 책상에서 이어 잡니다: 쉬는 세션은 며칠씩 깨지 않아, 깨어날 때까지 미루면 옛 책상에 남아
+    /// 그 사이 책상이 모두 빈 채로 행이 늘어나 있었습니다 (2026-11-10, btw 세션들이 퇴근한 뒤 서브가 7번째 책상에서 잠).
     private mutating func reseat(_ agent: Agent, at now: Date, into out: inout [Directive]) {
-        guard let presence = presences[agent.id], case .seat = presence.spot else { return }
-        let target = seatSpot(agent)
+        guard let presence = presences[agent.id], case .seat = presence.spot, !presence.waiting else { return }
+        returnToOwnDesk(agent.id, into: &out)
+    }
+
+    /// 책상에 앉아 있는데 자기 책상이 아니면(자리가 바뀜) 자기 책상으로 옮기고 하던 자세를 이어 갑니다.
+    private mutating func returnToOwnDesk(_ id: AgentID, into out: inout [Directive]) {
+        guard let presence = presences[id], presence.spot.isSeat, !presence.waiting else { return }
+        let target = seatSpot(presence.agent)
         guard target != presence.spot else { return }
-        if presence.waiting || presence.rest > .none {
-            // 손을 든 채이거나 자는 중이면 깨어나거나 승인이 끝난 뒤 옮깁니다
-            let returnAt = now.addingTimeInterval(config.linger)
-            modify(agent.id) { $0.returnAt = returnAt }
-            return
-        }
-        move(agent.id, to: target, into: &out)
-        out.append(Directive(agent.id, .pose(currentPose(presence, atDesk: isDesk(target)))))
+        move(id, to: target, into: &out)
+        out.append(Directive(id, .pose(currentPose(presence, atDesk: isDesk(target)))))
     }
 
     /// 자리를 옮긴 뒤 이어 갈 자세
@@ -847,6 +868,8 @@ public struct Choreographer: Sendable {
             $0.shout = nil
             $0.seated = $0.spot.isSeat
         }
+        // 손을 든 동안 자리가 바뀌었으면 이제 옮깁니다
+        returnToOwnDesk(id, into: &out)
     }
 
     private mutating func say(
