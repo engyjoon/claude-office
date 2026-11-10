@@ -539,6 +539,7 @@ final class AppModel {
         stageStore.floor.setSelection(selection, engine: engine)
         updateHidden()
         if let selectedAgent, visibleRoster.row(for: selectedAgent) == nil { select(nil) }
+        refreshMiniFocus()
         refreshStatusLine()
     }
 
@@ -633,10 +634,11 @@ final class AppModel {
 
     // MARK: - 미니 사무실 (M5(4))
 
-    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다): 답변 필요 → 완료 → 가장 마지막에 요청
+    /// 보여 줄 행을 다시 고릅니다 (훅을 받을 때, 0.25초마다, 디렉토리를 고를 때): 답변 필요 → 완료 → 가장 마지막에 요청.
+    /// 사무실 창에서 고른 디렉토리의 행만 후보입니다 (M6(16)).
     private func refreshMiniFocus(now: Date = Date()) {
         let next = MiniFocus.next(
-            previous: miniFocus, state: engine.state, pinned: nil, autoSwitch: miniSettings.autoSwitch, now: now)
+            previous: miniFocus, state: engine.state, selection: selection, pinned: nil, autoSwitch: miniSettings.autoSwitch, now: now)
         if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
         if next != miniFocus { miniFocus = next }
     }
@@ -699,6 +701,7 @@ final class AppModel {
         miniPanel?.hide()
         openOfficeWindow()
         if let id, roster.row(for: id) != nil {
+            // 미니는 고른 디렉토리 안에서만 보여 주므로(M6(16)) 보통은 그대로입니다. 그 사이 디렉토리를 바꿨을 때만 "모두"로.
             if visibleRoster.row(for: id) == nil { selectAllFolders() }
             select(id)
         }

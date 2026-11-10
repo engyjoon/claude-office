@@ -568,6 +568,7 @@ enum MiniWindowDrag {
 /// - 완료: 초록, "✓ 응답 완료 · 2분 전"
 /// - 그 밖: "작업 중 · 요청 5분 전" / "쉬는 중 · 요청 1시간 전"
 /// 메인·디렉토리 이름은 사무실의 명패·폴더 표지에 이미 있어 쓰지 않습니다. 오른쪽 끝은 ✕ 버튼 자리입니다.
+/// 사무실 창에서 디렉토리를 골랐으면 그 디렉토리의 메인만 보여 주고 칩도 그 안에서만 셉니다 (M6(16)).
 struct MiniHeaderView: View {
     let model: AppModel
     /// 시스템 "대비 증가" (M6(7)): 칩 테두리를 잉크색으로
@@ -583,7 +584,8 @@ struct MiniHeaderView: View {
     private static let maxChips = 3
 
     var body: some View {
-        let roster = model.roster
+        // 사무실 창에서 고른 디렉토리의 행만 (M6(16)): 보여 주는 메인·다른 메인 칩 모두 같은 범위
+        let roster = model.visibleRoster
         let focus = model.miniFocus
         let current = roster.teams.first { $0.id == focus.team }
         let waiting = (current?.rows ?? []).filter { $0.status == .waitingForPermission }.sorted { $0.since < $1.since }
@@ -596,7 +598,7 @@ struct MiniHeaderView: View {
         // 글자가 바뀌는 때만 (M6(1)): 답변 대기 "12초째"는 1초마다, "3분 전"은 1분마다
         // 미니가 숨어 있으면 멈춥니다. 칩까지 안에 두는 것은 VoiceOver 값이 화면 문구와 같은 시각을 쓰게 하려고 (M6(7b))
         TimelineView(NextChangeSchedule { [line, live = model.miniVisible] in live ? Self.nextChange(line, after: $0) : nil }) { context in
-            let headline = current == nil ? "아직 출근한 직원이 없어요" : statusText(line, waitingCount: waiting.count, now: context.date)
+            let headline = current == nil ? Self.emptyText(folder: model.selectedFolder) : statusText(line, waitingCount: waiting.count, now: context.date)
             HStack(spacing: 5) {
                 Text(headline)
                     .font(.system(size: 10.5, weight: line?.kind == .normal ? .regular : .semibold))
@@ -632,6 +634,12 @@ struct MiniHeaderView: View {
                 : nightPlain ? Self.nightPaper : Self.paper)
         .overlay(alignment: .bottom) { Rectangle().fill(model.isNight ? Self.nightLine : Color(hex: 0xD8CDBE)).frame(height: 1) }
         .environment(\.colorScheme, .light)
+    }
+
+    /// 보여 줄 사람이 없을 때: "아직 출근한 직원이 없어요", 디렉토리를 골랐으면 "claude-office에는 출근한 직원이 없어요" (M6(16))
+    static func emptyText(folder: String?) -> String {
+        guard let folder else { return "아직 출근한 직원이 없어요" }
+        return "\((folder as NSString).lastPathComponent)에는 출근한 직원이 없어요"
     }
 
     /// 다른 메인 칩 순서: 답변 필요 → 완료 → 그 밖

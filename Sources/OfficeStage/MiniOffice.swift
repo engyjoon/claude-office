@@ -116,6 +116,9 @@ public enum MiniCast {
 ///    데스크톱 앱에서 그 세션을 보거나, 새 요청을 보내거나, 캐릭터를 누르면 풀립니다 (M6(4): 예전의 10분 제한 대신).
 /// 4. **최근 요청**: 가장 마지막에 요청(UserPromptSubmit)을 받은 행 (행 안의 메인·서브 세션 중 가장 최근).
 /// 5. 아무것도 없으면 먼저 온 행.
+///
+/// 후보는 사무실 창에서 고른 디렉토리의 행뿐입니다(`selection`, M6(16)). "모두"면 모든 행, 고른 디렉토리에 아무도 없으면 빈 띠.
+/// 행마다의 상태(`tiers`, 머리줄 칩)도 같은 범위만 셉니다.
 public struct MiniFocus: Hashable, Sendable {
     public enum Reason: String, Hashable, Sendable {
         case answer, pinned, completed, requested, none
@@ -182,9 +185,9 @@ public struct MiniFocus: Hashable, Sendable {
     }
 
     public static func next(
-        previous: MiniFocus, state: OfficeState, pinned: TeamID?, autoSwitch: Bool, now: Date
+        previous: MiniFocus, state: OfficeState, selection: FloorSelection = .everyone, pinned: TeamID?, autoSwitch: Bool, now: Date
     ) -> MiniFocus {
-        let teams = state.sortedTeams.filter { !state.agents(in: $0.id).isEmpty }
+        let teams = state.sortedTeams.filter { selection.contains($0) && !state.agents(in: $0.id).isEmpty }
         guard !teams.isEmpty else { return MiniFocus(team: nil, reason: .none, since: now) }
         var statuses: [TeamID: Status] = [:]
         for team in teams { statuses[team.id] = status(of: team, state: state) }

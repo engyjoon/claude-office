@@ -32,10 +32,10 @@ struct MiniOfficeTests {
          on("SubagentStart", #""agent_id":"\#(agent)","agent_type":"general-purpose""#, session)]
     }
 
-    func next(_ h: FloorHarness, _ previous: MiniFocus, pinned: TeamID? = nil, autoSwitch: Bool = true,
-              after seconds: Double = 0) -> MiniFocus {
+    func next(_ h: FloorHarness, _ previous: MiniFocus, selection: FloorSelection = .everyone, pinned: TeamID? = nil,
+              autoSwitch: Bool = true, after seconds: Double = 0) -> MiniFocus {
         MiniFocus.next(
-            previous: previous, state: h.engine.state, pinned: pinned, autoSwitch: autoSwitch,
+            previous: previous, state: h.engine.state, selection: selection, pinned: pinned, autoSwitch: autoSwitch,
             now: h.epoch.addingTimeInterval(h.now + seconds))
     }
 
@@ -312,5 +312,47 @@ struct MiniOfficeTests {
         #expect(h.engine.state.parts[SessionID("m1")]?.completedAt == nil)
         focus = next(h, focus)
         #expect(focus.team == m1 && focus.reason == .requested)
+    }
+
+    @Test("M6(16): 사무실 창에서 디렉토리를 고르면 미니도 그 디렉토리의 행 안에서만 우선순위를 적용, 칩도 같은 범위")
+    func focusWithinFolder() {
+        var h = FloorHarness()
+        func at(_ folder: String, _ event: String, _ extra: String = "", _ session: String) -> String {
+            hook(event, extra, session: session, cwd: folder)
+        }
+        // /w/a에 메인 둘(a1, a2), /w/b에 메인 하나(b)
+        for (index, (folder, session)) in [("/w/a", "a1"), ("/w/a", "a2"), ("/w/b", "b")].enumerated() {
+            h.hook(at(folder, "SessionStart", "", session), at: Double(index) * 0.1)
+            h.hook(at(folder, "UserPromptSubmit", #""prompt":"x""#, session), at: 1 + Double(index))
+        }
+        let (a1, a2, b) = (h.team("a1"), h.team("a2"), h.team("b"))
+        #expect(h.engine.state.teams[a1]?.folder == "/w/a" && h.engine.state.teams[b]?.folder == "/w/b")
+        let onlyA = FloorSelection(all: false, folders: ["/w/a"])
+
+        // 모두: 가장 마지막에 요청한 b. /w/a만: 그 안에서 가장 마지막에 요청한 a2, 칩도 /w/a 행만
+        #expect(next(h, .empty).team == b)
+        var focus = next(h, .empty, selection: onlyA)
+        #expect(focus.team == a2 && focus.reason == .requested)
+        #expect(focus.tiers == [a1: .requested, a2: .requested])
+
+        // 다른 디렉토리의 답변 필요는 끌어오지 않음 ("모두"면 b로)
+        h.hook(at("/w/b", "PreToolUse", #""tool_name":"AskUserQuestion","tool_use_id":"q1","tool_input":{}"#, "b"), at: 4)
+        #expect(next(h, focus).team == b && next(h, focus).reason == .answer)
+        focus = next(h, focus, selection: onlyA)
+        #expect(focus.team == a2 && focus.reason == .requested)
+
+        // 고른 디렉토리 안에서는 그대로: 확인 안 한 응답이 최근 요청보다 먼저
+        h.hook(at("/w/a", "Stop", "", "a1"), at: 5)
+        focus = next(h, focus, selection: onlyA)
+        #expect(focus.team == a1 && focus.reason == .completed)
+
+        // 다른 디렉토리 행을 보던 중에 디렉토리를 고르면 그 행을 붙잡지 않음
+        let fromB = next(h, .empty)
+        #expect(fromB.team == b)
+        #expect(next(h, fromB, selection: onlyA).team == a1)
+
+        // 고른 디렉토리에 아무도 없으면 빈 띠
+        let empty = next(h, focus, selection: FloorSelection(all: false, folders: ["/w/c"]))
+        #expect(empty.team == nil && empty.reason == .none && empty.tiers.isEmpty)
     }
 }
