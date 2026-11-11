@@ -173,19 +173,35 @@ public enum HookSettingsEditor {
     }
 
     private static func isOurs(_ group: JSONValue, marker: String) -> Bool {
-        (group["hooks"]?.arrayValue ?? []).contains { $0["command"]?.stringValue?.contains(marker) == true }
+        (group["hooks"]?.arrayValue ?? []).contains { isOurHandler($0, marker: marker) }
     }
 
+    private static func isOurHandler(_ handler: JSONValue, marker: String) -> Bool {
+        handler["command"]?.stringValue?.contains(marker) == true
+    }
+
+    /// 우리 핸들러만 지웁니다. 사용자가 같은 그룹에 넣어 둔 다른 핸들러와 그 그룹의 matcher 등은 그대로 두고,
+    /// 핸들러가 모두 빠진 그룹과 그룹이 모두 빠진 이벤트만 지웁니다. `removed`는 지운 핸들러 수입니다.
     private static func removingOurs(from hooks: JSONObject, marker: String) -> (hooks: JSONObject, removed: Int) {
         var result = hooks
         var removed = 0
         for entry in hooks.entries {
-            guard let groups = entry.value.arrayValue else { continue }
-            let kept = groups.filter { !isOurs($0, marker: marker) }
-            removed += groups.count - kept.count
-            if kept.count != groups.count {
-                result[entry.key] = kept.isEmpty ? nil : .array(kept)
+            guard let groups = entry.value.arrayValue, groups.contains(where: { isOurs($0, marker: marker) }) else { continue }
+            var kept: [JSONValue] = []
+            for group in groups {
+                guard isOurs(group, marker: marker), case .object(var object) = group,
+                    let handlers = group["hooks"]?.arrayValue
+                else {
+                    kept.append(group)
+                    continue
+                }
+                let others = handlers.filter { !isOurHandler($0, marker: marker) }
+                removed += handlers.count - others.count
+                if others.isEmpty { continue }
+                object["hooks"] = .array(others)
+                kept.append(.object(object))
             }
+            result[entry.key] = kept.isEmpty ? nil : .array(kept)
         }
         return (result, removed)
     }

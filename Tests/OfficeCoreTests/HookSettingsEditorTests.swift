@@ -63,6 +63,56 @@ struct HookSettingsEditorTests {
         #expect(restored == ["model": "opus"])
     }
 
+    @Test("제거·재설치는 우리 핸들러만 지운다: 같은 그룹의 사용자 훅과 matcher는 남고, 비는 그룹만 지운다 (개선 7)")
+    func handlerLevelRemoval() throws {
+        let shared = """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "Bash",
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "~/bin/guard.sh"
+                      },
+                      {
+                        "type": "command",
+                        "command": "\(command)"
+                      }
+                    ]
+                  }
+                ],
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\(command)"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """
+        let settings = try JSONValue.parse(shared)
+        let (removedAll, removed) = try HookSettingsEditor.uninstall(from: settings)
+        #expect(removed == 2)
+        let group = try #require(removedAll["hooks"]?["PreToolUse"]?.arrayValue?.first)
+        #expect(group["matcher"]?.stringValue == "Bash")
+        #expect(group["hooks"]?.arrayValue?.map { $0["command"]?.stringValue } == ["~/bin/guard.sh"])
+        #expect(removedAll["hooks"]?["Stop"] == nil)
+
+        // 재설치: 사용자 그룹은 그대로, 우리 핸들러는 우리 그룹으로
+        let reinstalled = try HookSettingsEditor.install(into: settings, command: command, events: ["PreToolUse"])
+        let groups = try #require(reinstalled["hooks"]?["PreToolUse"]?.arrayValue)
+        #expect(groups.count == 2)
+        #expect(groups[0]["hooks"]?.arrayValue?.map { $0["command"]?.stringValue } == ["~/bin/guard.sh"])
+        #expect(groups[1]["hooks"]?.arrayValue?.map { $0["command"]?.stringValue } == [command])
+        #expect(HookSettingsEditor.installedEvents(in: reinstalled) == ["PreToolUse"])
+    }
+
     @Test("형식이 이상한 설정은 건드리지 않고 오류를 낸다")
     func invalidShapes() {
         #expect(throws: HookSettingsError.rootIsNotObject) { try HookSettingsEditor.install(into: [1, 2], command: command, events: ["Stop"]) }

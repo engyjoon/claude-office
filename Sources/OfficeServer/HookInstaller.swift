@@ -1,14 +1,33 @@
 import Foundation
 import OfficeCore
 
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
+
 /// 앱이 훅 스크립트 위치(포트와 토큰)를 알려주는 파일 (설계서 §4.2)
 public enum EndpointFile {
+    /// 엔드포인트 파일이 이 서버(포트·토큰)의 것인지
+    public enum State: Hashable, Sendable {
+        /// 이 서버의 포트와 토큰이 적혀 있음
+        case ours
+        /// 파일이 없음 (다른 프로세스가 끝나며 지웠거나 누가 지움)
+        case missing
+        /// 다른 포트나 토큰이 적혀 있음 (다른 프로세스가 가로챔, 예: 설치된 앱이 켜진 채 `make serve`)
+        case other(port: UInt16)
+        /// 읽을 수 없거나 형식이 다름
+        case unreadable
+    }
+
     /// `~/Library/Application Support/ClaudeOffice/endpoint`
     public static func defaultURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         home.appendingPathComponent("Library/Application Support/ClaudeOffice/endpoint")
     }
 
-    /// 폴더는 700, 파일은 600 권한으로 원자적으로 씁니다.
+    /// 폴더는 700, 파일은 600 권한으로 씁니다. 같은 폴더의 임시 파일을 `rename(2)`로 옮겨, 훅 스크립트는
+    /// 언제 읽어도 옛 내용이나 새 내용 중 하나를 온전히 봅니다(지운 뒤 옮기면 그 사이에 파일이 없음).
     public static func write(port: UInt16, token: String, to url: URL) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -16,8 +35,11 @@ public enum EndpointFile {
         guard FileManager.default.createFile(atPath: temporary.path, contents: Data("\(port) \(token)\n".utf8), attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        _ = try? FileManager.default.removeItem(at: url)
-        try FileManager.default.moveItem(at: temporary, to: url)
+        guard rename(temporary.path, url.path) == 0 else {
+            let code = errno
+            try? FileManager.default.removeItem(at: temporary)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
     }
 
     public static func read(from url: URL) throws -> (port: UInt16, token: String) {
@@ -27,8 +49,19 @@ public enum EndpointFile {
         return (port, String(parts[1]))
     }
 
-    public static func remove(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
+    /// 파일에 이 서버의 포트·토큰이 적혀 있는지
+    public static func state(at url: URL, port: UInt16, token: String) -> State {
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        guard let found = try? read(from: url) else { return .unreadable }
+        return found.port == port && found.token == token ? .ours : .other(port: found.port)
+    }
+
+    /// 파일에 이 서버의 포트·토큰이 적혀 있을 때만 지웁니다. 다른 프로세스가 덮어쓴 파일은 그 프로세스의 것이라 두고,
+    /// 다른 프로세스가 끝나며 우리 파일을 지우는 일도 없습니다. 지웠으면 true.
+    @discardableResult
+    public static func removeIfOwned(at url: URL, port: UInt16, token: String) -> Bool {
+        guard state(at: url, port: port, token: token) == .ours else { return false }
+        return (try? FileManager.default.removeItem(at: url)) != nil
     }
 }
 
@@ -64,13 +97,28 @@ public struct HookInstaller: Sendable {
     public var scriptURL: URL { home.appendingPathComponent(".claude/hooks/claude-office.sh") }
     public var settingsURL: URL { home.appendingPathComponent(".claude/settings.json") }
 
-    /// 패키지에 들어 있는 훅 스크립트
-    public static var bundledScript: String {
-        guard let url = Bundle.module.url(forResource: "claude-office", withExtension: "sh"),
-            let text = try? String(contentsOf: url, encoding: .utf8)
-        else { preconditionFailure("claude-office.sh 리소스가 없습니다") }
-        return text
+    public enum InstallError: Error, Equatable, CustomStringConvertible {
+        case scriptResourceMissing
+
+        public var description: String {
+            switch self {
+            case .scriptResourceMissing: "앱에 훅 스크립트(claude-office.sh)가 들어 있지 않습니다. 앱을 다시 설치해 주세요."
+            }
+        }
     }
+
+    /// 패키지에 들어 있는 훅 스크립트. 처음 쓸 때 한 번만 읽습니다(상태를 새로 읽을 때마다 읽으면, `make install`이
+    /// 번들을 바꾸는 사이에 리소스가 잠깐 없을 수 있음). 읽지 못하면 nil이고 앱은 죽지 않습니다.
+    public static let bundledScriptText: String? = {
+        guard let url = Bundle.module.url(forResource: "claude-office", withExtension: "sh") else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }()
+
+    /// 패키지에 들어 있는 훅 스크립트 (읽지 못했으면 빈 문자열)
+    public static var bundledScript: String { bundledScriptText ?? "" }
+
+    /// 남겨 둘 settings.json 백업 수 (우리가 만든 `settings.json.bak-*`만 셉니다)
+    public static let keptBackups = 5
 
     /// settings.json에 넣을 명령. 경로에 공백이 있으면 따옴표로 감쌉니다.
     public var command: String {
@@ -87,7 +135,9 @@ public struct HookInstaller: Sendable {
         let events = HookSettingsEditor.installedEvents(in: settings)
         guard !events.isEmpty else { return .notInstalled }
         let current = try? String(contentsOf: scriptURL, encoding: .utf8)
-        return current == Self.bundledScript ? .installed(events: events) : .scriptMissingOrOutdated(events: events)
+        // 번들 스크립트를 읽지 못했으면 비교할 수 없으니, 파일이 있기만 하면 설치된 것으로 봅니다
+        let upToDate = Self.bundledScriptText.map { current == $0 } ?? (current != nil)
+        return upToDate ? .installed(events: events) : .scriptMissingOrOutdated(events: events)
     }
 
     /// 훅이 등록돼 있어도 실행되지 않게 막는 설정. 사용자 설정을 먼저, 그다음 관리 설정을 봅니다.
@@ -113,62 +163,117 @@ public struct HookInstaller: Sendable {
     }
 
     /// 스크립트를 쓰고, settings.json을 백업한 뒤 훅을 병합합니다. 여러 번 해도 결과가 같습니다.
+    /// settings.json이 바뀌지 않으면(이미 같은 훅이 있음) 쓰지도 백업하지도 않습니다(`backup == nil`).
     @discardableResult
     public func install(version: ClaudeVersion?) throws -> Report {
+        guard let script = Self.bundledScriptText else { throw InstallError.scriptResourceMissing }
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: scriptURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(Self.bundledScript.utf8).write(to: scriptURL, options: .atomic)
+        if (try? String(contentsOf: scriptURL, encoding: .utf8)) != script {
+            try Data(script.utf8).write(to: scriptURL, options: .atomic)
+        }
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
         let settings = try readSettings()
         let events = HookSettingsEditor.recommendedEvents(for: version)
         let updated = try HookSettingsEditor.install(into: settings, command: command, events: events)
-        let backup = try writeSettings(updated)
+        let backup = updated == settings ? nil : try writeSettings(updated)
         return Report(events: events, backup: backup, version: version)
     }
 
-    /// 우리 훅만 지우고 스크립트를 삭제합니다. 지운 항목 수를 돌려줍니다.
+    /// 우리 훅(핸들러)만 지우고 스크립트를 삭제합니다. 지운 핸들러 수를 돌려줍니다.
     @discardableResult
     public func uninstall() throws -> Int {
         let settings = try readSettings()
         let (updated, removed) = try HookSettingsEditor.uninstall(from: settings)
-        if removed > 0 { try writeSettings(updated) }
+        if removed > 0, updated != settings { try writeSettings(updated) }
         try? FileManager.default.removeItem(at: scriptURL)
         return removed
     }
 
+    /// settings.json이 심볼릭 링크(dotfiles 저장소 등)면 그 대상. 링크가 아니면 그대로.
+    /// 원자적 쓰기는 경로의 파일을 새 파일로 바꾸므로, 링크 자체에 쓰면 링크가 일반 파일로 바뀝니다.
+    public var settingsTargetURL: URL {
+        var url = settingsURL
+        for _ in 0..<16 {
+            guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path) else { break }
+            url = destination.hasPrefix("/")
+                ? URL(fileURLWithPath: destination)
+                : url.deletingLastPathComponent().appendingPathComponent(destination)
+            url = url.standardizedFileURL
+        }
+        return url
+    }
+
+    /// 지금 있는 우리 백업 (`settings.json.bak-yyyyMMdd-HHmmss[-n]`), 오래된 것부터
+    public func backups() -> [URL] {
+        let directory = settingsURL.deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.filter { $0.wholeMatch(of: /settings\.json\.bak-\d{8}-\d{6}(-\d+)?/) != nil }
+            .sorted { lhs, rhs in Self.backupOrder(lhs) < Self.backupOrder(rhs) }
+            .map { directory.appendingPathComponent($0) }
+    }
+
+    /// "settings.json.bak-20261111-120000-2" → ("20261111-120000", 2)
+    private static func backupOrder(_ name: String) -> (String, Int) {
+        let stamp = name.dropFirst("settings.json.bak-".count)
+        let parts = stamp.split(separator: "-")
+        return (parts.prefix(2).joined(separator: "-"), parts.count > 2 ? Int(parts[2]) ?? 0 : 1)
+    }
+
     // MARK: -
 
-    private func readSettings() throws -> JSONValue {
+    func readSettings() throws -> JSONValue {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else { return .object(JSONObject()) }
         let data = try Data(contentsOf: settingsURL)
         if data.allSatisfy({ [0x20, 0x09, 0x0A, 0x0D].contains($0) }) { return .object(JSONObject()) }
         return try JSONValue.parse(data)
     }
 
+    /// 바뀐 settings.json을 씁니다. 링크면 대상에 쓰고, 원래 파일이 있으면 먼저 백업하고 백업은 최근 `keptBackups`개만 둡니다.
     @discardableResult
     private func writeSettings(_ settings: JSONValue) throws -> URL? {
         let fileManager = FileManager.default
+        let target = settingsTargetURL
         var backup: URL?
-        if fileManager.fileExists(atPath: settingsURL.path) {
+        var permissions: Any?
+        if fileManager.fileExists(atPath: target.path) {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyyMMdd-HHmmss"
-            var candidate = settingsURL.deletingLastPathComponent()
-                .appendingPathComponent("settings.json.bak-\(formatter.string(from: Date()))")
+            let stamp = formatter.string(from: Date())
+            let folder = settingsURL.deletingLastPathComponent()
+            var candidate = folder.appendingPathComponent("settings.json.bak-\(stamp)")
             var suffix = 1
             while fileManager.fileExists(atPath: candidate.path) {
                 suffix += 1
-                candidate = settingsURL.deletingLastPathComponent()
-                    .appendingPathComponent("settings.json.bak-\(formatter.string(from: Date()))-\(suffix)")
+                candidate = folder.appendingPathComponent("settings.json.bak-\(stamp)-\(suffix)")
             }
-            try fileManager.copyItem(at: settingsURL, to: candidate)
+            // 링크를 복사하지 않도록 내용을 복사합니다
+            let original = try Data(contentsOf: target)
+            guard fileManager.createFile(atPath: candidate.path, contents: original, attributes: [.posixPermissions: 0o600]) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
             backup = candidate
+            permissions = try? fileManager.attributesOfItem(atPath: target.path)[.posixPermissions]
         } else {
-            try fileManager.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         }
-        try Data((settings.serialized() + "\n").utf8).write(to: settingsURL, options: .atomic)
+        try Data((settings.serialized() + "\n").utf8).write(to: target, options: .atomic)
+        if let permissions { try? fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }
+        pruneBackups()
         return backup
+    }
+
+    /// 우리 이름 꼴의 백업만, 오래된 것부터 지워 `keptBackups`개를 남깁니다
+    private func pruneBackups() {
+        let all = backups()
+        guard all.count > Self.keptBackups else { return }
+        for url in all.prefix(all.count - Self.keptBackups) {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }
 

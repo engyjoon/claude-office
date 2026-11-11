@@ -16,7 +16,7 @@ extension HookInstaller {
     public func scriptState() -> HookScriptState {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: scriptURL.path) else { return .missing }
-        guard (try? String(contentsOf: scriptURL, encoding: .utf8)) == Self.bundledScript else { return .outdated }
+        if let bundled = Self.bundledScriptText, (try? String(contentsOf: scriptURL, encoding: .utf8)) != bundled { return .outdated }
         return fileManager.isExecutableFile(atPath: scriptURL.path) ? .current : .notExecutable
     }
 }
@@ -56,9 +56,16 @@ public struct HookHealth: Hashable, Sendable {
         public var version: ClaudeVersion?
         /// 훅을 막는 설정 (`disableAllHooks`, 관리 설정의 `allowManagedHooksOnly`)
         public var blocker: HookBlocker?
+        /// 엔드포인트 파일이 이 서버의 것인지 (서버가 멈췄거나 확인 전이면 nil)
+        public var endpoint: EndpointFile.State?
+        /// 서버가 거절한 요청 수 (상태 코드 → 수, 앱을 켠 뒤)
+        public var rejected: [Int: Int]
 
         public init(status: HookInstaller.Status, script: HookScriptState, port: UInt16?, serverError: String? = nil,
-                    lastEventAt: Date?, eventCount: Int, version: ClaudeVersion? = nil, blocker: HookBlocker? = nil) {
+                    lastEventAt: Date?, eventCount: Int, version: ClaudeVersion? = nil, blocker: HookBlocker? = nil,
+                    endpoint: EndpointFile.State? = nil, rejected: [Int: Int] = [:]) {
+            self.endpoint = endpoint
+            self.rejected = rejected
             self.version = version
             self.blocker = blocker
             self.status = status
@@ -114,10 +121,23 @@ public struct HookHealth: Hashable, Sendable {
             items.append(Item(label: "서버", value: "멈춤", level: .error))
         }
 
+        // 엔드포인트 파일 (다른 프로세스가 가로채면 서버는 돌아도 이벤트가 오지 않음)
+        if input.port != nil, let endpoint = input.endpoint {
+            switch endpoint {
+            case .ours: items.append(Item(label: "엔드포인트 파일", value: "이 앱의 포트·토큰", level: .ok))
+            case .missing: items.append(Item(label: "엔드포인트 파일", value: "없음", level: .error))
+            case .other(let port): items.append(Item(label: "엔드포인트 파일", value: "다른 프로그램의 것 · 포트 \(port)", level: .error))
+            case .unreadable: items.append(Item(label: "엔드포인트 파일", value: "읽을 수 없음", level: .error))
+            }
+        }
+
         // 받은 이벤트
         let last = input.lastEventAt.map { AgentTimeline.ago(now.timeIntervalSince($0)) } ?? "아직 없음"
         items.append(Item(label: "마지막 이벤트", value: last, level: input.lastEventAt == nil ? .idle : .ok))
         items.append(Item(label: "받은 이벤트", value: "\(input.eventCount)개 (앱을 켠 뒤)", level: input.eventCount > 0 ? .ok : .idle))
+        if !input.rejected.isEmpty {
+            items.append(Item(label: "거절한 요청", value: rejectedSummary(input.rejected), level: .warning))
+        }
 
         // Claude Code 버전과 훅을 막는 설정
         items.append(Item(label: "Claude Code", value: input.version.map { "\($0)" } ?? "버전을 확인하지 못함", level: input.version == nil ? .idle : .ok))
@@ -135,6 +155,11 @@ public struct HookHealth: Hashable, Sendable {
         } else if input.port == nil {
             level = .error
             headline = "서버가 멈춰 있어요. \"서버 다시 시작\"을 눌러 주세요."
+        } else if let endpoint = input.endpoint, endpoint != .ours {
+            level = .error
+            headline = endpoint == .missing || endpoint == .unreadable
+                ? "엔드포인트 파일이 없어져 훅이 이 앱을 찾지 못해요. \"서버 다시 시작\"을 눌러 주세요."
+                : "다른 프로그램(개발용 office-sim serve 등)이 엔드포인트 파일을 바꿔 이벤트가 그쪽으로 가요. 그 프로그램을 끈 뒤 \"서버 다시 시작\"을 눌러 주세요."
         } else if let blocker = input.blocker {
             level = .error
             headline = blocker.message
@@ -158,5 +183,27 @@ public struct HookHealth: Hashable, Sendable {
         }
         return HookHealth(level: level, headline: headline, items: items, suggestsReinstall: suggestsReinstall,
                           missingEvents: missing)
+    }
+
+    /// "3개 (401 2개, 413 1개)"
+    static func rejectedSummary(_ rejected: [Int: Int]) -> String {
+        let total = rejected.values.reduce(0, +)
+        let parts = rejected.sorted { $0.key < $1.key }.map { "\($0.key) \(Self.statusName($0.key)) \($0.value)개" }
+        return "\(total)개 (\(parts.joined(separator: ", ")))"
+    }
+
+    static func statusName(_ status: Int) -> String {
+        switch status {
+        case 400: "형식 오류"
+        case 401: "토큰 틀림"
+        case 403: "브라우저 요청"
+        case 404: "경로 틀림"
+        case 405: "메서드 틀림"
+        case 408: "시간 초과"
+        case 413: "본문 너무 큼"
+        case 415: "JSON 아님"
+        case 503: "연결 많음"
+        default: "기타"
+        }
     }
 }

@@ -7,7 +7,7 @@ import SwiftUI
 enum HookAlertStyle {
     static func symbol(_ alert: HookAlert) -> String {
         switch alert.kind {
-        case .serverFailed: "exclamationmark.triangle.fill"
+        case .serverFailed, .endpointLost: "exclamationmark.triangle.fill"
         case .settingsUnreadable: "doc.badge.ellipsis"
         case .blocked: "hand.raised.fill"
         case .notInstalled: "link.badge.plus"

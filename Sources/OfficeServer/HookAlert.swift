@@ -9,6 +9,8 @@ public struct HookAlert: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
         /// 훅 서버를 시작하지 못함 (멈춤)
         case serverFailed
+        /// 엔드포인트 파일이 없어졌거나 다른 프로세스가 덮어씀 (서버는 돌지만 훅이 오지 않음)
+        case endpointLost
         /// ~/.claude/settings.json을 읽을 수 없음
         case settingsUnreadable
         /// `disableAllHooks`·`allowManagedHooksOnly`로 막힘
@@ -51,6 +53,15 @@ public struct HookAlert: Hashable, Sendable {
             let reason = input.serverError.map { " \($0)" } ?? ""
             return HookAlert(kind: .serverFailed, isError: true, summary: "훅 서버가 멈춰 있어 세션 소식을 받지 못해요",
                              detail: "훅 서버를 시작하지 못했어요.\(reason)", action: .openSettings)
+        }
+        if let endpoint = input.endpoint, endpoint != .ours {
+            let detail = if case .other = endpoint {
+                "다른 프로그램(개발용 office-sim serve 등)이 엔드포인트 파일을 바꿔 이벤트가 그쪽으로 가요. 그 프로그램을 끈 뒤 설정 → 연동에서 서버를 다시 시작해 주세요."
+            } else {
+                "엔드포인트 파일이 없어져 훅이 이 앱을 찾지 못해요. 설정 → 연동에서 서버를 다시 시작해 주세요."
+            }
+            return HookAlert(kind: .endpointLost, isError: true, summary: "훅이 이 앱을 찾지 못해 세션 소식을 받지 못해요",
+                             detail: detail, action: .openSettings)
         }
         switch input.status {
         case .settingsUnreadable(let reason):

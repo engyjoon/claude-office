@@ -258,6 +258,9 @@ func serve(_ arguments: [String]) throws -> Never {
         box.queue.async { box.receive(delivery) }
     }
     let bound = try server.start(preferredPort: port)
+    if FileManager.default.fileExists(atPath: endpoint.path) {
+        emit("주의: 엔드포인트 파일이 이미 있어 덮어씁니다. 설치된 앱이 켜져 있다면 그동안 훅은 이쪽으로 오고, 앱은 연동 경고를 띄웁니다. 앱을 방해하지 않으려면 --endpoint로 다른 파일을 쓰세요.")
+    }
     try EndpointFile.write(port: bound, token: token, to: endpoint)
     emit("훅 서버: 127.0.0.1:\(bound)  엔드포인트: \(endpoint.path)  (Ctrl+C로 종료)")
 
@@ -265,8 +268,8 @@ func serve(_ arguments: [String]) throws -> Never {
     signal(SIGTERM, SIG_IGN)
     let shutdown: @Sendable () -> Void = {
         server.stop()
-        EndpointFile.remove(at: endpoint)
-        emit("\n종료했습니다. 엔드포인트 파일을 지웠습니다.")
+        let removed = EndpointFile.removeIfOwned(at: endpoint, port: bound, token: token)
+        emit(removed ? "\n종료했습니다. 엔드포인트 파일을 지웠습니다." : "\n종료했습니다. 엔드포인트 파일은 다른 프로세스가 바꿔 두어 그대로 둡니다.")
         exit(0)
     }
     let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: box.queue)

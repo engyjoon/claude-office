@@ -96,6 +96,10 @@ final class AppModel {
 
     @ObservationIgnored private var engine: OfficeEngine
     @ObservationIgnored private var server: HookServer?
+    /// 지금 서버의 토큰 (엔드포인트 파일이 우리 것인지 확인·끌 때 우리 것만 지우기)
+    @ObservationIgnored private var serverToken: String?
+    /// 엔드포인트 파일이 이 서버의 것인지 (개선 7). 5초마다, 그리고 연동 상태를 새로 읽을 때 확인합니다.
+    private(set) var endpointState: EndpointFile.State?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var directoryTimer: Timer?
     @ObservationIgnored private var loadingDirectories = false
@@ -232,6 +236,10 @@ final class AppModel {
 
     func startServer() {
         server?.stop()
+        if case .running(let oldPort) = serverState, let oldToken = serverToken {
+            EndpointFile.removeIfOwned(at: endpointURL, port: oldPort, token: oldToken)
+        }
+        serverToken = nil
         let token = HookRequestPolicy.makeToken()
         let directory = desktopSessions
         let server = HookServer(token: token) { [weak self] delivery in
@@ -245,11 +253,14 @@ final class AppModel {
             let port = try server.start()
             try EndpointFile.write(port: port, token: token, to: endpointURL)
             self.server = server
+            serverToken = token
             serverState = .running(port: port)
+            endpointState = .ours
             append(.system, "훅 서버를 시작했어요 (127.0.0.1:\(port))")
         } catch {
             server.stop()
             serverState = .failed("\(error)")
+            endpointState = nil
             append(.system, "훅 서버를 시작하지 못했어요: \(error)")
         }
     }
@@ -259,7 +270,28 @@ final class AppModel {
         timer?.invalidate()
         directoryTimer?.invalidate()
         server?.stop()
-        EndpointFile.remove(at: endpointURL)
+        // 다른 프로세스(개발용 serve 등)가 덮어쓴 파일은 그쪽 것이라 지우지 않습니다
+        if case .running(let port) = serverState, let token = serverToken {
+            EndpointFile.removeIfOwned(at: endpointURL, port: port, token: token)
+        }
+    }
+
+    /// 엔드포인트 파일이 아직 우리 것인지 봅니다. 없어졌으면(다른 프로세스가 끝나며 지움) 다시 씁니다.
+    /// 다른 프로세스가 덮어쓴 경우는 그쪽이 쓰는 중일 수 있어 다투지 않고 경고만 합니다(설정 → 연동의 "서버 다시 시작").
+    func checkEndpoint() {
+        guard case .running(let port) = serverState, let token = serverToken else {
+            endpointState = nil
+            return
+        }
+        var state = EndpointFile.state(at: endpointURL, port: port, token: token)
+        if state == .missing, (try? EndpointFile.write(port: port, token: token, to: endpointURL)) != nil {
+            append(.system, "엔드포인트 파일이 없어져 다시 적었어요")
+            state = .ours
+        }
+        if state != endpointState {
+            if case .other(let other) = state { append(.system, "다른 프로그램이 엔드포인트 파일을 바꿨어요 (포트 \(other)). 훅이 이 앱으로 오지 않아요") }
+            endpointState = state
+        }
     }
 
     /// 무대를 흘리고 0.25초마다 연출 엔진의 tick을 돌립니다. 간격은 보이는 장면의 빈도를 따릅니다 (M6(1), 설계서 §8.3):
@@ -493,6 +525,7 @@ final class AppModel {
     }
 
     func refreshDirectories() {
+        checkEndpoint()
         guard !loadingDirectories else { return }
         loadingDirectories = true
         let directory = desktopSessions
@@ -845,6 +878,7 @@ final class AppModel {
         hookStatus = installer.status()
         hookScript = installer.scriptState()
         hookBlocker = installer.blocker()
+        checkEndpoint()
         checkClaudeVersion()
     }
 
@@ -882,7 +916,7 @@ final class AppModel {
         case .failed(let message): (port, error) = (nil, message)
         }
         return .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
-                     eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker)
+                     eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker, endpoint: endpointState)
     }
 
     func installHooks() {

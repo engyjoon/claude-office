@@ -14,6 +14,26 @@ struct HookAlertTests {
                                  eventCount: 0, version: version, blocker: blocker))
     }
 
+    @Test("엔드포인트 파일을 다른 프로세스가 가로채거나 없어지면 빨간 경고 (개선 7)")
+    func endpointLost() throws {
+        func check(_ endpoint: EndpointFile.State?) -> HookAlert? {
+            HookAlert.evaluate(.init(status: .installed(events: events), script: .current, port: 50_000, lastEventAt: nil,
+                                     eventCount: 0, endpoint: endpoint))
+        }
+        #expect(check(.ours) == nil)
+        #expect(check(nil) == nil)
+        let taken = try #require(check(.other(port: 47821)))
+        #expect(taken.kind == .endpointLost && taken.isError && taken.action == .openSettings)
+        #expect(taken.detail.contains("office-sim serve"))
+        #expect(check(.missing)?.kind == .endpointLost)
+
+        let health = HookHealth.evaluate(.init(status: .installed(events: events), script: .current, port: 50_000, lastEventAt: nil,
+                                               eventCount: 0, endpoint: .other(port: 47821)), now: Date())
+        #expect(health.level == .error)
+        #expect(health.items.contains { $0.label == "엔드포인트 파일" && $0.level == .error })
+        #expect(health.headline.contains("서버 다시 시작"))
+    }
+
     @Test("정상이면(아직 이벤트가 없어도) 경고가 없다")
     func healthy() {
         #expect(evaluate(.installed(events: events)) == nil)

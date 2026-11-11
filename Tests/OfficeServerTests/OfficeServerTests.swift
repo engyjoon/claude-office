@@ -341,6 +341,93 @@ struct InstallerTests {
         #expect(try String(contentsOf: installer.settingsURL, encoding: .utf8) == "{ broken")
     }
 
+    @Test("엔드포인트 파일: rename으로 바꿔 쓰고(임시 파일 없음), 자기 포트·토큰일 때만 지운다 (개선 7)")
+    func endpointOwnership() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("endpoint")
+        #expect(EndpointFile.state(at: url, port: 1, token: "a") == .missing)
+        try EndpointFile.write(port: 1, token: "a", to: url)
+        try EndpointFile.write(port: 1, token: "a", to: url)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["endpoint"])
+        #expect(EndpointFile.state(at: url, port: 1, token: "a") == .ours)
+
+        // 두 번째 프로세스(make serve)가 덮어씀 → 앱은 가로채인 것을 알고, 끌 때 그 파일을 지우지 않음
+        try EndpointFile.write(port: 2, token: "b", to: url)
+        #expect(EndpointFile.state(at: url, port: 1, token: "a") == .other(port: 2))
+        #expect(!EndpointFile.removeIfOwned(at: url, port: 1, token: "a"))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(EndpointFile.removeIfOwned(at: url, port: 2, token: "b"))
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+
+        try "garbage".write(to: url, atomically: true, encoding: .utf8)
+        #expect(EndpointFile.state(at: url, port: 1, token: "a") == .unreadable)
+        #expect(!EndpointFile.removeIfOwned(at: url, port: 1, token: "a"))
+    }
+
+    @Test("settings.json이 심볼릭 링크면 링크를 지키고 대상에 쓴다 (개선 7)")
+    func symlinkedSettings() throws {
+        let home = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let installer = HookInstaller(home: home)
+        let dotfiles = home.appendingPathComponent("dotfiles")
+        try FileManager.default.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: installer.settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let target = dotfiles.appendingPathComponent("claude-settings.json")
+        try "{\"model\": \"opus\"}\n".write(to: target, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+        try FileManager.default.createSymbolicLink(atPath: installer.settingsURL.path, withDestinationPath: "../dotfiles/claude-settings.json")
+
+        #expect(installer.settingsTargetURL.path == target.standardizedFileURL.path)
+        let report = try installer.install(version: nil)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: installer.settingsURL.path) == "../dotfiles/claude-settings.json")
+        #expect(HookSettingsEditor.installedEvents(in: try JSONValue.parse(Data(contentsOf: target))) == HookSettingsEditor.baseEvents)
+        let permissions = try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber
+        #expect(permissions?.intValue == 0o600)
+        // 백업은 링크가 아니라 내용
+        let backup = try #require(report.backup)
+        #expect(try String(contentsOf: backup, encoding: .utf8) == "{\"model\": \"opus\"}\n")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: backup.path)) == nil)
+
+        try installer.uninstall()
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: installer.settingsURL.path) == "../dotfiles/claude-settings.json")
+        #expect(try JSONValue.parse(Data(contentsOf: target)) == ["model": "opus"])
+    }
+
+    @Test("바뀐 것이 없으면 쓰지도 백업하지도 않고, 백업은 우리 이름 꼴만 최근 몇 개 남긴다 (개선 7)")
+    func backupsOnlyWhenChanged() throws {
+        let home = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let installer = HookInstaller(home: home)
+        let folder = installer.settingsURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "{}\n".write(to: installer.settingsURL, atomically: true, encoding: .utf8)
+        let first = try installer.install(version: nil)
+        #expect(first.backup != nil)
+        let written = try Data(contentsOf: installer.settingsURL)
+        let modified = try FileManager.default.attributesOfItem(atPath: installer.settingsURL.path)[.modificationDate] as? Date
+
+        let again = try installer.install(version: nil)
+        #expect(again.backup == nil)
+        #expect(try Data(contentsOf: installer.settingsURL) == written)
+        #expect(try FileManager.default.attributesOfItem(atPath: installer.settingsURL.path)[.modificationDate] as? Date == modified)
+        #expect(installer.backups().count == 1)
+
+        // 오래된 우리 백업 7개와 사용자가 만든 비슷한 이름의 파일
+        for day in 1...7 {
+            try "{}".write(to: folder.appendingPathComponent("settings.json.bak-2026010\(day)-120000"), atomically: true, encoding: .utf8)
+        }
+        let foreign = ["settings.json.bak-mine", "settings.json.bak-20260101-120000.keep", "settings.json.backup"]
+        for name in foreign { try "{}".write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8) }
+        _ = try installer.install(version: ClaudeVersion(2, 1, 318))  // 이벤트가 늘어 바뀜 → 백업 하나 더
+        let kept = installer.backups().map(\.lastPathComponent)
+        #expect(kept.count == HookInstaller.keptBackups)
+        #expect(kept.suffix(2).allSatisfy { !$0.hasPrefix("settings.json.bak-202601") })  // 이번 두 백업이 가장 새것
+        #expect(!kept.contains("settings.json.bak-20260101-120000"))
+        #expect(kept.contains("settings.json.bak-20260107-120000"))
+        for name in foreign { #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path)) }
+    }
+
     @Test("홈 경로에 공백이 있으면 명령을 따옴표로 감싼다")
     func quotedCommand() {
         #expect(HookInstaller(home: URL(fileURLWithPath: "/Users/a b")).command == "\"/Users/a b/.claude/hooks/claude-office.sh\"")
