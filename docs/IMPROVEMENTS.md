@@ -20,7 +20,7 @@
 | 8 | 화면 디자인 다듬기 | Opus 5.5 (high) | 완료(커밋) | 칩은 제 머리 위 자기 몫(옆 사람까지 거리 절반)으로 말줄임·옆으로 안 밀고 위로, 마우스 올림·고름만 전체. 밤 ♪·Zz·빛줄기·외침 선은 따뜻한 흰색. 같은 폴더 행 표지에 세션 제목 둘째 줄. 답변 필요만 남으면 메뉴바 파란 점. 승인 대기·쉼·정리 중인 메인엔 보고 연출 생략. NFC·grapheme 폭. 종이비행기 15°. 소파는 좌표 정상. 화면 확인 필요 |
 | 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 완료(커밋) | 경과 시간 글자·갱신 일정을 코어 `ElapsedText` 한 벌로(앱 사본 삭제, 일 단위까지), 낡은 문구·용어 통일(사무실 창 열기), Return 키 수식키, 테스트 이벤트는 테스트 세션 훅만 셈, `make install`/`uninstall`은 실행 중이면 멈춤·빌드 오류 보임, 로그는 맨 아래일 때만 따라감, 미니 자리는 당겨 넣음. 화면 확인 필요 |
 | 10 | 레티나 메모리 줄이기 | Opus 5.5 (high) | 보류 | 측정하려면 새로 빌드한 앱을 설치된 앱과 나란히 띄워야 해서 사용자 결정을 기다립니다 (기존 `scripts/perf-launch.sh`는 설치된 앱을 끄고 다시 띄움). 그동안 11번을 먼저 진행 |
-| 11 | 구조 정리와 안전망 | Fable 5.2 (high) | 진행 중 | |
+| 11 | 구조 정리와 안전망 | Fable 5.2 (high) | 완료(커밋) | 잠복 버그 둘(테스트), 죽은 코드 제거, 무대 쪽 중복 합침, 배치 숫자는 `OfficeLayout`에서만(접근 지점 불변식 테스트), 모습 규칙은 `Choreographer.look(for:)` 하나(어긋난 곳은 일할 때 모습으로), `AppModel.commit` 하나(tick이 상태를 바꾸면 바로 반영)·훅 한 번 파싱, `make test` CI 워크플로, 큰 파일 둘 나눔. 스냅샷은 모습 규칙의 3장만 달라짐. 글자 폭 두 벌·`OverlayTier`는 그대로 둠(까닭은 결과에). 화면 확인 필요 |
 
 ## 모든 항목에 공통인 규칙
 
@@ -321,7 +321,7 @@
 
 **문제 (실측)**: 5K 2배율 화면에서 실행 3시간 41분 뒤 `footprint`가 326MB입니다(목표는 1배율 150MB). 그래픽이 약 240MB입니다(unmapped graphics 146MB, IOAccelerator 77MB, IOSurface 20MB). 설계서 §8.3이 "레티나면 넘을 가능성이 큼"이라며 측정을 미뤄 둔 부분입니다.
 
-- 캐릭터·말풍선은 텍스처 배율이 바뀌어도 다시 굽지 않습니다. 1배율 화면에서 켠 뒤 레티나가 붙으면 흐리고, 반대면 4배 텍스처를 계속 듭니다. (`App/Sources/ShapeBaker.swift:27-33`, `App/Sources/OfficeScene.swift:350-354`, `:704-752`)
+- 캐릭터·말풍선은 텍스처 배율이 바뀌어도 다시 굽지 않습니다. 1배율 화면에서 켠 뒤 레티나가 붙으면 흐리고, 반대면 4배 텍스처를 계속 듭니다. (`App/Sources/ShapeBaker.swift:27-33`, `App/Sources/OfficeScene.swift:350-354`, `:704-752`) — 11번에서 `OfficeScene.swift`를 나눠 캐릭터 노드는 `App/Sources/CharacterNode.swift`, 도형 → 노드(`ArtNodes`·`OverlayNode`)는 `App/Sources/ArtNodes.swift`에 있습니다. 줄 번호 대신 심볼로 찾습니다.
 - 텍스처 캐시는 300장에서 통째로 비웁니다. (`ShapeBaker.swift:49`, `:156`)
 - `AVAudioEngine`을 소리 묶음마다 메인 스레드에서 시작합니다(전제 미확인: 끊김). (`App/Sources/SoundPlayer.swift:85-118`)
 
@@ -350,7 +350,30 @@
 
 **완료 기준**: 스냅샷이 정리 전과 같고(`make snapshot` 결과 비교), `make test`·`make app`이 통과합니다. 커밋은 덩어리별로 나눕니다.
 
-**결과**:
+**결과** (2026-11-11, 커밋 `c77d48d`·`0169f03`·`bea70b7`·`e9ab6b0`·`33353e8`·`489d1f1`·`69b1497`·`5d838b5`):
+
+- **기준선**: 정리 전(`2ce960e`)에 `make snapshot`의 SVG 14장, 밤 5장(`delegation --at 2.6,20,52.2,128,400 --night`), `make demo` 출력, 그리고 덤으로 나머지 시나리오 다섯(`crowd`·`layout`·`rooms`·`notify`·`m0-observed`)의 스냅샷과 지시 타임라인까지 50개 파일을 보관하고(두 번 돌려 같은 결과임을 확인), 덩어리마다 바이트 단위로 비교했습니다. 덩어리 1~4·6·7과 파일 나누기는 50개가 그대로이고, 덩어리 5만 3장이 달라졌습니다(아래). `make test`는 504 → 516개 통과, `make app` 통과.
+- **(1) 잠복 버그**: `VectorPath.parse`는 "Z" 뒤에 숫자가 오면 그 숫자를 먹지 못해 같은 자리를 끝없이 돌며 `close`를 쌓았습니다 → 거기서 멈춥니다(시간 제한을 건 테스트). `StableHashLite.value`의 `abs(hash)`는 `Int.min`에서 넘쳐 죽습니다 → 그 값만 0(`nonNegative`, 나머지는 `abs`와 같은 값이라 깜빡임 시점·별 자리는 그대로).
+- **(2) 죽은 코드**: 지운 것 — `OfficeLayout.lounge`, `Pathfinder.length`(쓰던 테스트 하나 안으로 옮김), `RenderPacer.isLively`(테스트는 `motion`을 봄), `MiniFocus.next(pinned:)`와 `Reason.pinned`·`office-sim --pin`(앱은 늘 nil), `StageEvent.effect`, 미니 패널의 `windowDidResize`(크기 고정, 프로그램이 바꿀 때는 `placing`이라 일하지 않음), `AppModel.missingHookEvents`(읽는 곳 없음).
+  - **남긴 것과 까닭**: `OfficeLayout.wallBottom`은 덩어리 4에서 그림이 읽어 가는 값이 됐습니다. `StageEvent`의 `.teamOpened`·`.teamClosed`·`.spawned`·`.despawned`는 앱은 안 읽지만 테스트가 "그 사이 무대에서 내려간 적이 없다"(`busyRowsStay` 등)를 확인하는 기록이라 남기고 주석에 적었습니다. **`OverlayTier.tiny`·`.compact`는 죽은 코드가 아니었습니다**: 화면이 작으면 사무실 영역을 줄이므로(`OfficeWindowSize.office(screen:)`, 최소 480×300) 예컨대 화면 폭 1200pt 이하에서 패널을 연 채면 배율이 0.8 아래로 내려가 `.compact`(칩 숨김·18자)가 실제로 나옵니다. 그대로 두었습니다.
+- **(3) 무대 쪽 중복**: `Stage`의 `.despawn`과 `remove` → `takeDown`(자리 예약 풀기·말풍선 올리기·닫히던 행 닫기), `OfficeFloor.apply`와 `resync` → `replan`(배치 다시 세우고 숨은 사람 내리고 행·칸 맞추기)·`restoreNewlyVisible`, 팀 색 `% count` 네 곳 → `Swatch.team(_:)`, "응답을 끝낸 때"(`completedAt ?? activitySince`) 세 곳과 "행의 마지막 요청" 두 곳 → `OfficeState.completedAt(of:)`·`lastPromptAt(in:)`.
+  - **"최근 활동" 세 벌**은 뜻이 서로 달라 합치지 않았습니다: 행의 마지막 활동(`FloorPlan.lastActivity`: 활동 바뀐 때·요청), 서브의 마지막 활동(`MiniCast.pick`: 활동 기록까지 봄), 행의 마지막 요청(`MiniFocus.status`). 똑같이 복사돼 있던 위 두 조각만 옮겼습니다.
+  - **글자 폭 두 벌은 그대로 두었습니다**: `OfficeArt.estimatedWidth`(명패·"+N", 한글 1.0·영문 0.52)를 `TextMetrics.width`(한글 0.87 등)로 바꾸면 명패가 있는 스냅샷이 전부 달라집니다("★ 메인1" 명패 폭 48.3 → 45.3pt, "서브N"·"+N"도 1~3pt). 같은 규칙의 사본이 아니라 "넉넉하게 잡은 어림"과 "실제 글꼴에 맞춘 어림"이라, 합치려면 맥 화면에서 글자가 좁아진 명패 안에 들어오는지 봐야 합니다(아래 "새로 발견한 것").
+- **(4) 배치 숫자**: `OfficeLayout`에서만 정의하고 그림이 읽어 갑니다 — 벽과 바닥의 경계 `wallBottom`(바탕·걸레받이·줄눈·현관 매트·출입문), 책상 `deskTop`·`deskBottom`·`deskFootprint`(그림의 상판·앞판과 장애물, 명패 최대 폭, 행 표지 위치), 행 띠 `rowAbove`·`rowBelow`(미니 사무실 아래 끝), 소파 `sofaSeatOffsets`·`sofaSeatY`·`sofaApproachY`(앉는 판 칸막이·깊이), `whiteboardWidth`·`doorWidth`·`pantryWidth`(최소 폭 계산·출입문 자리·그림), 길찾기 여유 `obstacleMargin`, 머리 꼭대기 `CharacterArt.crown`(`Overlay.headTop`·`badgeOffset`). 테스트: 기본 크기와 최소 크기에서 모든 접근 지점(책상 뒤, 공용 구역 앞, 출입문)이 가구 밖이고 걸을 수 있는 칸임(`approachesAreWalkable`), 첫 행 책상 뒤 여유가 정확히 1pt이고 그림의 책상과 장애물이 같은 폭·같은 위 끝임(`deskApproachMargin`).
+- **(5) 모습 규칙**: `Choreographer.look(for:)`(순수 함수, 자세·손에 든 것·표정·늘 따라붙는 아이콘) 하나를 `show`·`rest`·`settle`·`restoreRest`·자리 옮김(`returnToOwnDesk`)·손 내리기(`resolveWaiting`)·`restoreDirectives`·긴 명령 ⏳·정리 중·승인 요청이 씁니다. `restoredPose`·`restoredProp`·`restoredExpression`·`currentPose`는 없앴습니다. 지시를 내는 순서는 자리마다 예전 그대로라 `make demo` 출력은 바이트까지 같습니다. **어긋났던 곳은 모두 "일할 때 낸 모습" 쪽으로 맞췄습니다** (다시 세우거나 자리를 옮길 때가 달라짐):
+  - 웹 검색: 다시 세우거나 자리를 당겨 앉으면 읽는 자세 → **타이핑** 그대로.
+  - 냉장고에서 꺼낸 음료: 소파에서 대화를 정리한 뒤·다시 세울 때 컵 → **음료** 그대로(`Presence.drink`).
+  - 긴 셸 명령을 기다림(⏳): 다시 세우면 집중한 표정 → **평온한 표정**, 책상이 아니면 타이핑 → 생각하는 자세.
+  - 화이트보드 앞에서 계획을 마치고 생각 중·잠깐 머무는 중: 다시 세우면 판서 자세와 마커 → **생각하는(서 있는) 모습, 빈손**.
+  - 승인을 기다리는 사람은 어디에 있든 손 든 모습(안마 의자에서 다시 세우면 안마 자세였음), 응답이 끝난 뒤 남아 있던 ⏳ 표시로 모니터 보는 자세가 되던 것은 앉아 쉬는 모습.
+  - 달라진 스냅샷 3장: `floor-052`·`floor-080`(`swift build`를 기다리다 화면에 다시 들어온 서브의 표정), `mini-065`(웹 검색 서브의 팔 자세, `swift test`를 기다리는 서브의 표정). 테스트 `LookTests` 7개(웹 검색·당겨 앉기·음료·긴 명령·화이트보드·쉼 단계·승인 대기).
+- **(6) `AppModel`**: `commit(_:at:)` 하나가 지시를 무대에 넘기고 → 알림 → 직원 목록 → 미니 초점 → 고른 사람 정리 → 현황 줄을 하고, `receive`·`sweepEndedProcesses`·`syncResidents`·`acknowledge`·tick이 모두 이것을 부릅니다. **tick 경로**: `OfficeEngine.tickChanges`(tick이 상태를 바꾼 횟수, 테스트)가 달라졌을 때만 `commit`이라, 출근 중 → 쉬는 중·정리 중 시간 초과·1시간 침묵이 다음 훅이나 5초 확인을 기다리지 않고 목록·현황 줄·알림에 바로 반영됩니다. 연출만 흘러가는 tick은 예전처럼 지시를 무대에 넘기고 미니 초점만 봅니다(0.25초 구간에서 정수 하나 비교). `settleUntil` 올리기 네 꼴 → `keepLively(for:from:repace:)`, 사무실 창을 제목으로 찾던 곳 → `OfficeWindow`(`owns`·`first(where:)`·`isOpen`·`isOpenOrMinimized`·`close`), 훅 본문은 전달 큐에서 `ParsedHook`으로 한 번만 파싱(로그 한 줄도 그때 만듦).
+  - **함께 달라진 동작(작음)**: 응답 확인(`acknowledge`)도 알림 큐·고른 사람 정리·현황 줄까지 맞춥니다. 지시를 받을 때 `settleUntil`을 덮어쓰지 않고 더 긴 쪽을 지킵니다(조명 크로스페이드 중에 훅이 와도 30fps 유지). 읽을 수 없는 훅에서도 쌓인 알림 동작을 비웁니다.
+- **(7) 안전망**: `.github/workflows/test.yml` — 푸시·PR마다 `macos-26` 러너에서 `swift --version`과 `make test`. **실제로 도는지는 확인하지 못했습니다**(푸시는 사용자 몫). 러너 이름이 없다고 나오면 `macos-15`(Xcode 16, Swift 6.x; `Package.swift`는 tools 6.0)로 바꾸면 됩니다. 로컬은 Xcode 26.1.1·Swift 6.2.1입니다.
+  - **앱 계층 동시성 조사** (설정은 되돌림, 전환하지 않음): Swift 5 모드에서 `SWIFT_STRICT_CONCURRENCY: complete`로 올리면 **오류 0개, 앱 소스 경고 91개**(중복 제외)입니다. 파일별로 `OfficeScene` 46·`SceneAccessibility` 20·`ShapeBaker` 14·`Notifier` 6·`ClaudeOfficeApp` 3·`Support` 1·`AppModel` 1(파일을 나누기 전 기준). 종류는 "메인 액터 속성·메서드·생성자를 격리 안 된 곳에서 씀"이 67개(`SKScene`·`SKNode` 하위 클래스와 `StageStore`에 `@MainActor`가 없어서 생김), 전역 변경 가능 상태(`ShapeBaker`의 캐시 등) 7개, `sending`·Sendable 아닌 값 캡처·기타가 17개입니다. `SWIFT_VERSION: 6.0`으로 올리면 첫 묶음에서 오류 9개(`ShapeBaker` 5·`OfficeScene` 2·`ClaudeOfficeApp` 2)로 멈추고, 위 경고 대부분이 오류가 됩니다. 전환한다면 `StageStore`·`OfficeScene`·`CharacterNode`·`ArtNodes`·`ShapeBaker`에 `@MainActor`를 다는 것이 대부분이고(`ShapeBaker`는 10번이 고치는 파일이라 그 뒤에), `Notifier`의 대리자 콜백 정리가 남습니다.
+- **파일 나누기 (코드 이동만, `5d838b5`)**: `OfficeState.swift`(1011줄) → 본체(저장 속성·조회·리듀서·압축·공통, 477줄) + `OfficeState+ImplicitEnd`·`+Cues`·`+Residents`·`+Rooms`·`+Members`. 다른 파일의 확장이 쓰도록 `private` 멤버와 `private(set)` 저장 속성을 모듈 내부(`internal`·`internal(set)`)로 넓힌 것 말고는 줄 단위로 같습니다(옮긴 줄을 원본과 대조). `OfficeScene.swift`(1073줄) → `OfficeScene`·`StageStore`·`CharacterNode`·`ArtNodes`(`OverlayNode` 포함).
+- **설계서**: §6.4(모습 규칙), §8.1(배치 숫자 정의 위치와 접근 지점 불변식), §8.3(모델 타이머: `commit`과 tick), §10.1(미니 고정 인자 제거), §13(저장소 구조), §14.2(CI·기준선).
+- **화면 확인 필요** (설치된 앱은 바꾸지 않았습니다): (1) 새 세션이 출근한 지 10초 뒤 패널·메뉴의 "출근 중"이 훅 없이도 "쉬는 중"으로 바뀌는지. (2) 미니 사무실·디렉토리 전환으로 다시 세워진 직원: 웹 검색 중이면 타이핑, 냉장고 음료를 든 채 소파, ⏳로 기다리는 사람의 표정. (3) 사무실 창에서 직원을 고를 때 발밑 고리가 바로 그려지는지, 밤·낮 전환 크로스페이드가 훅이 오는 중에도 끊기지 않는지. (4) 미니 → 사무실 창 전환, 사무실 창을 닫으면 미니가 다시 뜨는지, Esc로 고른 직원 해제(`OfficeWindow`로 옮긴 창 찾기). (5) 이벤트 로그의 훅 한 줄이 예전과 같은 모양인지.
 
 ---
 
@@ -377,3 +400,11 @@
 - **`PostToolBatch` 훅**: 실제 페이로드를 수집하지 못해 이번에도 넣지 않았습니다(위 4번 항목의 내용 그대로).
 - **인스펙터·메뉴 버튼 도움말의 앱 이름**: 이동 동작(`AppModel.focusAgent`·알림 열기)은 띄운 앱의 번들 id를 쓰지만, `AgentCard`·`MenuContentView`의 버튼 도움말은 아직 `row.destination`이라 Cursor 세션에도 "VS Code 창을 앞으로 가져와요"라고 씁니다. `model.destination(for:)`로 바꾸면 됩니다(9번 문구 쪽).
 - **tmux 안의 세션**: `TERM_PROGRAM=tmux`라 버튼이 없지만, 번들 id(`__CFBundleIdentifier`, 예: iTerm)로 바깥 터미널은 알 수 있습니다. 버튼을 보이려면 번들 id가 `RosterRow`까지 와야 해서(코어 모델 변경) 넣지 않았습니다.
+
+11번 항목을 하다가 (2026-11-11):
+
+- **명패 글자 폭을 `TextMetrics`로 합치기**: `OfficeArt.estimatedWidth`(명패·"+N")는 `TextMetrics.width`보다 넉넉한 다른 어림입니다. 합치면 명패가 1~3pt 좁아지므로, 맥 화면에서 굵은 9.5pt 글자가 좁아진 명패 안에 들어오는지 확인한 뒤에 합칠 수 있습니다(8번의 NFC·grapheme 기준도 그때 명패에 적용됨). (`Sources/OfficeStage/Art/OfficeArt.swift`의 `estimatedWidth`·`fitted`)
+- **손을 든 동안 들고 있던 책·서류**: 승인 요청(`permissionAsked`)은 자세·표정·"!"만 바꾸고 손에 든 것은 내리지 않아, 책을 읽다 승인을 기다리면 책을 든 채 손을 듭니다. 화면에 다시 세우면(`look(for:)`는 빈손) 책이 사라집니다. 어느 쪽이 맞는지 정해 한쪽으로 맞추면 됩니다(지시 한 줄 차이라 `make demo` 출력이 달라짐). (`Sources/OfficeCore/Engine/Choreographer.swift`의 `permissionAsked`)
+- **쉬는 자리에서 생각 중으로 바뀌면 깨우지 않음** (코드): 소파·안마 의자에 조용히 앉힌 데스크톱 세션의 첫 훅이 도구의 끝(Post)이면 `offer(.thinking)` → `show(.thinking)`이 `wake` 없이 생각하는 자세만 내서, 다음 도구가 올 때까지 소파에서 ♪를 띄운 채 생각합니다. `show(.thinking)`도 일하는 중처럼 깨워 자리로 보내면 됩니다. (`Choreographer.show`)
+- **앱의 색 표 사본**: `App/Sources/Support.swift`의 `Palette.tops`·`skins`·`teams`가 `CharacterArt.tops`·`skins`, `Swatch.teamColors`와 같은 값을 따로 적어 둡니다(패널 칩·초상화 색). 지금은 값이 같지만 한쪽만 바꾸면 사무실과 패널의 색이 어긋납니다.
+- **CI 러너 이름**: `.github/workflows/test.yml`의 `macos-26`은 푸시해 보지 못해 확인하지 못했습니다(위 11번 결과).

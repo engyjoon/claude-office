@@ -429,6 +429,7 @@ public enum Directive: Equatable, Sendable {
 
 ### 6.4 M1 구현 메모 (설계에서 구체화하거나 바뀐 점)
 
+- **모습 규칙은 한 곳 (개선 11):** 상태 → 모습(자세·손에 든 것·표정·늘 따라붙는 아이콘)은 `Choreographer.look(for:)` 하나가 정합니다. 앞선 것이 이깁니다: 승인 대기(손 들기) → 대화 정리(서류) → 보이는 활동(일하는 중은 툴 종류별, 긴 셸 명령은 모니터 보기·⏳, 생각 중) → 쉼 단계(소파·안마·잠) → 자리에서 쉼. 일을 시작할 때·쉼 단계에 들어갈 때·조용히 앉힐 때·자리를 옮긴 뒤·화면에 다시 세울 때(`restoreDirectives`) 모두 이 값을 써서, 다시 세워도 일하던 모습 그대로입니다(웹 검색은 타이핑, 냉장고에서 꺼낸 음료는 음료 그대로, 긴 명령 기다림은 평온한 표정, 화이트보드 앞에서 생각 중이면 생각하는 모습). 인사·축하·놀람 같은 잠깐의 표정·제스처·아이콘(💡·❓·💦·✨)은 상태가 아니라서 각 비트가 따로 냅니다.
 - **두 단계 구조:** `OfficeState`(리듀서)가 이벤트를 받아 의미 단위의 `Beat`(출근, 위임, 보고, 승인 요청 …)를 내고, `Choreographer`가 `Beat`를 `Directive`로 바꿉니다. 앱은 `OfficeEngine` 하나만 들고 `handle(hookPayload:)`와 `tick(at:)`(0.25초 주기)만 부르면 됩니다.
 - **직원별 대기열:** 씬은 직원마다 지시를 순서대로 실행합니다. `walk`와 `wait`는 다음 지시를 막고, 두 직원의 타이밍은 `signal`/`await`로 맞춥니다 (보고하러 온 팀원이 도착한 뒤 팀장이 하이파이브). `await`부터 `awaitEnd`까지는 함께하는 연출이라, 신호를 보낼 사람이 그 무대에 없으면(화면 밖 서브, `Stage.withdraw`) 기다리지 않고 건너뜁니다(개선 5). 받는 사람 없이 남은 신호는 보낸 사람이 무대를 떠날 때 지웁니다. 승인 요청·보고·퇴근처럼 급한 연출은 `clearQueue`로 시작합니다. `agent`가 없는 지시(팀 열기, 종이비행기, 알림성 효과음)는 바로 실행합니다.
 - **유지 시간의 예외:** 더 바쁜 활동으로 바뀔 때(대기 → 생각 → 작업)는 2.5초를 기다리지 않고 바로 보여줍니다. 같은 등급끼리나 덜 바쁜 쪽으로 바뀔 때만 기다리고, 그 사이 들어온 활동은 최신 것만 남깁니다.
@@ -672,6 +673,7 @@ t=4.0  팀원   walk(to: 팀원석) → sit → pose(.reading)
 
 - 행마다 메인 색 러그를 사람 수만큼 깔고, 책상 앞에 직함 명패를 답니다.
 - 길찾기는 직접 구현한 A\*(16pt 격자)를 씁니다. 책상과 소파·큰 화분·안마 의자는 통과할 수 없고, 행과 행 사이는 행 끝을 돌아 지나갑니다.
+- **배치 숫자는 `OfficeLayout`에서만 정의합니다 (개선 11).** 벽과 바닥의 경계(`wallBottom` 160), 책상 발자국(`deskWidth`·`deskTop`·`deskBottom`, 장애물은 `deskFootprint`), 행 띠(`rowAbove`·`rowBelow`), 소파 앉는 자리(`sofaSeatOffsets`·`sofaSeatY`), 화이트보드·출입문·탕비 코너 폭을 그림(`OfficeArt`)과 미니 사무실이 읽어 가고, 머리 위 그림(`Overlay`)은 `CharacterArt.crown`(머리 꼭대기)을 기준으로 놓습니다. 책상 뒤 접근 지점(발 위치에서 46pt 위)은 첫 행에서 길찾기 칸 가운데가 책상 장애물(둘레 여유 4pt)보다 1pt 위라 숫자를 바꾸면 길이 막힐 수 있습니다: 접근 지점이 가구 밖이고 걸을 수 있는 칸임을 테스트(`approachesAreWalkable`·`deskApproachMargin`)가 지킵니다.
 
 ### 8.2 시간대와 다크 모드 (밤 조명, M6(6), 2026-11-09)
 
@@ -722,6 +724,7 @@ t=4.0  팀원   walk(to: 팀원석) → sit → pose(.reading)
 2. **안 보이는 SKView가 계속 그림**: 숨긴 미니·닫힌 사무실 창, 장면을 뗀 SKView(`dismantleNSView`의 `presentScene(nil)`), 굽기용 화면 밖 SKView까지 모두 디스플레이 링크가 vsync(120Hz)마다 메인 스레드를 깨움(메뉴바만일 때 22%). → 안 보이면 `isPaused`. 뗀 뷰·창에서 떨어진 뷰·화면 밖 뷰도 멈춤. 가려짐·최소화·다른 Space·꺼진 디스플레이는 `occlusionState`로 판단하고 알림(`didChangeOcclusionState`·`didMiniaturize`)에 바로 반응.
 3. **빈도 단계** (`RenderPacer`, 순수 함수·테스트): 안 보임 0 / 잠잠함 3fps / 쉬는 중 6fps / 일하는 중(타이핑·손 들기만) 10fps / 빠른 움직임(걷기·제스처·말풍선 톡·종이비행기)·훅 직후 0.5초 30fps. `preferredFramesPerSecond`만 낮추면 디스플레이 링크가 그대로 120Hz로 돌아 CPU가 줄지 않아서(12fps → 6fps에도 2.6% 그대로), 30fps 아래 단계는 SKView를 멈춰 두고 모델 타이머가 한 장씩 풀어 그림(`renderOneFrame`, 그린 뒤 `didFinishUpdate`에서 다시 멈춤). 멈춘 뷰를 풀었는데 그리지 않는 경우(창을 처음 열 때 재현, M5(4)의 멈춤과 같은 증상)는 껐다 켜서 되살림.
 4. **모델 타이머**: 늘 30Hz였던 것을 보이는 장면의 빈도에 맞춤(안 보이면 4Hz). 느려도 무대 시간은 0.1초 조각으로 실제 시간대로 흘림.
+   엔진이 바뀐 뒤의 처리(지시를 무대에 → 알림 → 직원 목록 → 미니 초점 → 고른 사람 정리 → 현황 줄)는 `AppModel.commit` 하나이고(개선 11), 0.25초 tick에서는 엔진이 상태를 바꿨을 때만(`OfficeEngine.tickChanges`: 출근 중 → 쉬는 중, 정리 중 시간 초과, 오래 조용한 턴 닫기) 부릅니다. 연출만 흘러가는 tick(쉬러 가기, ⏳)은 지시를 무대에 넘기고 미니 초점만 봅니다. 훅 본문은 전달 큐에서 한 번만 파싱해 메인 스레드에는 결과만 옵니다.
 5. **SwiftUI 시계**: 현황 줄·미니 머리줄·인스펙터·세션 패널의 `TimelineView(.periodic)`가 닫히거나 가려진 창에서도 1초마다 창 전체를 다시 배치함. → 글자가 실제로 바뀌는 순간에만 다시 그리는 일정(`StatusLine.nextChange`: 1분 안쪽 1초, 그 뒤 1분, 쉬는 중은 잠드는 순간)과, 창이 안 보이면 멈춤(`liveClock`). 경과 시간 글자와 그 일정은 코어 `ElapsedText` 한 벌입니다(개선 9): 지속 "12초째"→"3분째"→"1시간 5분째"→"3일 2시간째", 지난 "방금"→"12초 전"→"3분 전"→"2시간 전"→"3일 전"; 메뉴·세션 패널·미니 머리줄처럼 30초·1분마다 갱신하는 곳은 `showSeconds: false`(1분 미만 생략/"방금"). 설정 창의 1초 시계는 키 창일 때만 갱신합니다.
 6. **데스크톱 세션 파일**: 5초마다 30개·1.1MB를 모두 다시 파싱 → 수정 시각·크기가 같으면 이전 결과를 씀.
 7. 사무실 SKView 그림판(drawable) 3장 → 2장. 30초 넘게 안 보이는 장면의 가구 텍스처는 놓음(다시 보이면 다시 구움). 효과음 엔진은 이미 마지막 소리 2초 뒤 멈추고 있어 그대로. 메뉴바 아이콘은 상태가 바뀔 때만 다시 그려 문제 없음.
@@ -1166,7 +1169,9 @@ claude-office/
 │  ├─ OfficeCore/
 │  │  ├─ Support/      JSONValue(키 순서 보존 파서), StableHash, SeededRandom
 │  │  ├─ Hooks/        HookParser, HookSettingsEditor(settings.json 병합), ClaudeVersion, AgentDefinition, HookTestScenario(테스트 이벤트)
-│  │  ├─ Model/        OfficeEvent, ToolCall/ToolCatalog, Agent/Team/AgentProfile/Appearance, AppearanceAllocator(겹치지 않는 외형), OfficeState(리듀서)
+│  │  ├─ Model/        OfficeEvent, ToolCall/ToolCatalog, Agent/Team/AgentProfile/Appearance, AppearanceAllocator(겹치지 않는 외형),
+│  │  │                OfficeState(리듀서) + 확장 파일: +ImplicitEnd(암묵적 종료 §5.3), +Cues(배지 판정), +Residents(데스크톱 세션 맞추기),
+│  │  │                +Rooms(행·책상 배정), +Members(서브에이전트) (개선 11)
 │  │  ├─ Engine/       Choreographer, Directive, OfficeEngine(진입점)
 │  │  ├─ Dialogue/     DialogueBook, PrivacyLevel, Redactor(민감 정보 가리기)
 │  │  ├─ Sound/        SoundCue/SoundGroup, SoundRecipe/SoundLibrary/SoundRenderer(합성), SoundPolicy
@@ -1184,12 +1189,13 @@ claude-office/
 │  ├─ project.yml                   # XcodeGen 설정 → ClaudeOffice.xcodeproj 생성
 │  ├─ Sources/         # M2: ClaudeOfficeApp(MenuBarExtra), AppModel, MenuContentView, SettingsView,
 │  │                   #     EventLogView, Support(Palette, TerminalFocuser)
-│  │                   # M3: OfficeScene(CharacterNode), AgentCard, StaffPanel, CharacterPortrait
-│  │                   # M4: OverlayNode(말풍선·칩·아이콘), SoundPlayer, 설정 효과음 탭
+│  │                   # M3: OfficeScene, StageStore(무대 저장소), CharacterNode, AgentCard, StaffPanel, CharacterPortrait
+│  │                   # M4: ArtNodes(도형 → SpriteKit 노드, OverlayNode: 말풍선·칩·아이콘), SoundPlayer, 설정 효과음 탭
 │  │                   # M5(3): Notifier(알림·DesktopAppFocuser·FocusDetector), 설정 알림 탭, 메뉴바 상태 점
 │  │                   # M5~: MiniOfficePanel
 │  │                   # M5(8): LoginItem(로그인 시 실행·SettingsWindow), 설정 일반·연동·표시·미니 탭
 │  └─ Assets.xcassets/ AppIcon.appiconset (M6(3), make icon으로 만든 PNG)
+├─ .github/workflows/test.yml     # `make test`만 도는 CI (macOS 러너, 개선 11). 앱은 로컬에서 `make app`
 ├─ scripts/
 │  ├─ capture-hook.sh              # M0: 실제 페이로드를 이벤트마다 파일로 저장
 │  ├─ capture.py                   # M0: 수집 훅 설치·제거, 구조 리포트, 픽스처 내보내기
@@ -1231,6 +1237,8 @@ claude-office/
 - **시나리오 재생:** `office-replay scenario.jsonl --speed 2`로 녹화한 세션을 앱에 다시 보냅니다. Claude Code 없이도 화면을 확인할 수 있습니다.
 - **데모 모드:** 앱 안에서 가짜 이벤트를 생성하는 디버그 메뉴
 - **수동 점검표 (맥):** 전체화면 IDE 위 표시, Space 전환, 다크 모드 전환, 동작 줄이기, 앱 종료 상태에서 Claude Code 정상 동작
+- **CI (개선 11):** `.github/workflows/test.yml`이 푸시·PR마다 macOS 러너에서 `make test`만 돌립니다. 앱 계층(`App/`)은 테스트가 없고 Swift 5 모드·동시성 검사 최소라 CI에서 빌드하지 않습니다(`make app`으로 로컬 확인).
+- **정리할 때의 기준선 (개선 11):** 동작을 바꾸지 않는 정리는 `make snapshot`의 SVG와 `make demo` 출력이 바이트까지 같은지로 확인합니다(두 번 돌려도 같은 결과가 나옵니다).
 
 ---
 
