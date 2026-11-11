@@ -132,7 +132,7 @@ extension SoundGroup {
         switch self {
         case .approval: "똑똑 · 권한 승인을 기다릴 때. 30초마다 최대 2번 더"
         case .inputWaiting: "뾰롱 · 응답을 마치고 내 입력을 기다릴 때"
-        case .completion: "띠리링 · 팀장 응답 완료, 팀원 보고는 짧은 2음"
+        case .completion: "띠리링 · 메인 응답 완료, 서브 보고는 짧은 2음"
         case .bubble: "톡 + 블립 · 말풍선이 뜰 때. 직원마다 목소리 높이가 달라요"
         case .door: "딸랑 · 출근·퇴근"
         case .error: "뿅? · 툴 오류"

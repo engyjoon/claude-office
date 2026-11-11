@@ -97,7 +97,7 @@ struct MenuContentView: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
-                RosterRowView(row: row, highlight: highlight) { model.focusAgent(row.id) }
+                RosterRowView(row: row, highlight: highlight, destination: model.destination(for: row)) { model.focusAgent(row.id) }
             }
         }
     }
@@ -105,7 +105,7 @@ struct MenuContentView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("아직 출근한 직원이 없어요").font(.subheadline.weight(.semibold))
-            Text("터미널에서 claude를 실행하면 메인이 출근해요.")
+            Text("Claude 데스크톱 앱이나 터미널에서 세션을 시작하면 메인이 출근해요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -116,7 +116,7 @@ struct MenuContentView: View {
         HStack {
             // 키보드 (M6(7)): 드롭다운이 열려 있으면 ⌘O·⌘L·⌘,·⌘Q로 바로 (버튼 Tab 이동은 시스템 "키보드 탐색"을 켰을 때만)
             // 메뉴바 앱은 창이 다른 앱 뒤에 열리기 쉬워 활성화한 뒤 앞으로 올립니다 (M6(17), `WindowFront`)
-            Button("사무실 보기") {
+            Button("사무실 창 열기") {
                 model.openOfficeWindow()
             }
             .keyboardShortcut("o")
@@ -169,6 +169,8 @@ private struct ContentHeightKey: PreferenceKey {
 struct RosterRowView: View {
     let row: RosterRow
     let highlight: Bool
+    /// 이 세션으로 갈 곳 (띄운 앱까지 반영, `AppModel.destination(for:)`)
+    let destination: SessionDestination?
     /// 그 세션으로 이동 (데스크톱 앱 세션이면 Claude 앱, CLI면 터미널). 모델의 `focusAgent`를 거칩니다 (응답 확인·로그).
     let focus: () -> Void
 
@@ -186,7 +188,7 @@ struct RosterRowView: View {
                 }
             }
             Spacer(minLength: 4)
-            if highlight, let destination = row.destination {
+            if highlight, let destination {
                 // 승인 대기 줄: 알림을 누른 것과 같은 곳으로
                 Button(destination.label, action: focus)
                     .controlSize(.small)
@@ -200,7 +202,7 @@ struct RosterRowView: View {
         .background(highlight ? Palette.attention.opacity(0.35) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { if row.canFocus { focus() } }
-        .help(row.destination?.doubleClickHelp ?? "")
+        .help(destination?.doubleClickHelp ?? "")
         // VoiceOver (M6(7)): 한 문장으로 읽고, 누르기 = 그 세션으로 이동 (승인 대기 줄의 [앱으로] 버튼과 같음)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((highlight ? "승인 대기, " : "") + AccessibilityText.row(row))
@@ -215,10 +217,9 @@ struct RosterRowView: View {
         if let caller = row.calledBy { parts.append("\(caller) 호출") }
         if let detail = row.detail { parts.append(detail) }
         if parts.isEmpty, let title = row.sessionTitle { parts.append(title) }
-        let minutes = Int(now.timeIntervalSince(row.since) / 60)
         let quiet: Set<RosterStatus> = [.waitingForInput, .idle, .waitingForPermission, .awaitingReply, .unread]
-        if minutes >= 1, quiet.contains(row.status) {
-            parts.append("\(row.status.label) \(minutes)분")
+        if quiet.contains(row.status), let elapsed = ElapsedText.duration(now.timeIntervalSince(row.since), showSeconds: false) {
+            parts.append("\(row.status.label) \(elapsed)")
         }
         if parts.isEmpty, let term = SessionDestination.displayName(term: row.term) {
             // 상태는 오른쪽 칩에 있으므로, 세부 정보가 없으면 어느 터미널의 세션인지 보여줍니다

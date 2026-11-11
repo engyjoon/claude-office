@@ -153,7 +153,7 @@ struct WelcomeView: View {
             HStack {
                 Button("닫기", action: close)
                 Spacer()
-                Button("사무실 보기") {
+                Button("사무실 창 열기") {
                     model.openOfficeWindow()
                     close()
                 }

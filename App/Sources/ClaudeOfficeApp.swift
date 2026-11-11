@@ -70,6 +70,7 @@ struct OfficeWindowView: View {
                         if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
                             AgentCard(
                                 row: row, team: team, privacy: model.privacy, timeline: model.inspectorTimeline,
+                                destination: model.destination(for: row),
                                 agentDescription: model.agentDescription(for: row, in: team),
                                 onSelect: { model.select($0) },
                                 onFocus: { model.focusAgent(id) },
@@ -311,7 +312,7 @@ final class OfficeSKView: AccessibleSKView {
         case 124 where modifiers.isEmpty: scene.moveSelection(.next)
         case 126 where modifiers.isEmpty: scene.moveSelection(.up)
         case 125 where modifiers.isEmpty: scene.moveSelection(.down)
-        case 36, 76 where modifiers.isEmpty:  // Return, Enter
+        case 36 where modifiers.isEmpty, 76 where modifiers.isEmpty:  // Return, Enter (수식키를 누른 것은 보내지 않음)
             if let id = scene.selectedAgent { scene.onActivate?(id) } else { NSSound.beep() }
         default:
             super.keyDown(with: event)

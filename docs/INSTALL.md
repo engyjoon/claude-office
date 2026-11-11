@@ -117,7 +117,7 @@ cd claude-office
 make install
 ```
 
-`make install`은 XcodeGen으로 프로젝트를 만들고(`make bootstrap`), Release로 빌드한 뒤(`make app`, 몇 분), `/Applications/Claude Office.app`에 복사합니다. 결과물은 인텔·Apple 칩 겸용(universal)입니다.
+`make install`은 XcodeGen으로 프로젝트를 만들고(`make bootstrap`), Release로 빌드한 뒤(`make app`, 몇 분), `/Applications/Claude Office.app`에 복사합니다. 결과물은 인텔·Apple 칩 겸용(universal)입니다. 앱이 실행 중이면 번들을 바꾸지 않고 "메뉴바 아이콘 → 종료한 뒤 다시 실행하세요"라고 알려 주며 멈춥니다(자동으로 끄지 않음). 빌드 오류는 잘리지 않고 그대로 보입니다.
 
 빌드 전에 코어만 확인해 보려면 `make test`를 먼저 실행해도 됩니다 (Xcode 없이 Swift 6 툴체인만으로 됨).
 
@@ -170,6 +170,7 @@ make install
    ```bash
    make uninstall
    ```
+   (훅을 먼저 빼지 않았다면 `make uninstall`이 훅이 남았다고 알려 줍니다. 앱이 꺼져 있으면 훅 스크립트는 조용히 끝나므로 남아도 해롭지 않지만, 설정 → 연동 → 제거로 지우는 편이 깔끔합니다.)
 
 ## 5. 문제가 생겼을 때
 

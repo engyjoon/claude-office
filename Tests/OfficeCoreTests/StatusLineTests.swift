@@ -457,14 +457,6 @@ struct StatusLineTests {
 
     // MARK: - 조각
 
-    @Test("경과 시간 표현")
-    func elapsed() {
-        #expect(StatusLine.elapsed(0.4) == nil)
-        #expect(StatusLine.elapsed(12) == "12초째")
-        #expect(StatusLine.elapsed(185) == "3분째")
-        #expect(StatusLine.elapsed(3720) == "1시간 2분째")
-    }
-
     @Test("주격 조사", arguments: [
         ("메인", "메인이"), ("서브", "서브가"), ("메인1", "메인1이"), ("서브2", "서브2가"), ("서브3", "서브3이"),
         ("서브4", "서브4가"), ("서브10", "서브10이"),

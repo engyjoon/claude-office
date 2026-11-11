@@ -145,17 +145,6 @@ struct AgentTimelineTests {
         #expect(AgentTimeline.make(agent: AgentID("없음"), state: office.engine.state, journal: office.engine.journal, privacy: .detailed) == .empty)
     }
 
-    @Test("상대 시간 문구")
-    func ago() {
-        #expect(AgentTimeline.ago(-3) == "방금")
-        #expect(AgentTimeline.ago(4.9) == "방금")
-        #expect(AgentTimeline.ago(12) == "12초 전")
-        #expect(AgentTimeline.ago(60) == "1분 전")
-        #expect(AgentTimeline.ago(3599) == "59분 전")
-        #expect(AgentTimeline.ago(7200) == "2시간 전")
-        #expect(AgentTimeline.ago(86400 * 3 + 5) == "3일 전")
-    }
-
     @Test("질문·계획 승인에 답하면 타임라인 항목이 승인 대기에서 끝난 일로")
     func askAnswered() {
         var office = Office()

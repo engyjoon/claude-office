@@ -132,7 +132,7 @@ public struct HookHealth: Hashable, Sendable {
         }
 
         // 받은 이벤트
-        let last = input.lastEventAt.map { AgentTimeline.ago(now.timeIntervalSince($0)) } ?? "아직 없음"
+        let last = input.lastEventAt.map { ElapsedText.ago(now.timeIntervalSince($0)) } ?? "아직 없음"
         items.append(Item(label: "마지막 이벤트", value: last, level: input.lastEventAt == nil ? .idle : .ok))
         items.append(Item(label: "받은 이벤트", value: "\(input.eventCount)개 (앱을 켠 뒤)", level: input.eventCount > 0 ? .ok : .idle))
         if !input.rejected.isEmpty {

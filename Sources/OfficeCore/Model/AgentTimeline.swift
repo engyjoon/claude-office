@@ -29,13 +29,13 @@ public struct AgentTimeline: Hashable, Sendable {
 
         /// 줄 앞머리: 진행 중이면 "지금", 아니면 "12초 전"
         public func when(now: Date) -> String {
-            since != nil ? "지금" : AgentTimeline.ago(now.timeIntervalSince(at))
+            since != nil ? "지금" : ElapsedText.ago(now.timeIntervalSince(at))
         }
 
         /// 화면에 그릴 글자 그대로 (테스트·도움말): "12초 전 · Edit auth.ts", "지금 · Bash npm test (12초째)"
         public func text(now: Date) -> String {
             var body = text
-            if let since, let elapsed = StatusLine.elapsed(now.timeIntervalSince(since)) { body += " (\(elapsed))" }
+            if let since, let elapsed = ElapsedText.duration(now.timeIntervalSince(since)) { body += " (\(elapsed))" }
             return "\(when(now: now)) · \(body)"
         }
     }
@@ -73,17 +73,5 @@ public struct AgentTimeline: Hashable, Sendable {
                 at: group.entries.last?.at ?? group.first.at, since: segment.since, count: group.count)
         }
         return AgentTimeline(items: Array(items), truncated: groups.count > items.count)
-    }
-
-    /// "방금", "12초 전", "3분 전", "2시간 전", "3일 전"
-    public static func ago(_ seconds: TimeInterval) -> String {
-        let total = Int(max(0, seconds))
-        if total < 5 { return "방금" }
-        if total < 60 { return "\(total)초 전" }
-        let minutes = total / 60
-        if minutes < 60 { return "\(minutes)분 전" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)시간 전" }
-        return "\(hours / 24)일 전"
     }
 }

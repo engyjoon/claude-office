@@ -87,7 +87,7 @@ extension BubbleKind {
 /// 잠깐 그렸다가 사라지는 효과 (종이비행기, 하이파이브 반짝임)
 public struct StageEffect: Hashable, Sendable, Identifiable {
     public enum Kind: Hashable, Sendable {
-        /// 새 프롬프트가 날아와 팀장에게 도착합니다. 도착 지점은 그 직원의 지금 위치로 계산합니다.
+        /// 새 프롬프트가 날아와 메인에게 도착합니다. 도착 지점은 그 직원의 지금 위치로 계산합니다.
         case paperPlane(to: AgentID)
         case sparkle(at: MapPoint)
     }

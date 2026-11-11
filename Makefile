@@ -73,21 +73,31 @@ bootstrap:
 
 ## Release 빌드 (로컬 서명)
 app: bootstrap
-	set -o pipefail; xcodebuild -project App/ClaudeOffice.xcodeproj -scheme ClaudeOffice -configuration Release \
-		-derivedDataPath $(DERIVED) build | tail -n 20
+	xcodebuild -quiet -project App/ClaudeOffice.xcodeproj -scheme ClaudeOffice -configuration Release \
+		-derivedDataPath $(DERIVED) build
 
 ## 빌드한 앱 실행
 run: app
 	open "$(APP_PATH)"
 
 ## /Applications에 복사
+## 앱이 실행 중이면 멈춥니다 (자동으로 끄지 않음): 번들만 바꾸면 옛 프로세스가 계속 돌기 때문
 install: app
+	@if pgrep -x "Claude Office" >/dev/null 2>&1; then \
+		echo "Claude Office가 실행 중이에요. 메뉴바 아이콘 → 종료한 뒤 make install을 다시 실행하세요."; \
+		exit 1; \
+	fi
 	rm -rf "/Applications/$(APP_NAME)"
 	cp -R "$(APP_PATH)" /Applications/
 	@echo "/Applications/$(APP_NAME) 에 설치했습니다."
 
 uninstall:
+	@if pgrep -x "Claude Office" >/dev/null 2>&1; then \
+		echo "Claude Office가 실행 중이에요. 메뉴바 아이콘 → 종료한 뒤 make uninstall을 다시 실행하세요."; \
+		exit 1; \
+	fi
 	rm -rf "/Applications/$(APP_NAME)"
+	@echo "앱을 지웠어요. ~/.claude/settings.json의 훅은 남아 있어요: 앱을 지우기 전에 설정 → 연동 → 제거…로 지우는 게 좋아요 (훅 스크립트는 앱이 꺼져 있으면 조용히 끝나므로 남아 있어도 해롭지 않아요)."
 
 clean:
 	rm -rf .build build App/ClaudeOffice.xcodeproj App/Generated

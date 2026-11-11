@@ -6,6 +6,8 @@ struct EventLogView: View {
 
     let model: AppModel
     @State private var showDirectives = false
+    /// 지금 화면에 그려진 줄 (맨 아래 줄이 보이는지로 "따라가기"를 정함)
+    @State private var visibleIDs: Set<AppModel.LogEntry.ID> = []
 
     private static let timeFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -42,9 +44,13 @@ struct EventLogView: View {
                             .textSelection(.enabled)
                     }
                     .id(entry.id)
+                    .onAppear { visibleIDs.insert(entry.id) }
+                    .onDisappear { visibleIDs.remove(entry.id) }
                 }
-                .onChange(of: entries.last?.id) { _, last in
-                    if let last { proxy.scrollTo(last, anchor: .bottom) }
+                // 맨 아래(방금까지의 마지막 줄)를 보고 있을 때만 새 줄을 따라갑니다. 위로 올려 읽는 중이면 그대로 둡니다.
+                .onChange(of: entries.last?.id) { old, last in
+                    guard let last else { return }
+                    if old == nil || visibleIDs.contains(old!) { proxy.scrollTo(last, anchor: .bottom) }
                 }
             }
         }

@@ -68,7 +68,7 @@ public struct OfficeState: Sendable {
     private var memberBySubagent: [String: AgentID] = [:]
     private var memberByDelegation: [String: AgentID] = [:]
     private var serial = 0
-    /// 최근에 끝난 tool_use_id. 훅 스크립트가 curl을 백그라운드로 보내므로 Post가 Pre보다 먼저 도착할 수 있습니다.
+    /// 최근에 끝난 tool_use_id. 훅마다 따로 뜬 스크립트(curl)가 보내서 도착 순서가 뒤바뀔 수 있어, Post가 Pre보다 먼저 올 수 있습니다.
     private var finishedToolIDs: [String] = []
     private var finishedToolIDSet: Set<String> = []
     /// 데스크톱 앱이 앞에 있을 때 지금 보고 있는 데스크톱 세션 (`syncResidents`가 맞춤, M6(4)).

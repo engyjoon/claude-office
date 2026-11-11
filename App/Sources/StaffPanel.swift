@@ -39,7 +39,7 @@ struct StaffPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
-                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행). 창을 넓히면 더 보여요.")
+                    .help("사무실은 줄이지 않고 들어가는 만큼만 그려요 (최대 3행).")
             }
 
             Divider()
@@ -48,7 +48,7 @@ struct StaffPanel: View {
                 VStack(spacing: 6) {
                     Image(systemName: "building.2").font(.system(size: 22)).foregroundStyle(.tertiary).accessibilityHidden(true)
                     Text("아직 출근한 직원이 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Text("Claude 데스크톱 앱에서 세션을 시작하면 메인이 출근해요")
+                    Text("Claude 데스크톱 앱이나 터미널에서 세션을 시작하면 메인이 출근해요")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }
@@ -298,7 +298,7 @@ private struct StaffRow: View {
         if let title = row.sessionTitle { parts.append(title) }
         if let caller = row.calledBy { parts.append("\(caller) 호출") }
         if let detail = row.detail { parts.append(detail) }
-        if let elapsed = AgentCard.elapsed(since: row.since, now: now) { parts.append(elapsed) }
+        if let elapsed = ElapsedText.duration(now.timeIntervalSince(row.since), showSeconds: false) { parts.append(elapsed) }
         if parts.isEmpty {
             switch row.kind {
             case .lead: parts.append(SessionDestination.displayName(term: row.term) ?? "Claude Code 세션")

@@ -68,7 +68,7 @@ public enum SoundCue: Hashable, Sendable, CustomStringConvertible {
     case knock
     /// 뾰롱 (입력 대기)
     case inputWaiting
-    /// 띠리링 (팀장 응답 완료)
+    /// 띠리링 (메인 응답 완료)
     case turnComplete
     /// 띠링 (팀원 보고, 더 짧은 2음)
     case memberReport

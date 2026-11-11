@@ -647,7 +647,7 @@ final class OfficeScene: SKScene {
 final class CharacterNode: SKNode {
     private let colors: CharacterArt.Colors
     private let body = SKNode()
-    /// 몸통 (팀장만 가슴에 별 배지. 승진하면 다시 그립니다)
+    /// 몸통 (메인만 가슴에 별 배지. 승진하면 다시 그립니다)
     private let torso = SKNode()
     private var shownStar: Bool?
     private let leftLeg: SKNode

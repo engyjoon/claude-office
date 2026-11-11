@@ -18,7 +18,7 @@
 | 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 완료(커밋) | 알림 권한을 보내기 직전에 다시 읽고 켤 때·끌 때 알림 지움, 이동 판정을 `SessionDestination` 하나로(모르는 터미널은 버튼 없음, `openApplication`), `HookAlert`로 메뉴 배너·사무실 창 띠·메뉴바 아이콘에 고장 표시와 설치 결과, 첫 실행 환영 창. Cursor 구별 불가·미니에는 안 넣음. 화면 확인 필요 |
 | 7 | 훅 서버·설정 파일 안전 (+ 죽은 터미널 세션 퇴근) | Opus 5.5 (medium) — 범위가 늘어 Sonnet 5.5에서 올림 (훅 스크립트·서버·앱에 걸친 PID 확인) | 완료(커밋) | 엔드포인트 파일은 rename·자기 것만 지움·가로채이면 빨간 경고, settings.json 링크는 대상에 쓰고 바뀐 것 없으면 안 씀, 백업 5개, 핸들러 단위 제거. 서버 연결당 3초·동시 32개·accept 쉼·토큰 먼저·거절 수 표시. 훅이 `$PPID`(실측: Claude Code 자신)·`__CFBundleIdentifier`를 보내 죽은 터미널 세션 퇴근과 Cursor 구별. 훅당 추가 시간은 측정 오차 안. 다시 설치 필요, 화면 확인 필요 |
 | 8 | 화면 디자인 다듬기 | Opus 5.5 (high) | 완료(커밋) | 칩은 제 머리 위 자기 몫(옆 사람까지 거리 절반)으로 말줄임·옆으로 안 밀고 위로, 마우스 올림·고름만 전체. 밤 ♪·Zz·빛줄기·외침 선은 따뜻한 흰색. 같은 폴더 행 표지에 세션 제목 둘째 줄. 답변 필요만 남으면 메뉴바 파란 점. 승인 대기·쉼·정리 중인 메인엔 보고 연출 생략. NFC·grapheme 폭. 종이비행기 15°. 소파는 좌표 정상. 화면 확인 필요 |
-| 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 대기 | |
+| 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 완료(커밋) | 경과 시간 글자·갱신 일정을 코어 `ElapsedText` 한 벌로(앱 사본 삭제, 일 단위까지), 낡은 문구·용어 통일(사무실 창 열기), Return 키 수식키, 테스트 이벤트는 테스트 세션 훅만 셈, `make install`/`uninstall`은 실행 중이면 멈춤·빌드 오류 보임, 로그는 맨 아래일 때만 따라감, 미니 자리는 당겨 넣음. 화면 확인 필요 |
 | 10 | 레티나 메모리 줄이기 | Opus 5.5 (high) | 대기 | |
 | 11 | 구조 정리와 안전망 | Fable 5.2 (high) | 대기 | |
 
@@ -305,7 +305,17 @@
 
 **완료 기준**: 경과 시간 함수 테스트, `make test`·`make app` 통과.
 
-**결과**:
+**결과** (2026-11-11):
+
+- **문구**: StaffPanel의 "창을 넓히면 더 보여요"는 지움. "세션은 사이드바에서 골라 주세요"는 6번에서 이미 없어져 있어 손대지 않음. 빈 상태 안내는 메뉴·패널 모두 "Claude 데스크톱 앱이나 터미널에서 세션을 시작하면 메인이 출근해요". 같은 동작은 "사무실 창 열기"로 통일(메뉴·환영 창·README·설계서·M2-build). 7번이 넘긴 것: 인스펙터·메뉴 버튼 도움말과 마우스 올림 도움말이 `model.destination(for:)`로 띄운 앱(Cursor 등) 이름을 씀. 화면 문구를 훑어 남은 "팀장·팀원"(소리 설정 설명, 주석)도 메인·서브로.
+- **경과 시간**: `Sources/OfficeCore/Model/ElapsedText.swift` 한 벌 (`duration`·`ago`·`nextChange`). `StatusLine.elapsed`·`AgentTimeline.ago`·`AgentCard.elapsed`·미니의 `ago`·메뉴의 분 단위를 모두 없애고 이것을 부름. 초 → 분 → 시간 → 일 (메뉴 "쉬는 중 4320분" → "쉬는 중 3일 0시간째", 미니 "72시간 전" → "3일 전"). 메뉴·패널·미니처럼 30초·1분마다 갱신하는 곳은 `showSeconds: false`. 갱신 일정은 `StatusLine.nextChange`·미니 `nextChange` 모두 `ElapsedText.nextChange`를 써서 M6(1)의 "글자가 바뀌는 때만 다시 그림"·`liveClock`은 그대로. 지난 시간이 1시간을 넘으면 갱신이 1시간 단위로 늘고 지속은 하루부터(글자가 시간 단위로만 바뀜). 테스트: 59초·60초·59분·60분·23시간·24시간·3일 경계, 그리고 4일 동안 글자가 바뀌는 순간과 `nextChange`가 어긋나지 않는지 훑는 테스트.
+- **Return 키**: `case 36 where modifiers.isEmpty, 76 where modifiers.isEmpty`.
+- **테스트 이벤트 수**: 지금 보내는 테스트 세션 id의 훅만 세는 `testHooksArrived`.
+- **Makefile**: `make install`·`make uninstall`은 `Claude Office`가 실행 중이면 "메뉴바 아이콘 → 종료한 뒤 다시 실행하세요"라고 알리고 멈춤(자동으로 끄지 않음). `xcodebuild -quiet … build`(`| tail` 제거)라 오류가 잘리지 않고 성공 때 출력도 짧음. `make uninstall`은 훅이 남는다는 안내를 출력. 실행 확인은 `make -n install`로만 했고 `docs/INSTALL.md`에 한두 줄 보탬(README·CLAUDE.md의 설치 설명은 그대로 맞음).
+- **이벤트 로그**: 방금까지의 마지막 줄이 화면에 있을 때만 새 줄로 따라감. 화면 확인 필요 (List의 onAppear/onDisappear로 보이는 줄을 추적, 위로 올려 읽는 중에 줄이 들어와도 그대로인지).
+- **미니 위치**: `initialFrame`은 저장한 자리를 `clamped`로 화면 안으로 당기고(기억한 자리가 없을 때만 오른쪽 아래), `keepOnScreen`은 패널이 놓인 화면(`panel.screen`)을 쓰고 그 화면이 없을 때만 메인 화면. 화면 확인 필요 (Dock 크기를 바꿔 왼쪽 아래 미니가 제자리에 있는지).
+- **주석**: OfficeState의 curl 설명(스크립트는 앞에서 보내고 훅마다 따로 떠서 순서가 바뀔 수 있음)과 OfficeEvent의 "팀장"을 고침.
+- **닫은 창 갱신(전제 미확인)**: 설정 창의 1초 시계는 `controlActiveState`가 비활성이면 갱신을 건너뛰고, 다시 활성화되면 바로 갱신(`liveClock`과 같은 생각이지만 "키 창인가"로 판정해, 보이지만 뒤에 있는 설정 창은 멈춤). 이벤트 로그 창은 닫혀도 모델의 `log`를 보는 뷰가 남는지 확인하지 못함 — **화면 확인 필요**(닫은 뒤 CPU, `make perf`).
 
 ## 10. 레티나 메모리 줄이기
 

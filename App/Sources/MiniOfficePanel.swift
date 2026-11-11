@@ -404,14 +404,21 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
 
     private static func frameKey(_ id: UInt32) -> String { "mini.frame.\(id)" }
 
-    /// 열 때: 지금 화면(메뉴바가 있는 화면)에서 기억해 둔 자리, 없거나 화면 밖이면 오른쪽 아래
-    private func initialFrame() -> NSRect {
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        if let id = Self.displayID(screen), let saved = UserDefaults.standard.string(forKey: Self.frameKey(id)) {
-            let frame = NSRect(origin: NSRectFromString(saved).origin, size: Self.size)
-            if let visible = screen?.visibleFrame, visible.contains(frame) { return frame }
+    /// 열 때: 지금 화면(메뉴바가 있는 화면)에서 기억해 둔 자리. 화면 밖으로 나갔으면(Dock 크기·해상도 변경) 초기화하지 않고 화면 안으로 당기고, 기억한 자리가 없을 때만 오른쪽 아래
+    private func initialFrame(on screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> NSRect {
+        if let id = Self.displayID(screen), let saved = UserDefaults.standard.string(forKey: Self.frameKey(id)),
+           let visible = screen?.visibleFrame {
+            return Self.clamped(NSRect(origin: NSRectFromString(saved).origin, size: Self.size), in: visible)
         }
         return defaultFrame(on: screen)
+    }
+
+    /// `frame`을 `visible` 안으로 가장 가까운 자리까지만 당긴 것 (이미 안이면 그대로)
+    static func clamped(_ frame: NSRect, in visible: NSRect) -> NSRect {
+        var result = frame
+        result.origin.x = max(visible.minX, min(frame.minX, visible.maxX - frame.width))
+        result.origin.y = max(visible.minY, min(frame.minY, visible.maxY - frame.height))
+        return result
     }
 
     private func defaultFrame(on screen: NSScreen?) -> NSRect {
@@ -426,12 +433,13 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
         placing = false
     }
 
-    /// 해상도가 바뀌거나 모니터를 빼서 화면 밖으로 나가면 그 화면에서 쓰던 자리(없으면 기본 자리)로
+    /// 해상도·Dock이 바뀌어 화면 밖으로 나가면 패널이 놓인 화면 안으로 당깁니다. 그 화면이 사라졌으면(모니터를 뺌) 메인 화면의 기억한 자리(없으면 기본 자리)로
     private func keepOnScreen() {
         guard let panel, panel.isVisible else { return }
-        let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        guard let screen = panel.screen else { return place(panel, frame: initialFrame()) }
+        let visible = screen.visibleFrame
         guard !visible.contains(panel.frame) else { return }
-        place(panel, frame: initialFrame())
+        place(panel, frame: Self.clamped(panel.frame, in: visible))
     }
 
     /// 옮긴 뒤 잠깐 기다렸다가(끄는 중이면 다시 미룸) 가장자리에 붙이고 저장합니다
@@ -725,38 +733,22 @@ struct MiniHeaderView: View {
         let name = row.title.label
         switch line.kind {
         case .answer:
-            let elapsed = StatusLine.elapsed(now.timeIntervalSince(row.since)).map { " \($0)" } ?? ""
+            let elapsed = ElapsedText.duration(now.timeIntervalSince(row.since)).map { " \($0)" } ?? ""
             let more = waitingCount > 1 ? " (외 \(waitingCount - 1)명)" : ""
             return "\(name): \(model.waitLabel(of: row.id))\(elapsed)\(more)"
         case .reply:
-            return "\(name): 답변 필요 · \(Self.ago(row.since, now: now))"
+            return "\(name): 답변 필요 · \(ElapsedText.ago(now.timeIntervalSince(row.since), showSeconds: false))"
         case .completed:
-            return "\(name): 새 응답 · \(Self.ago(row.since, now: now))"
+            return "\(name): 새 응답 · \(ElapsedText.ago(now.timeIntervalSince(row.since), showSeconds: false))"
         case .normal:
             let prompted = row.status == .thinking && model.promptedAt(row).map { abs($0.timeIntervalSince(row.since)) < 1 } == true
-            return "\(name): \(prompted ? "요청 받음" : row.status.label) · \(Self.ago(row.since, now: now))"
+            return "\(name): \(prompted ? "요청 받음" : row.status.label) · \(ElapsedText.ago(now.timeIntervalSince(row.since), showSeconds: false))"
         }
     }
 
-    /// 머리줄 글자가 다음에 바뀌는 때: 답변 대기는 "N초째"라 1초마다, 나머지는 `ago`가 1분 단위라 다음 분 경계
+    /// 머리줄 글자가 다음에 바뀌는 때: 답변 대기는 "N초째"라 1초마다, 나머지는 초 없는 "N분 전"이라 1분(1시간부터 1시간) 단위 (`ElapsedText`)
     static func nextChange(_ line: Line?, after now: Date) -> Date? {
         guard let line else { return nil }
-        if line.kind == .answer {
-            let elapsed = max(now.timeIntervalSince(line.row.since), 0)
-            let step: TimeInterval = elapsed < 60 ? 1 : 60
-            return line.row.since.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step)
-        }
-        let elapsed = max(now.timeIntervalSince(line.row.since), 0)
-        let step: TimeInterval = elapsed < 3600 ? 60 : 3600
-        return line.row.since.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step)
-    }
-
-    /// "방금", "3분 전", "2시간 전"
-    static func ago(_ date: Date?, now: Date) -> String {
-        guard let date else { return "" }
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
-        if seconds < 60 { return "방금" }
-        if seconds < 3600 { return "\(seconds / 60)분 전" }
-        return "\(seconds / 3600)시간 전"
+        return ElapsedText.nextChange(since: line.row.since, after: now, isDuration: line.kind == .answer, showSeconds: line.kind == .answer)
     }
 }

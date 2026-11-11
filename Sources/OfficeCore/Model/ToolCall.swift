@@ -2,7 +2,7 @@ import Foundation
 
 public enum ToolCategory: String, Hashable, Sendable, CaseIterable {
     case read, write, shell, web, plan, delegate, mcp, other
-    /// 서브에이전트가 결과를 팀장에게 넘기는 중 (`SubagentHandback`, M0에서 확인)
+    /// 서브에이전트가 결과를 메인에게 넘기는 중 (`SubagentHandback`, M0에서 확인)
     case report
 
     /// 요약 표시 수준에서 쓰는 이름

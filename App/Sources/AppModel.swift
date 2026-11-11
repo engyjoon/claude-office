@@ -60,6 +60,9 @@ final class AppModel {
     private var isCheckingVersion = false
     /// 테스트 이벤트를 보내는 중 (설정 → 연동)
     private(set) var isSendingTest = false
+    /// 지금 보내는 테스트 세션의 id와, 그 세션 훅이 도착한 수 (그 사이 온 실제 훅은 세지 않음)
+    private var testSessionID: String?
+    private var testHooksArrived = 0
     /// 동작 줄이기 설정과 macOS 손쉬운 사용 값 (설계서 §10, M5(8))
     private(set) var motionSettings: MotionSettings
     private(set) var systemReduceMotion = false
@@ -402,6 +405,7 @@ final class AppModel {
             var directives: [Directive] = []
             if var event = try HookParser.parse(delivery.body, term: delivery.term, receivedAt: delivery.receivedAt) {
                 event.hint = hint
+                if let testSessionID, event.session.raw == testSessionID { testHooksArrived += 1 }
                 var ended = false
                 if case .sessionEnded = event.kind { ended = true }
                 sessionProcesses.note(session: event.session, process: delivery.process, app: delivery.app,
@@ -709,7 +713,7 @@ final class AppModel {
     /// 마우스를 올린 캐릭터의 도움말 (M5(7)). 미니는 한 번 누르면 사무실 창이 열린다는 것도 알려 줍니다.
     func hoverHelp(for id: AgentID, mini: Bool) -> String? {
         guard let row = roster.row(for: id) else { return nil }
-        let jump = row.destination?.doubleClickHelp
+        let jump = destination(for: row)?.doubleClickHelp
         if mini { return [row.name, "누르면 사무실 창", jump].compactMap { $0 }.joined(separator: " · ") }
         return [row.name, jump].compactMap { $0 }.joined(separator: " · ")
     }
@@ -830,7 +834,7 @@ final class AppModel {
         WindowFront.bring(open: openSettingsAction) { SettingsWindow.window }
     }
 
-    /// 사무실 창을 열고 다른 앱 창 위로 가져옵니다 (미니 누르기·메뉴바 "사무실 보기"·설정, M6(17)).
+    /// 사무실 창을 열고 다른 앱 창 위로 가져옵니다 (미니 누르기·메뉴바 "사무실 창 열기"·설정, M6(17)).
     /// 이미 열려 있으면 앞으로, 최소화돼 있으면 Dock에서 꺼내고, 다른 Space에 있으면 지금 Space로 데려옵니다.
     func openOfficeWindow() {
         let open = openOfficeWindowAction ?? { OfficeWindow.window?.makeKeyAndOrderFront(nil) }
@@ -1040,8 +1044,10 @@ final class AppModel {
         guard !isSendingTest else { return }
         isSendingTest = true
         let script = installer.scriptURL
-        let before = receivedHooks
-        let steps = HookTestScenario.steps(session: HookTestScenario.sessionID(at: Date()))
+        let sessionID = HookTestScenario.sessionID(at: Date())
+        testSessionID = sessionID
+        testHooksArrived = 0
+        let steps = HookTestScenario.steps(session: sessionID)
         installMessage = "테스트 세션이 출근하는 중이에요… 사무실 창이나 미니 사무실에서 \"\((HookTestScenario.folder as NSString).lastPathComponent)\" 행을 보세요."
         Task.detached(priority: .userInitiated) {
             for step in steps {
@@ -1049,6 +1055,7 @@ final class AppModel {
                 if let error = Self.runHookScript(script, payload: step.payload) {
                     await MainActor.run {
                         self.isSendingTest = false
+                        self.testSessionID = nil
                         self.installMessage = "훅 스크립트를 실행하지 못했어요: \(error). \"다시 설치\"를 눌러 보세요."
                         self.refreshHookStatus()
                     }
@@ -1058,7 +1065,8 @@ final class AppModel {
             try? await Task.sleep(nanoseconds: 800_000_000)
             await MainActor.run {
                 self.isSendingTest = false
-                let arrived = self.receivedHooks - before
+                let arrived = self.testHooksArrived
+                self.testSessionID = nil
                 self.installMessage = arrived >= steps.count
                     ? "연결 확인 완료! 테스트 이벤트 \(arrived)개가 모두 도착했어요."
                     : "테스트 이벤트가 \(steps.count)개 중 \(arrived)개만 도착했어요. 훅을 다시 설치하거나 서버를 다시 시작해 보세요."

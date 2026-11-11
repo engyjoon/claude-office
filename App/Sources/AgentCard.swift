@@ -12,6 +12,8 @@ struct AgentCard: View {
     let team: RosterTeam
     let privacy: PrivacyLevel
     let timeline: AgentTimeline
+    /// 이 세션으로 갈 곳 (띄운 앱까지 반영, `AppModel.destination(for:)`)
+    let destination: SessionDestination?
     /// 직접 만든 에이전트면 정의 파일(`.claude/agents/*.md`)의 설명 (설계서 §4.5)
     var agentDescription: String? = nil
     /// 다른 사람으로 고르기 (서브 목록, 소속 메인)
@@ -154,7 +156,7 @@ struct AgentCard: View {
                     TimelineView(NextChangeSchedule.every(1, live: liveClock)) { context in
                         HStack(spacing: 6) {
                             StatusChip(status: row.status)
-                            if let elapsed = StatusLine.elapsed(context.date.timeIntervalSince(row.since)) {
+                            if let elapsed = ElapsedText.duration(context.date.timeIntervalSince(row.since)) {
                                 Text(elapsed).font(.system(size: 11)).foregroundStyle(Self.labelColor).monospacedDigit()
                             }
                         }
@@ -181,7 +183,7 @@ struct AgentCard: View {
                     label("어디서")
                     HStack(spacing: 6) {
                         Text(place).font(.system(size: 12)).lineLimit(1)
-                        if let destination = row.destination {
+                        if let destination {
                             Button(destination.label, action: onFocus)
                                 .controlSize(.mini)
                                 .help("\(destination.buttonHelp). 캐릭터를 더블클릭해도 돼요.")
@@ -289,13 +291,6 @@ struct AgentCard: View {
         let home = NSHomeDirectory()
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
-
-    static func elapsed(since: Date, now: Date) -> String? {
-        let minutes = Int(now.timeIntervalSince(since) / 60)
-        if minutes < 1 { return nil }
-        if minutes < 60 { return "\(minutes)분째" }
-        return "\(minutes / 60)시간 \(minutes % 60)분째"
-    }
 }
 
 /// 타임라인 한 줄: "12초 전 · Edit auth.ts". 승인 대기는 노랑 형광펜, 실패·거부는 빨강 (현황 줄과 같은 색).
@@ -333,7 +328,7 @@ private struct TimelineRow: View {
             text.backgroundColor = Palette.reply
         case .error: text.foregroundColor = .red
         }
-        if let since = item.since, let elapsed = StatusLine.elapsed(now.timeIntervalSince(since)) {
+        if let since = item.since, let elapsed = ElapsedText.duration(now.timeIntervalSince(since)) {
             var suffix = AttributedString(" (\(elapsed))")
             suffix.foregroundColor = .secondary
             text += suffix

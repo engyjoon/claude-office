@@ -213,6 +213,8 @@ struct ConnectionSettings: View {
     /// "12초 전"이 흐르도록 1초마다 다시 판정합니다
     @State private var now = Date()
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    /// 창이 키 창이 아니면(닫힘·뒤에 가림) 시계를 멈춤 (현황 줄의 `liveClock`과 같은 생각). 다시 앞으로 오면 바로 갱신.
+    @Environment(\.controlActiveState) private var activeState
 
     var body: some View {
         Form {
@@ -276,7 +278,8 @@ struct ConnectionSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { model.refreshHookStatus() }
-        .onReceive(clock) { now = $0 }
+        .onReceive(clock) { if activeState != .inactive { now = $0 } }
+        .onChange(of: activeState) { _, state in if state != .inactive { now = Date() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshHookStatus()  // 터미널에서 settings.json을 고치고 돌아왔을 때
         }

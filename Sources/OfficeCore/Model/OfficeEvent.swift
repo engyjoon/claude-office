@@ -31,7 +31,7 @@ public enum ToolOutcome: Hashable, Sendable {
 /// 세션이 어느 방에 속하는지 알려 주는 힌트 (설계서 §4.4).
 ///
 /// 훅 페이로드에는 부모 세션 정보가 없어서, 앱이 Claude 데스크톱 앱의 세션 정보 파일을 읽어 만듭니다.
-/// 코어는 파일을 모르고 이 값만 받습니다. 없으면 "같은 폴더에 먼저 온 세션이 팀장" 규칙을 씁니다.
+/// 코어는 파일을 모르고 이 값만 받습니다. 없으면 "같은 폴더에 먼저 온 세션이 메인" 규칙을 씁니다.
 public struct SessionHint: Hashable, Sendable {
     /// 데스크톱 앱 세션 id (`local_…`)
     public var hostSession: String?

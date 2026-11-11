@@ -58,8 +58,8 @@ public struct StatusLine: Hashable, Sendable {
 
         /// 괄호 안 시간: 진행 중이면 "12초째"(1초 미만은 없음), 끝났으면 "방금"·"3초 전"
         public func time(now: Date) -> String? {
-            if let since { return StatusLine.elapsed(now.timeIntervalSince(since)) }
-            return at.map { AgentTimeline.ago(now.timeIntervalSince($0)) }
+            if let since { return ElapsedText.duration(now.timeIntervalSince(since)) }
+            return at.map { ElapsedText.ago(now.timeIntervalSince($0)) }
         }
 
         public func text(now: Date) -> String {
@@ -132,7 +132,7 @@ public struct StatusLine: Hashable, Sendable {
 
     /// 시간 때문에 화면 글자가 다음에 바뀌는 때 (바뀔 일이 없으면 nil). 화면은 이때만 다시 그립니다 (M6(1), 설계서 §8.3).
     ///
-    /// "12초째"·"3초 전"처럼 1분 안쪽은 1초마다, "3분째"·"5분 전"·"1시간 2분째"는 1분마다 바뀌고(시작 시각 기준으로 맞춤),
+    /// "12초째"·"3초 전"처럼 1분 안쪽은 1초마다, "3분째"·"5분 전"·"1시간 2분째"는 1분마다(지난 뒤 1시간부터·지속 하루부터는 1시간마다, `ElapsedText`) 바뀌고(시작 시각 기준으로 맞춤),
     /// 쉬는 중은 `napAfter`가 지나는 순간 "잠든 중"으로 바뀝니다. 1초마다 창 전체를 다시 배치하던 것을 줄입니다.
     public func nextChange(after now: Date) -> Date? {
         var next: Date?
@@ -142,9 +142,7 @@ public struct StatusLine: Hashable, Sendable {
         for line in lines {
             let segment = line.segment
             if let start = segment.since ?? segment.at {
-                let elapsed = max(now.timeIntervalSince(start), 0)
-                let step: TimeInterval = elapsed < 60 ? 1 : 60
-                consider(start.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step))
+                consider(ElapsedText.nextChange(since: start, after: now, isDuration: segment.since != nil))
             }
             if let resting = segment.restingSince { consider(resting.addingTimeInterval(Self.napAfter)) }
         }
@@ -160,16 +158,6 @@ public struct StatusLine: Hashable, Sendable {
     /// "claude-office" → 그대로, "very-long-directory-name" → "very-long-direc…"
     public static func shortFolder(_ name: String) -> String {
         name.count > maxFolderLength ? String(name.prefix(maxFolderLength - 1)) + "…" : name
-    }
-
-    /// "12초째", "3분째", "1시간 5분째". 1초 미만은 nil
-    public static func elapsed(_ seconds: TimeInterval) -> String? {
-        let total = Int(seconds)
-        if total < 1 { return nil }
-        if total < 60 { return "\(total)초째" }
-        let minutes = total / 60
-        if minutes < 60 { return "\(minutes)분째" }
-        return "\(minutes / 60)시간 \(minutes % 60)분째"
     }
 
     // MARK: - 만들기
