@@ -61,9 +61,16 @@ enum ShapeBaker {
     private static var ledger = TextureCacheLedger<Key>()
     private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    /// 이보다 픽셀이 많은 층은 GPU에서 굽습니다 (약 1000×1000)
+    /// 이보다 픽셀이 많은 층(바닥·벽 바탕, 약 1000×1000)은 캐시하지 않습니다. 가구를 다시 만들 때만 굽고 같은 그림을 다시 쓸 일이 드물어,
+    /// 담으면 작은 텍스처(캐릭터 부위·롤러 그림)만 밀려납니다.
     private static let largeTexturePixels = 1_000_000
-    /// GPU 굽기용 화면 밖 뷰 (창에 붙지 않아 배율 1로 그리므로 노드를 굽는 배율만큼 키워서 그림)
+    /// 이보다 픽셀이 많은 층을 화면 밖 SKView로(GPU) 굽기. 기본은 꺼짐(모두 CoreGraphics), 측정 실행에서만 `CLAUDE_OFFICE_GPU_BAKE_PIXELS`로 켭니다.
+    ///
+    /// 개선 10 실측(5K 2배율, M3): 예전처럼 100만 픽셀이 넘는 층을 GPU로 구우면 큰 층 텍스처 약 33MB에 그래픽 메모리가 약 113MB
+    /// 더 잡혔고(화면 밖 SKView 렌더러의 몫, 내려가지 않음), CoreGraphics로 구우면 텍스처는 GPU 메모리(IOAccelerator)에만 남고
+    /// CPU 사본(CG image)은 0.1MB였습니다. 1배율 화면에서는 바탕이 100만 픽셀 아래라 예전에도 늘 CoreGraphics였습니다.
+    private static let gpuBakePixels = PerfLaunch.gpuBakePixels
+    /// GPU 굽기용 화면 밖 뷰 (창에 붙지 않아 배율 1로 그리므로 노드를 굽는 배율만큼 키워서 그림). `gpuBakePixels`를 줄 때만 만듭니다.
     /// 멈춰 둡니다: 멈추지 않은 SKView는 장면이 없어도 디스플레이 링크가 vsync마다 메인 스레드를 깨움 (`texture(from:)`은 멈춰도 됨)
     private static let offscreenView: SKView = {
         let view = SKView(frame: CGRect(x: 0, y: 0, width: 16, height: 16))
@@ -131,10 +138,20 @@ enum ShapeBaker {
         }
         let width = Int((frame.width * scale).rounded(.up)), height = Int((frame.height * scale).rounded(.up))
         guard width > 0, height > 0, width <= 8192, height <= 8192 else { return nil }
-        // 바닥·벽처럼 큰 층은 GPU에서 한 번 그려 GPU 텍스처로만 둡니다 (CGImage로 만들면 CPU 사본이 텍스처마다 남아 메모리가 50MB 넘게 늘었음).
-        // 가구를 다시 만들 때만 그리므로(창 크기·행이 바뀔 때) 동기 렌더링 비용(수십 ms)은 괜찮습니다. 캐시하지 않습니다.
-        if width * height > largeTexturePixels, let texture = renderOnGPU(items.map(\.shape), colors: colors, frame: frame, scale: scale) {
-            largeBytes["\(Int(frame.width))x\(Int(frame.height))@\(Double(scale))x"] = width * height * 4
+        // 바닥·벽처럼 큰 층은 캐시하지 않습니다. 가구를 다시 만들 때만 그리므로(창 크기·행·명패·조명이 바뀔 때) 동기 굽기 비용은
+        // 계측(`bake.large ms`)으로 봅니다.
+        let isLarge = width * height > largeTexturePixels
+        let started = isLarge ? Date() : nil
+        defer {
+            if let started {
+                largeBytes["\(Int(frame.width))x\(Int(frame.height))@\(Double(scale))x"] = width * height * 4
+                let ms = Date().timeIntervalSince(started) * 1000
+                MainActor.assumeIsolated { PerfProbe.shared?.measured("bake.large", ms: ms) }  // 굽기는 늘 메인 스레드
+            }
+        }
+        if let gpuBakePixels, width * height > gpuBakePixels,
+            let texture = renderOnGPU(items.map(\.shape), colors: colors, frame: frame, scale: scale)
+        {
             return Baked(texture: texture, frame: frame)
         }
         guard let context = CGContext(
@@ -149,6 +166,10 @@ enum ShapeBaker {
         for (shape, path) in items {
             let grouped = shape.opacity < 1
             if grouped {
+                // 투명도 층은 잘린 영역만큼 버퍼를 만듭니다. 도형 경계(+ 선 굵기·안티에일리어싱 1pt)로 잘라 두면 결과 픽셀은 같고,
+                // 밤 바탕(반투명 도형 55개, 2배율 350만 픽셀)이 622 → 12ms로 줄었습니다 (개선 10, 디버그 빌드 측정).
+                context.saveGState()
+                context.clip(to: path.boundingBoxOfPath.insetBy(dx: -shape.lineWidth - 1, dy: -shape.lineWidth - 1))
                 context.setAlpha(shape.opacity)
                 context.beginTransparencyLayer(auxiliaryInfo: nil)
             }
@@ -166,13 +187,14 @@ enum ShapeBaker {
             }
             if grouped {
                 context.endTransparencyLayer()
-                context.setAlpha(1)
+                context.restoreGState()
             }
         }
         guard let image = context.makeImage() else { return nil }
         let texture = SKTexture(cgImage: image)
         texture.filteringMode = .linear
         let baked = Baked(texture: texture, frame: frame)
+        if isLarge { return baked }
         let (stored, evicted) = ledger.insert(key, pixels: width * height, scale: Double(scale))
         for old in evicted { cache[old] = nil }
         if stored { cache[key] = baked }

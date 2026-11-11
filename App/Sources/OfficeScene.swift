@@ -352,6 +352,10 @@ final class OfficeScene: SKScene {
     }
 
     private func sync() {
+        // 뷰에 붙지 않은 장면은 아무것도 굽지 않습니다 (개선 10 실측: 앱을 켤 때 `SKScene.init(size:)`의 크기 변경으로
+        // 숨은 사무실·미니 장면이 2배율 바탕을 화면 밖 SKView로 구워, 메뉴바만 있어도 그래픽 메모리가 170MB 넘게 잡혔음).
+        // 처음 보일 때 `didMove(to:)`가 다시 부릅니다.
+        guard view != nil else { return }
         refreshScreenScale()
         if reportedSize != size, size.width > 1, size.height > 1 {
             reportedSize = size

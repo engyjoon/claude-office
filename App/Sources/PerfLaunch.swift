@@ -8,6 +8,7 @@ import SpriteKit
 /// - `CLAUDE_OFFICE_PERF=1`: 알림 센터를 건드리지 않습니다(켤 때·끌 때 지우기, 권한 묻기, 보내기 모두 안 함 — 같은 번들 ID의
 ///   설치된 앱 알림을 지우지 않게). 미니 위치와 첫 실행 표시를 저장하지 않습니다.
 /// - `CLAUDE_OFFICE_PERF_SCENE=menubar|mini|office`: 켤 때의 화면. 미니 켜기/끄기는 저장하지 않고 이번 실행에만 씁니다.
+/// - `CLAUDE_OFFICE_GPU_BAKE_PIXELS=<픽셀 수>`: 이보다 큰 층을 화면 밖 SKView(GPU)로 굽기 (개선 10 전의 방식, 예전 기준 1000000). 기본은 모두 CoreGraphics.
 /// - `CLAUDE_OFFICE_DRAWABLE_SCALE=1`: SpriteKit 뷰의 그림판(drawable)을 화면 배율 대신 이 배율로 (실험, 글자까지 흐려짐).
 enum PerfLaunch {
     private static let environment = ProcessInfo.processInfo.environment
@@ -26,6 +27,9 @@ enum PerfLaunch {
 
     /// 켤 때의 화면 (측정 실행일 때만)
     static let scene: Scene? = isMeasuring ? environment["CLAUDE_OFFICE_PERF_SCENE"].flatMap(Scene.init) : nil
+
+    /// 이보다 큰 층을 GPU로 굽기 (측정 실행일 때만, 예전 방식과 견줄 때)
+    static let gpuBakePixels: Int? = isMeasuring ? environment["CLAUDE_OFFICE_GPU_BAKE_PIXELS"].flatMap(Int.init) : nil
 
     /// 그림판 배율 실험값 (측정 실행일 때만, 0.5~4)
     static let drawableScale: CGFloat? = {
