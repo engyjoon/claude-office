@@ -84,6 +84,8 @@ public struct Choreographer: Sendable {
         var watching: String??
         /// 쉬러 간 횟수 (탕비 코너에 들를지 정하는 데 씀)
         var breaks = 0
+        /// 소파에서 손에 든 것: 보통 컵, 탕비 코너 냉장고에 들렀으면 음료
+        var drink = Prop.cup
         /// 승인 대기 중 띄운 외침 풍선 (화면에 다시 보일 때 그대로 띄웁니다)
         var shout: Bubble?
         /// 대화를 압축하는 중 (서류 정리 자세). 쉼 단계(`rest`)와 쉬기 시작한 때(`idleSince`)는 그대로 두었다가 끝나면 되돌립니다 (M6(2)).
@@ -96,6 +98,57 @@ public struct Choreographer: Sendable {
     enum Rest: Int, Comparable, Sendable {
         case none, lounge, massage, nap
         static func < (lhs: Rest, rhs: Rest) -> Bool { lhs.rawValue < rhs.rawValue }
+    }
+
+    /// 직원의 모습: 자세·손에 든 것·표정, 그리고 그 모습에 늘 따라붙는 머리 위 아이콘.
+    struct Look: Equatable, Sendable {
+        var pose: Pose
+        var prop: Prop?
+        var expression: FacialExpression
+        /// 승인 대기 "!", 쉼 ♪·Zz, 긴 명령 ⏳. 잠깐 띄우는 아이콘(💡·❓·💦·✨)은 비트가 따로 띄우고 `Presence.emote`가 기억합니다.
+        var emote: Emote?
+    }
+
+    /// 상태 → 모습 (개선 11). 모습을 정하는 규칙은 여기 한 곳뿐이고, 일을 시작할 때(`show`)·쉼 단계에 들어갈 때(`rest`)·
+    /// 조용히 앉힐 때(`settle`)·자리를 옮긴 뒤(`returnToOwnDesk`)·화면에 다시 세울 때(`restoreDirectives`) 모두 이 값을 씁니다.
+    /// 앞선 것이 이깁니다: 승인 대기 → 대화 정리 → 보이는 활동(일하는 중·생각 중) → 쉼 단계 → 자리에서 쉼.
+    /// 인사·축하·놀람 같은 잠깐의 표정과 제스처는 상태가 아니라서 각 비트가 따로 냅니다.
+    static func look(for presence: Presence) -> Look {
+        if presence.waiting { return Look(pose: .raisingHand, prop: nil, expression: .eager, emote: .exclamation) }
+        if presence.compacting { return Look(pose: .sorting, prop: .documents, expression: .focus, emote: nil) }
+        let atDesk = presence.seated && presence.spot.isSeat
+        switch presence.shown {
+        case .working(let call):
+            // 오래 걸리는 셸 명령은 자기 책상에서 모니터를 보며 기다립니다 (⏳)
+            if presence.watching != nil { return Look(pose: atDesk ? .watching : .thinking, prop: nil, expression: .neutral, emote: .hourglass) }
+            switch call.category {
+            case .read: return Look(pose: .reading, prop: .book, expression: .focus, emote: nil)
+            case .plan: return Look(pose: .writingBoard, prop: .marker, expression: .focus, emote: nil)
+            case .report: return Look(pose: .sorting, prop: .documents, expression: .focus, emote: nil)
+            // 웹 검색은 자기 책상에서 타이핑 (M5(1): 리서치 데스크를 없앰)
+            case .web, .write, .shell, .delegate, .mcp, .other: return Look(pose: .typing, prop: nil, expression: .focus, emote: nil)
+            }
+        case .thinking:
+            return Look(pose: .thinking, prop: nil, expression: .think, emote: nil)
+        case .idle:
+            switch presence.rest {
+            case .nap: return Look(pose: .sleeping, prop: nil, expression: .sleepy, emote: .zzz)
+            case .massage: return Look(pose: .massage, prop: nil, expression: .happy, emote: .note)
+            case .lounge: return Look(pose: .holdingCup, prop: presence.drink, expression: .happy, emote: .note)
+            case .none: return Look(pose: atDesk ? .sitting : .standing, prop: nil, expression: .neutral, emote: nil)
+            }
+        }
+    }
+
+    /// 모습을 지시로 냅니다. 순서는 자리마다 예전 그대로 둡니다 (`propFirst`: 손에 든 것을 먼저 내려놓는 곳).
+    private mutating func wear(_ id: AgentID, propFirst: Bool = false, emote: Bool = false, into out: inout [Directive]) {
+        guard let presence = presences[id] else { return }
+        let look = Self.look(for: presence)
+        if propFirst { out.append(Directive(id, .prop(look.prop))) }
+        out.append(Directive(id, .pose(look.pose)))
+        if !propFirst { out.append(Directive(id, .prop(look.prop))) }
+        out.append(Directive(id, .express(look.expression)))
+        if emote { setEmote(id, look.emote, into: &out) }
     }
 
     public init(privacy: PrivacyLevel = .detailed, config: ChoreographyConfig = .init(), book: DialogueBook = .korean, seed: UInt64) {
@@ -285,9 +338,11 @@ public struct Choreographer: Sendable {
             presence.rest = .none
             presence.watching = nil
             presences[agent.id] = presence
-            out.append(Directive(agent.id, .pose(.raisingHand)))
-            out.append(Directive(agent.id, .express(.eager)))
-            setEmote(agent.id, .exclamation, into: &out)
+            // 손에 든 것은 그대로 둡니다 (손 든 모습의 자세·표정·"!"만)
+            let look = Self.look(for: presence)
+            out.append(Directive(agent.id, .pose(look.pose)))
+            out.append(Directive(agent.id, .express(look.expression)))
+            setEmote(agent.id, look.emote, into: &out)
             out.append(Directive(nil, .sound(.knock)))
             let (key, variables) = permissionLine(for: call)
             say(agent.id, key, variables, kind: .shout, persistent: true, silent: true, into: &out)
@@ -379,10 +434,6 @@ public struct Choreographer: Sendable {
             // 그 자리에 앉은 채 잠에서 깨어 서류를 훑어봅니다. Zz·음표·⏳ 같은 이전 표시와 들고 있던 컵은 내립니다.
             setEmote(agent.id, nil, into: &out)
             setPill(agent.id, nil, into: &out)
-            out.append(Directive(agent.id, .pose(.sorting)))
-            out.append(Directive(agent.id, .prop(.documents)))
-            out.append(Directive(agent.id, .express(.focus)))
-            say(agent.id, "compact", into: &out)
             modify(agent.id) {
                 $0.shown = .thinking
                 $0.shownAt = now
@@ -392,6 +443,8 @@ public struct Choreographer: Sendable {
                 $0.shellWatch = nil
                 $0.compacting = true
             }
+            wear(agent.id, into: &out)
+            say(agent.id, "compact", into: &out)
 
         case .compactionEnded(let agent):
             touch(agent)
@@ -525,11 +578,11 @@ public struct Choreographer: Sendable {
                 !presences[id]!.waiting
             {
                 // 실무처럼 자기 자리에서 원격으로 확인합니다: 모니터를 보며 기다리는 자세 + ⏳ (서버랙으로 가지 않음)
-                let atDesk = presences[id]!.seated && isDesk(presences[id]!.spot)
-                out.append(Directive(id, .pose(atDesk ? .watching : .thinking)))
-                out.append(Directive(id, .express(.neutral)))
-                setEmote(id, .hourglass, into: &out)
                 modify(id) { $0.watching = .some(call.id) }
+                let look = Self.look(for: presences[id]!)
+                out.append(Directive(id, .pose(look.pose)))
+                out.append(Directive(id, .express(look.expression)))
+                setEmote(id, look.emote, into: &out)
             }
         }
 
@@ -540,8 +593,9 @@ public struct Choreographer: Sendable {
                 switch current.shown {
                 case .idle, .thinking:
                     move(id, to: seatSpot(current.agent), into: &out)
-                    out.append(Directive(id, .pose(current.shown == .idle ? .sitting : .thinking)))
-                    out.append(Directive(id, .prop(nil)))
+                    let look = Self.look(for: presences[id]!)
+                    out.append(Directive(id, .pose(look.pose)))
+                    out.append(Directive(id, .prop(look.prop)))
                 case .working:
                     break
                 }
@@ -573,27 +627,23 @@ public struct Choreographer: Sendable {
     /// 안마 의자에 있으면 그 자리에서 잠들고, 아니면 자기 자리로 돌아가 꾸벅꾸벅 좁니다.
     private mutating func rest(_ id: AgentID, _ current: Presence, elapsed: Double, at now: Date, into out: inout [Directive]) {
         if elapsed >= config.napAfter, current.rest < .nap {
+            modify(id) { $0.rest = .nap }
             if current.spot == .massageChair {
-                out.append(Directive(id, .pose(.sleeping)))
-                out.append(Directive(id, .express(.sleepy)))
-                setEmote(id, .zzz, into: &out)
+                // 안마 의자에서는 그 자리에서 잠듭니다 (손에 든 것이 없음)
+                let look = Self.look(for: presences[id]!)
+                out.append(Directive(id, .pose(look.pose)))
+                out.append(Directive(id, .express(look.expression)))
+                setEmote(id, look.emote, into: &out)
             } else {
                 move(id, to: seatSpot(current.agent), into: &out)
-                out.append(Directive(id, .prop(nil)))
-                out.append(Directive(id, .pose(.sleeping)))
-                out.append(Directive(id, .express(.sleepy)))
-                setEmote(id, .zzz, into: &out)
+                wear(id, propFirst: true, emote: true, into: &out)
             }
-            modify(id) { $0.rest = .nap }
         } else if elapsed >= config.massageAfter, current.rest == .lounge,
             presences.values.filter({ $0.spot == .massageChair }).count < config.massageChairs
         {
             move(id, to: .massageChair, into: &out)
-            out.append(Directive(id, .prop(nil)))
-            out.append(Directive(id, .pose(.massage)))
-            out.append(Directive(id, .express(.happy)))
-            setEmote(id, .note, into: &out)
             modify(id) { $0.rest = .massage }
+            wear(id, propFirst: true, emote: true, into: &out)
         } else if elapsed >= config.loungeAfter, current.rest == .none {
             var drink = Prop.cup
             // 가끔 탕비 코너 냉장고에서 음료를 꺼내 들고 갑니다
@@ -604,14 +654,12 @@ public struct Choreographer: Sendable {
                 drink = .drink
             }
             move(id, to: .lounge, into: &out)
-            out.append(Directive(id, .pose(.holdingCup)))
-            out.append(Directive(id, .prop(drink)))
-            out.append(Directive(id, .express(.happy)))
-            setEmote(id, .note, into: &out)
             modify(id) {
                 $0.rest = .lounge
                 $0.breaks += 1
+                $0.drink = drink
             }
+            wear(id, emote: true, into: &out)
         }
     }
 
@@ -684,28 +732,10 @@ public struct Choreographer: Sendable {
             if let emote = presences[id]?.emote, [.bulb, .question, .sweat].contains(emote) {
                 setEmote(id, nil, into: &out)
             }
-            var zone = seatSpot(previous.agent)
-            var pose = Pose.typing
-            var prop: Prop?
-            switch call.category {
-            case .read:
-                // 파일 읽기는 자기 책상에서 책을 펴 읽습니다 (2026-11-08: 책장을 없앰)
-                pose = .reading
-                prop = .book
-            case .web:
-                // 웹 검색은 자기 책상에서 합니다 (M5(1): 리서치 데스크를 없앰)
-                pose = .typing
-            case .plan:
-                zone = .whiteboard
-                pose = .writingBoard
-                prop = .marker
-            case .shell:
+            // 파일 읽기·웹 검색도 자기 책상에서 합니다 (책장·리서치 데스크를 없앰). 계획만 화이트보드 앞에서.
+            let zone: Spot = call.category == .plan ? .whiteboard : seatSpot(previous.agent)
+            if call.category == .shell {
                 modify(id) { $0.shellWatch = ShellWatch(callID: call.id, since: now) }
-            case .report:
-                pose = .sorting
-                prop = .documents
-            case .write, .delegate, .mcp, .other:
-                break
             }
 
             var sameCategory = false
@@ -713,9 +743,7 @@ public struct Choreographer: Sendable {
             let moved = previous.spot != zone
             move(id, to: zone, into: &out)
             if moved || !sameCategory {
-                out.append(Directive(id, .pose(pose)))
-                out.append(Directive(id, .prop(prop)))
-                out.append(Directive(id, .express(.focus)))
+                wear(id, into: &out)
             }
             setPill(id, pill(for: call), into: &out)
             modify(id) {
@@ -726,9 +754,7 @@ public struct Choreographer: Sendable {
         case .thinking:
             setPill(id, nil, into: &out)
             if previous.shown != .thinking || previous.compacting {
-                out.append(Directive(id, .pose(.thinking)))
-                out.append(Directive(id, .prop(nil)))
-                out.append(Directive(id, .express(.think)))
+                wear(id, into: &out)
             }
             if !(presences[id]?.spot.isSeat ?? true) {
                 let returnAt = now.addingTimeInterval(config.linger)
@@ -737,8 +763,11 @@ public struct Choreographer: Sendable {
 
         case .idle:
             setPill(id, nil, into: &out)
-            out.append(Directive(id, .prop(nil)))
-            out.append(Directive(id, .pose(presences[id]?.seated == true ? .sitting : .standing)))
+            if let presence = presences[id] {
+                let look = Self.look(for: presence)
+                out.append(Directive(id, .prop(look.prop)))
+                out.append(Directive(id, .pose(look.pose)))
+            }
             let returnAt = now.addingTimeInterval(config.linger)
             modify(id) {
                 $0.idleSince = now
@@ -774,21 +803,19 @@ public struct Choreographer: Sendable {
         presence.idleSince = since
         if elapsed >= config.napAfter {
             presence.rest = .nap
-            presence.emote = .zzz
         } else if elapsed >= config.massageAfter,
             presences.values.filter({ $0.spot == .massageChair }).count < config.massageChairs
         {
             presence.spot = .massageChair
             presence.seated = false
             presence.rest = .massage
-            presence.emote = .note
         } else if elapsed >= config.loungeAfter {
             presence.spot = .lounge
             presence.seated = false
             presence.rest = .lounge
-            presence.emote = .note
             presence.breaks = 1
         }
+        presence.emote = Self.look(for: presence).emote
         presences[agent.id] = presence
         out += restoreDirectives(for: agent, entering: false)
     }
@@ -808,24 +835,7 @@ public struct Choreographer: Sendable {
         let target = seatSpot(presence.agent)
         guard target != presence.spot else { return }
         move(id, to: target, into: &out)
-        out.append(Directive(id, .pose(currentPose(presence, atDesk: isDesk(target)))))
-    }
-
-    /// 자리를 옮긴 뒤 이어 갈 자세
-    private func currentPose(_ presence: Presence, atDesk: Bool) -> Pose {
-        if presence.waiting { return .raisingHand }
-        if presence.rest == .nap { return .sleeping }
-        if presence.watching != nil, atDesk { return .watching }
-        switch presence.shown {
-        case .idle: return atDesk ? .sitting : .standing
-        case .thinking: return .thinking
-        case .working(let call):
-            switch call.category {
-            case .read, .web: return .reading
-            case .report: return .sorting
-            default: return .typing
-            }
-        }
+        out.append(Directive(id, .pose(Self.look(for: presences[id]!).pose)))
     }
 
     private mutating func leave(_ id: AgentID, into out: inout [Directive]) {
@@ -863,29 +873,9 @@ public struct Choreographer: Sendable {
     /// 지금 쉼 단계의 모습 (자세·소품·표정·머리 위 표시)을 다시 정합니다. `rest(_:)`가 각 단계에 들어갈 때와 같은 모습입니다.
     private mutating func restoreRest(_ id: AgentID, into out: inout [Directive]) {
         guard let presence = presences[id] else { return }
-        switch presence.rest {
-        case .none:
-            move(id, to: seatSpot(presence.agent), into: &out)
-            out.append(Directive(id, .prop(nil)))
-            out.append(Directive(id, .pose(.sitting)))
-            out.append(Directive(id, .express(.neutral)))
-            setEmote(id, nil, into: &out)
-        case .lounge:
-            out.append(Directive(id, .pose(.holdingCup)))
-            out.append(Directive(id, .prop(.cup)))
-            out.append(Directive(id, .express(.happy)))
-            setEmote(id, .note, into: &out)
-        case .massage:
-            out.append(Directive(id, .prop(nil)))
-            out.append(Directive(id, .pose(.massage)))
-            out.append(Directive(id, .express(.happy)))
-            setEmote(id, .note, into: &out)
-        case .nap:
-            out.append(Directive(id, .prop(nil)))
-            out.append(Directive(id, .pose(.sleeping)))
-            out.append(Directive(id, .express(.sleepy)))
-            setEmote(id, .zzz, into: &out)
-        }
+        if presence.rest == .none { move(id, to: seatSpot(presence.agent), into: &out) }
+        // 소파에서는 자세부터, 나머지는 손에 든 것부터 (예전 순서 그대로)
+        wear(id, propFirst: presence.rest != .lounge, emote: true, into: &out)
     }
 
     private mutating func resolveWaiting(_ id: AgentID, into out: inout [Directive]) {
@@ -893,10 +883,6 @@ public struct Choreographer: Sendable {
         out.append(Directive(id, .dismissBubble))
         setEmote(id, nil, into: &out)
         // 손 든 자세를 풉니다. 이어지는 활동이 자세·소품·표정을 다시 정하도록 보이는 활동도 처음으로 돌립니다.
-        out.append(Directive(id, .pose(presence.spot.isSeat ? .sitting : .standing)))
-        if presence.spot.isSeat {
-            out.append(Directive(id, .sit))
-        }
         modify(id) {
             $0.shown = .idle
             $0.waiting = false
@@ -904,6 +890,10 @@ public struct Choreographer: Sendable {
             $0.nextKnockAt = nil
             $0.shout = nil
             $0.seated = $0.spot.isSeat
+        }
+        out.append(Directive(id, .pose(Self.look(for: presences[id]!).pose)))
+        if presence.spot.isSeat {
+            out.append(Directive(id, .sit))
         }
         // 손을 든 동안 자리가 바뀌었으면 이제 옮깁니다
         returnToOwnDesk(id, into: &out)
@@ -1000,58 +990,16 @@ public struct Choreographer: Sendable {
             out.append(Directive(id, .spawn(agent, at: presence.spot)))
         }
         if presence.seated { out.append(Directive(id, .sit)) }
-        out.append(Directive(id, .pose(restoredPose(presence))))
-        out.append(Directive(id, .prop(restoredProp(presence))))
-        out.append(Directive(id, .express(restoredExpression(presence))))
+        let look = Self.look(for: presence)
+        out.append(Directive(id, .pose(look.pose)))
+        out.append(Directive(id, .prop(look.prop)))
+        out.append(Directive(id, .express(look.expression)))
+        // 머리 위 아이콘은 기억해 둔 것 그대로 (💡·❓처럼 잠깐 띄운 것도 아직 떠 있으면 다시 띄움)
         if let emote = presence.emote { out.append(Directive(id, .emote(emote))) }
         if let badge = presence.badge { out.append(Directive(id, .badge(badge))) }
         if let pill = presence.pill { out.append(Directive(id, .status(pill))) }
         if presence.waiting, let shout = presence.shout { out.append(Directive(id, .say(shout))) }
         return out
-    }
-
-    private func restoredPose(_ presence: Presence) -> Pose {
-        if presence.compacting { return .sorting }
-        switch presence.spot {
-        case .massageChair: return presence.rest == .nap ? .sleeping : .massage
-        case .lounge: return presence.waiting ? .raisingHand : .holdingCup
-        case .pantry: return presence.waiting ? .raisingHand : .holdingCup
-        case .whiteboard where !presence.waiting: return .writingBoard
-        default:
-            let pose = currentPose(presence, atDesk: presence.seated && isDesk(presence.spot))
-            return presence.seated && pose == .standing ? .sitting : pose
-        }
-    }
-
-    private func restoredProp(_ presence: Presence) -> Prop? {
-        if presence.waiting { return nil }
-        if presence.compacting { return .documents }
-        switch presence.spot {
-        case .lounge, .pantry: return .cup
-        case .whiteboard: return .marker
-        default: break
-        }
-        if case .working(let call) = presence.shown {
-            switch call.category {
-            case .read: return .book
-            case .plan: return .marker
-            case .report: return .documents
-            default: return nil
-            }
-        }
-        return nil
-    }
-
-    private func restoredExpression(_ presence: Presence) -> FacialExpression {
-        if presence.waiting { return .eager }
-        if presence.compacting { return .focus }
-        if presence.rest == .nap { return .sleepy }
-        if presence.rest > .none { return .happy }
-        switch presence.shown {
-        case .working: return .focus
-        case .thinking: return .think
-        case .idle: return .neutral
-        }
     }
 
     private mutating func touch(_ agent: Agent) {
