@@ -24,14 +24,36 @@ public enum HTTPParseResult: Hashable, Sendable {
     case invalid(String)
 }
 
+/// 머리줄(요청 줄과 헤더)까지 읽은 결과. 본문을 기다리기 전에 토큰부터 검사하는 데 씁니다.
+public enum HTTPHeadResult: Hashable, Sendable {
+    case incomplete
+    /// `request.body`는 비어 있고, 본문 길이는 `contentLength`, 본문은 버퍼의 `bodyStart`부터
+    case head(HTTPRequest, contentLength: Int, bodyStart: Int)
+    case invalid(String)
+}
+
 /// 버퍼에 쌓인 바이트에서 요청 하나를 읽습니다. Content-Length 본문만 지원합니다 (curl --data-binary).
 public enum HTTPRequestParser {
     public static let maxHeaderBytes = 16 * 1024
 
     public static func parse(_ data: Data, maxBodyBytes: Int) -> HTTPParseResult {
-        let bytes = [UInt8](data)
+        switch parseHead(data) {
+        case .incomplete: return .incomplete
+        case .invalid(let reason): return .invalid(reason)
+        case .head(var request, let length, let bodyStart):
+            guard length <= maxBodyBytes else { return .tooLarge }
+            guard data.count - bodyStart >= length else { return .incomplete }
+            let start = data.startIndex + bodyStart
+            request.body = Data(data[start..<start + length])
+            return .complete(request)
+        }
+    }
+
+    /// 머리줄만 읽습니다. 본문은 기다리지 않습니다.
+    public static func parseHead(_ data: Data) -> HTTPHeadResult {
+        let bytes = [UInt8](data.prefix(maxHeaderBytes + 4))
         guard let headerEnd = find([13, 10, 13, 10], in: bytes) else {
-            return bytes.count > maxHeaderBytes ? .invalid("헤더가 너무 깁니다") : .incomplete
+            return data.count > maxHeaderBytes ? .invalid("헤더가 너무 깁니다") : .incomplete
         }
         guard headerEnd <= maxHeaderBytes else { return .invalid("헤더가 너무 깁니다") }
         let headerText = String(decoding: bytes[0..<headerEnd], as: UTF8.self)
@@ -55,11 +77,8 @@ public enum HTTPRequestParser {
         } else {
             length = 0
         }
-        guard length <= maxBodyBytes else { return .tooLarge }
-        let bodyStart = headerEnd + 4
-        guard bytes.count - bodyStart >= length else { return .incomplete }
-        let body = Data(bytes[bodyStart..<bodyStart + length])
-        return .complete(HTTPRequest(method: String(requestLine[0]), path: String(requestLine[1]), headers: headers, body: body))
+        return .head(HTTPRequest(method: String(requestLine[0]), path: String(requestLine[1]), headers: headers, body: Data()),
+                     contentLength: length, bodyStart: headerEnd + 4)
     }
 
     private static func find(_ pattern: [UInt8], in bytes: [UInt8]) -> Int? {
@@ -104,6 +123,16 @@ public struct HookRequestPolicy: Sendable {
     }
 
     public func evaluate(_ request: HTTPRequest) -> Decision {
+        if case .reject(let status, let reason) = evaluateHead(request) { return .reject(status: status, reason: reason) }
+        guard !request.body.isEmpty else { return .reject(status: 400, reason: "본문이 비어 있습니다") }
+        let term = request.headers["x-office-term"].flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
+        let host = request.headers["x-office-host-session"].flatMap { Self.isHostSessionID($0) ? $0 : nil }
+        return .accept(body: request.body, term: term, hostSession: host)
+    }
+
+    /// 머리줄만으로 하는 검사 (Origin·경로·메서드·토큰·Content-Type). 본문을 받기 전에 거절할 수 있게,
+    /// 서버는 머리줄을 다 받으면 이것부터 봅니다. 통과면 본문 없이 `.accept`.
+    public func evaluateHead(_ request: HTTPRequest) -> Decision {
         // 브라우저가 보낸 요청(CSRF, DNS 리바인딩)은 Origin 헤더가 붙습니다. curl은 붙이지 않습니다.
         if request.headers["origin"] != nil { return .reject(status: 403, reason: "Origin 헤더가 있는 요청은 받지 않습니다") }
         guard request.path == Self.path else { return .reject(status: 404, reason: "알 수 없는 경로입니다") }
@@ -114,10 +143,7 @@ public struct HookRequestPolicy: Sendable {
         guard (request.headers["content-type"] ?? "").lowercased().hasPrefix("application/json") else {
             return .reject(status: 415, reason: "JSON만 받습니다")
         }
-        guard !request.body.isEmpty else { return .reject(status: 400, reason: "본문이 비어 있습니다") }
-        let term = request.headers["x-office-term"].flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
-        let host = request.headers["x-office-host-session"].flatMap { Self.isHostSessionID($0) ? $0 : nil }
-        return .accept(body: request.body, term: term, hostSession: host)
+        return .accept(body: Data(), term: nil, hostSession: nil)
     }
 
     /// 데스크톱 앱 세션 id 형식 (`local_` + 영숫자·하이픈). 파일 경로에 쓰므로 그 밖의 값은 버립니다.
@@ -153,8 +179,10 @@ public enum HTTPResponse {
         case 403: reason = "Forbidden"
         case 404: reason = "Not Found"
         case 405: reason = "Method Not Allowed"
+        case 408: reason = "Request Timeout"
         case 413: reason = "Payload Too Large"
         case 415: reason = "Unsupported Media Type"
+        case 503: reason = "Service Unavailable"
         default: reason = "Error"
         }
         let bodyData = Data(body.utf8)

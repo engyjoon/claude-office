@@ -13,6 +13,8 @@ import Foundation
 ///
 /// - 연결은 동시에 처리하되, 받은 훅은 도착한 순서대로 `handler`에 넘깁니다 (직렬 큐).
 /// - `handler`는 백그라운드 큐에서 불립니다. 앱은 메인 액터로 넘겨서 처리합니다.
+/// - 연결 하나는 모두 합쳐 `connectionDeadline`(3초) 안에 끝나야 하고(넘으면 408), 동시에 `maxConnections`개까지
+///   받습니다(넘으면 503). 머리줄을 다 받으면 본문을 기다리기 전에 토큰부터 검사합니다. 거절한 수는 상태 코드별로 셉니다.
 public final class HookServer: @unchecked Sendable {
     public enum ServerError: Error, Equatable, CustomStringConvertible {
         case socket(Int32)
@@ -29,6 +31,10 @@ public final class HookServer: @unchecked Sendable {
     }
 
     public static let defaultPort: UInt16 = 47821
+    /// 연결 하나에 주는 전체 시간 (훅 스크립트의 curl은 1초 안에 끝남)
+    public static let connectionDeadline: TimeInterval = 3
+    /// 동시에 처리하는 연결 수 상한 (훅은 도구 호출마다 하나씩, 병렬 도구여도 몇 개)
+    public static let maxConnections = 32
 
     private let policy: HookRequestPolicy
     private let handler: @Sendable (HookDelivery) -> Void
@@ -36,13 +42,27 @@ public final class HookServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var running = false
     private var boundPort: UInt16 = 0
+    private var activeConnections = 0
+    private var rejections: [Int: Int] = [:]
+    private let deadline: TimeInterval
+    private let connectionLimit: Int
     private let connectionQueue = DispatchQueue(label: "claude-office.hook.connections", attributes: .concurrent)
     private let deliveryQueue = DispatchQueue(label: "claude-office.hook.delivery")
     private let acceptQueue = DispatchQueue(label: "claude-office.hook.accept")
 
-    public init(token: String, handler: @escaping @Sendable (HookDelivery) -> Void) {
+    public init(token: String, deadline: TimeInterval = HookServer.connectionDeadline, maxConnections: Int = HookServer.maxConnections,
+                handler: @escaping @Sendable (HookDelivery) -> Void) {
         self.policy = HookRequestPolicy(token: token)
+        self.deadline = deadline
+        self.connectionLimit = maxConnections
         self.handler = handler
+    }
+
+    /// 거절한 요청 수 (상태 코드 → 수). 서버를 만든 뒤부터 셉니다.
+    public var rejectedCounts: [Int: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return rejections
     }
 
     deinit {
@@ -162,10 +182,31 @@ public final class HookServer: @unchecked Sendable {
             guard isCurrent(fd) else { break }
             if ready <= 0 { continue }
             let client = accept(fd, nil, nil)
-            if client < 0 { continue }
+            if client < 0 {
+                // EMFILE·ENFILE(파일 서술자 바닥) 등은 곧바로 다시 실패하므로 잠깐 쉽니다 (바쁜 대기 막기)
+                let code = errno
+                if code != EINTR && code != EAGAIN && code != ECONNABORTED { usleep(100_000) }
+                continue
+            }
             configureClient(client)
+            lock.lock()
+            let admitted = activeConnections < connectionLimit
+            if admitted { activeConnections += 1 }
+            lock.unlock()
+            guard admitted else {
+                reject(client, status: 503)
+                close(client)
+                continue
+            }
             connectionQueue.async { [weak self] in
-                self?.serve(client)
+                guard let self else {
+                    close(client)
+                    return
+                }
+                self.serve(client)
+                self.lock.lock()
+                self.activeConnections -= 1
+                self.lock.unlock()
             }
         }
     }
@@ -181,13 +222,32 @@ public final class HookServer: @unchecked Sendable {
 
     private func serve(_ client: Int32) {
         defer { close(client) }
+        let endAt = Date().addingTimeInterval(deadline)
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         var result = HTTPParseResult.incomplete
+        var headChecked = false
         while case .incomplete = result {
+            let remaining = endAt.timeIntervalSinceNow
+            var descriptor = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+            guard remaining > 0, poll(&descriptor, 1, Int32(max(1, remaining * 1000))) > 0 else {
+                reject(client, status: 408)  // 전체 시간 초과 (천천히 보내는 연결이 자리를 오래 잡지 않게)
+                return
+            }
             let count = chunk.withUnsafeMutableBytes { recv(client, $0.baseAddress, $0.count, 0) }
-            guard count > 0 else { return }  // 시간 초과 또는 연결 끊김
+            guard count > 0 else {
+                if !buffer.isEmpty { tally(rejection: 400) }  // 보내다 끊김
+                return
+            }
             buffer.append(contentsOf: chunk[0..<count])
+            if !headChecked, case .head(let head, _, _) = HTTPRequestParser.parseHead(buffer) {
+                headChecked = true
+                // 토큰이 틀린 요청은 본문을 기다리지 않고 바로 거절합니다
+                if case .reject(let status, _) = policy.evaluateHead(head) {
+                    reject(client, status: status)
+                    return
+                }
+            }
             result = HTTPRequestParser.parse(buffer, maxBodyBytes: policy.maxBodyBytes)
         }
 
@@ -195,13 +255,13 @@ public final class HookServer: @unchecked Sendable {
         case .incomplete:
             return
         case .tooLarge:
-            respond(client, status: 413)
+            reject(client, status: 413)
         case .invalid:
-            respond(client, status: 400)
+            reject(client, status: 400)
         case .complete(let request):
             switch policy.evaluate(request) {
             case .reject(let status, _):
-                respond(client, status: status)
+                reject(client, status: status)
             case .accept(let body, let term, let hostSession):
                 respond(client, status: 202)
                 let delivery = HookDelivery(body: body, term: term, hostSession: hostSession, receivedAt: Date())
@@ -209,6 +269,17 @@ public final class HookServer: @unchecked Sendable {
                 deliveryQueue.async { handler(delivery) }
             }
         }
+    }
+
+    private func tally(rejection status: Int) {
+        lock.lock()
+        rejections[status, default: 0] += 1
+        lock.unlock()
+    }
+
+    private func reject(_ client: Int32, status: Int) {
+        tally(rejection: status)
+        respond(client, status: status)
     }
 
     private func respond(_ client: Int32, status: Int) {

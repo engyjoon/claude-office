@@ -916,7 +916,8 @@ final class AppModel {
         case .failed(let message): (port, error) = (nil, message)
         }
         return .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
-                     eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker, endpoint: endpointState)
+                     eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker, endpoint: endpointState,
+                     rejected: server?.rejectedCounts ?? [:])
     }
 
     func installHooks() {

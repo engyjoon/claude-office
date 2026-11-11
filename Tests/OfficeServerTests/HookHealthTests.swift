@@ -47,6 +47,18 @@ struct HookHealthTests {
         }
     }
 
+    @Test("거절한 요청이 있으면 상태 코드별로 보여 준다 (개선 7)")
+    func rejectedRequests() {
+        let input = HookHealth.Input(status: .installed(events: HookSettingsEditor.baseEvents), script: .current, port: 1,
+                                     lastEventAt: nil, eventCount: 0, rejected: [413: 1, 401: 2])
+        let item = HookHealth.evaluate(input, now: Date()).items.first { $0.label == "거절한 요청" }
+        #expect(item?.value == "3개 (401 토큰 틀림 2개, 413 본문 너무 큼 1개)")
+        #expect(item?.level == .warning)
+        let clean = HookHealth.Input(status: .installed(events: HookSettingsEditor.baseEvents), script: .current, port: 1,
+                                     lastEventAt: nil, eventCount: 0)
+        #expect(!HookHealth.evaluate(clean, now: Date()).items.contains { $0.label == "거절한 요청" })
+    }
+
     @Test("설치 안 됨은 경고가 아니라 안내")
     func notInstalled() {
         let health = evaluate(.notInstalled, .missing, last: nil, count: 0)

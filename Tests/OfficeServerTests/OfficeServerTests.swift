@@ -135,6 +135,44 @@ func run(_ executable: String, _ arguments: [String], stdin: String? = nil, envi
     return (process.terminationStatus, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
 }
 
+/// 127.0.0.1:port에 연결한 소켓
+func openSocket(port: UInt16) throws -> Int32 {
+    #if canImport(Darwin)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+    #else
+        let fd = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+    #endif
+    guard fd >= 0 else { throw POSIXError(.EIO) }
+    var address = sockaddr_in()
+    #if canImport(Darwin)
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = port.bigEndian
+    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    let connected = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+    }
+    guard connected == 0 else {
+        close(fd)
+        throw POSIXError(.ECONNREFUSED)
+    }
+    return fd
+}
+
+/// 날 요청을 보내고 응답 첫 줄을 읽습니다 (`wait`초 안에 답이 없으면 빈 문자열)
+func rawRequest(port: UInt16, _ text: String, wait: TimeInterval = 2) throws -> String {
+    let fd = try openSocket(port: port)
+    defer { close(fd) }
+    var timeout = timeval(tv_sec: Int(wait), tv_usec: Int32((wait - floor(wait)) * 1_000_000))
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    let bytes = Array(text.utf8)
+    _ = bytes.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+    var buffer = [UInt8](repeating: 0, count: 1024)
+    let count = buffer.withUnsafeMutableBytes { recv(fd, $0.baseAddress, $0.count, 0) }
+    return count > 0 ? String(decoding: buffer[0..<count], as: UTF8.self) : ""
+}
+
 @Suite("로컬 훅 서버", .serialized)
 struct HookServerTests {
     @Test("127.0.0.1에서 받고, 토큰이 틀리거나 Origin이 있으면 거절한다")
@@ -157,6 +195,53 @@ struct HookServerTests {
         #expect(inbox.deliveries.count == 1)
         #expect(received.first?.term == "vscode")
         #expect(received.first.flatMap { try? JSONValue.parse($0.body)["hook_event_name"]?.stringValue } == "Stop")
+    }
+
+    @Test("머리줄만 와도 토큰이 틀리면 본문을 기다리지 않고 거절하고, 거절 수를 상태 코드별로 센다 (개선 7)")
+    func earlyRejectAndCounts() throws {
+        let server = HookServer(token: "tkn") { _ in }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        // 본문 10바이트를 약속하고 보내지 않는 요청: 토큰이 틀리면 바로 401
+        let started = Date()
+        let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: nope\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n")
+        #expect(status.hasPrefix("HTTP/1.1 401"))
+        #expect(Date().timeIntervalSince(started) < 1)
+        // 토큰이 맞고 본문이 너무 크면 413 (본문을 받기 전에)
+        let large = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\nContent-Length: 5000000\r\n\r\n")
+        #expect(large.hasPrefix("HTTP/1.1 413"))
+        _ = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: nope\r\nContent-Length: 0\r\n\r\n")
+        #expect(server.rejectedCounts == [401: 2, 413: 1])
+    }
+
+    @Test("연결마다 전체 시간 제한이 있어 천천히 보내는 연결은 408로 끊는다 (개선 7)")
+    func connectionDeadline() throws {
+        let server = HookServer(token: "tkn", deadline: 0.5) { _ in }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        let started = Date()
+        let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\n", wait: 3)
+        #expect(status.hasPrefix("HTTP/1.1 408"))
+        #expect(Date().timeIntervalSince(started) < 2)
+        #expect(server.rejectedCounts[408] == 1)
+    }
+
+    @Test("동시 연결이 상한을 넘으면 503으로 거절하고, 자리가 나면 다시 받는다 (개선 7)")
+    func connectionLimit() async throws {
+        let inbox = Inbox()
+        let server = HookServer(token: "tkn", deadline: 1.5, maxConnections: 1) { inbox.append($0) }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        let idle = try openSocket(port: port)  // 아무것도 보내지 않고 자리를 잡음
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let busy = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+        #expect(busy.hasPrefix("HTTP/1.1 503"))
+        close(idle)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let body = #"{"session_id":"s","hook_event_name":"Stop"}"#
+        let ok = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)")
+        #expect(ok.hasPrefix("HTTP/1.1 202"))
+        #expect(server.rejectedCounts[503] == 1)
     }
 
     @Test("선호 포트가 사용 중이면 다음 포트를 쓴다")
@@ -269,6 +354,14 @@ struct HookServerTests {
         let stale = try run("/bin/sh", [script.path], stdin: "{}", environment: environment)
         #expect(stale.status == 0 && stale.output.isEmpty)
         #expect(Date().timeIntervalSince(started) < 1)
+
+        // 비었거나 깨진 엔드포인트 파일이면 보내지 않고 바로 끝남 (빈 PORT면 80번 포트로 보내던 것)
+        for broken in ["", "\n", "abc tok\n", " tok\n"] {
+            try broken.write(to: endpoint, atomically: true, encoding: .utf8)
+            let result = try run("/bin/sh", ["-x", script.path], stdin: "{}", environment: environment)
+            #expect(result.status == 0)
+            #expect(!result.output.contains("curl"))
+        }
     }
 }
 

@@ -15,6 +15,13 @@ if [ ! -r "$ENDPOINT_FILE" ]; then
   exit 0
 fi
 read -r PORT TOKEN < "$ENDPOINT_FILE"
+# 비었거나 깨진 파일이면 보내지 않습니다 (빈 PORT면 curl이 80번 포트로 보냄)
+case "$PORT" in
+  '' | *[!0-9]*)
+    cat >/dev/null
+    exit 0
+    ;;
+esac
 curl -s --connect-timeout 0.3 -m 1 -X POST \
   -H "Content-Type: application/json" \
   -H "X-Office-Token: $TOKEN" \
