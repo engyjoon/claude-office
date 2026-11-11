@@ -475,10 +475,6 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         if !placing { settle() }
     }
-
-    func windowDidResize(_ notification: Notification) {
-        if !placing { settle() }
-    }
 }
 
 /// 비활성 패널에서도 첫 클릭이 바로 캐릭터·버튼에 가도록

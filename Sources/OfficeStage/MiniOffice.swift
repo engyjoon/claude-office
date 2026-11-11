@@ -122,7 +122,7 @@ public enum MiniCast {
 /// 행마다의 상태(`tiers`, 머리줄 칩)도 같은 범위만 셉니다.
 public struct MiniFocus: Hashable, Sendable {
     public enum Reason: String, Hashable, Sendable {
-        case answer, pinned, completed, requested, none
+        case answer, completed, requested, none
     }
 
     /// 행마다의 상태 (머리줄 칩)
@@ -186,7 +186,7 @@ public struct MiniFocus: Hashable, Sendable {
     }
 
     public static func next(
-        previous: MiniFocus, state: OfficeState, selection: FloorSelection = .everyone, pinned: TeamID?, autoSwitch: Bool, now: Date
+        previous: MiniFocus, state: OfficeState, selection: FloorSelection = .everyone, autoSwitch: Bool, now: Date
     ) -> MiniFocus {
         let teams = state.sortedTeams.filter { selection.contains($0) && !state.agents(in: $0.id).isEmpty }
         guard !teams.isEmpty else { return MiniFocus(team: nil, reason: .none, since: now) }
@@ -215,11 +215,9 @@ public struct MiniFocus: Hashable, Sendable {
                 if let team = best({ $0[keyPath: key] }, latest: false) { return pick(team, .answer) }
             }
         }
-        // 2) 고정
-        if let pinned, statuses[pinned] != nil { return pick(pinned, .pinned) }
-        // 3) 완료 (가장 최근)
+        // 2) 완료 (가장 최근)
         if let team = best({ $0.completedAt }, latest: true) { return pick(team, .completed) }
-        // 4) 최근 요청
+        // 3) 최근 요청
         if let team = best({ $0.lastPromptAt }, latest: true) { return pick(team, .requested) }
         return pick(teams[0].id, .none)
     }

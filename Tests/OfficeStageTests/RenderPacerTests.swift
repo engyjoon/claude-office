@@ -51,7 +51,6 @@ struct RenderPacerTests {
         let seated = try! #require(h.actor("lead-1"))
         #expect(seated.seated)
         #expect(RenderPacer.motion(h.stage) == .still, "앉아 쉬는 중: \(seated.pose), 제스처 \(String(describing: seated.gesture))")
-        #expect(!RenderPacer.isLively(h.stage))
 
         h.hook(hook("UserPromptSubmit", #""prompt":"고쳐 줘""#), at: 13)
         h.hook(tool("PreToolUse", "Edit", "t1", #"{"file_path":"/w/a-sdn-portal/a.swift"}"#), at: 14)
@@ -59,7 +58,6 @@ struct RenderPacerTests {
         // 자리에서 타이핑만: 일하는 중 (10fps)
         #expect(h.actor("lead-1")?.pose == .typing)
         #expect(RenderPacer.motion(h.stage) == .busy)
-        #expect(RenderPacer.isLively(h.stage))
     }
 
     @Test("쉬는 자세(숨쉬기·졸기·안마·컵)는 빠른 자세가 아님")

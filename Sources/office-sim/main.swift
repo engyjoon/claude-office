@@ -14,8 +14,7 @@ import OfficeStage
 //   office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748]
 //       시나리오를 엔진과 무대에 흘려서 지정한 시각의 사무실 장면을 SVG로 저장합니다 (맥 없이 그림 확인).
 //       --size는 사무실 영역 크기(배율 1)로, 들어가지 않는 행·서브는 앱처럼 숨기고 "+N"을 답니다.
-//       --mini 390 이면 미니 사무실(폭 390 패널의 한 행 띠: 메인 + 서브 2명, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고르고,
-//       --pin <세션>으로 고정할 행을 정할 수 있습니다.
+//       --mini 390 이면 미니 사무실(폭 390 패널의 한 행 띠: 메인 + 서브 2명, 머리줄 제외)을 그립니다. 보여 줄 행은 앱과 같은 규칙(MiniFocus)으로 고릅니다.
 //       --night 이면 밤 조명으로 그립니다 (M6(6)).
 //       --select 메인1 이면 그 직원을 고른 모습(몸 외곽선 + 머리 위 ▼)으로, --contrast 면 대비 증가로 그립니다 (M6(15)).
 //   office-sim icon [--out 폴더]
@@ -38,7 +37,7 @@ func usage() -> Never {
           office-sim run <scenario.jsonl> [--privacy detailed|summary|hidden] [--seed N] [--tail 초]
           office-sim sounds <출력 폴더>
           office-sim serve [--port N] [--endpoint 파일] [--privacy …] [--roster-only]
-          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390 [--pin 세션]] [--night] [--select 이름] [--contrast]
+          office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390] [--night] [--select 이름] [--contrast]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
           office-sim icon [--out 폴더]
         """)
@@ -301,7 +300,6 @@ func snapshot(_ arguments: [String]) throws {
     let pad = OfficeLayout.padding * 2
     // --mini <패널 폭>: 미니 사무실 (한 행 띠, 배율 1)
     let miniWidth = option("--mini", in: arguments).flatMap(Double.init)
-    let pinSession = option("--pin", in: arguments).map(SessionID.init)
     var floor = miniWidth.map {
         OfficeFloor(selection: .nobody, width: MiniOffice.visibleMapWidth(panelWidth: $0), height: OfficeLayout.minHeight, band: true)
     } ?? OfficeFloor(
@@ -310,9 +308,8 @@ func snapshot(_ arguments: [String]) throws {
     let epoch = Date(timeIntervalSince1970: 1_800_000_000)
     func refocus(_ time: Double) {
         guard miniWidth != nil else { return }
-        let pinned = pinSession.flatMap { engine.state.lead(of: $0)?.teamID }
         let next = MiniFocus.next(
-            previous: focus, state: engine.state, pinned: pinned, autoSwitch: true,
+            previous: focus, state: engine.state, autoSwitch: true,
             now: epoch.addingTimeInterval(time))
         if next.team != focus.team { floor.setSelection(.only(next.team), engine: engine) }
         focus = next

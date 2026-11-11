@@ -737,7 +737,7 @@ final class AppModel {
     /// 사무실 창에서 고른 디렉토리의 행만 후보입니다 (M6(16)).
     private func refreshMiniFocus(now: Date = Date()) {
         let next = MiniFocus.next(
-            previous: miniFocus, state: engine.state, selection: selection, pinned: nil, autoSwitch: miniSettings.autoSwitch, now: now)
+            previous: miniFocus, state: engine.state, selection: selection, autoSwitch: miniSettings.autoSwitch, now: now)
         if next.team != miniFocus.team { miniStore.floor.setSelection(.only(next.team), engine: engine) }
         if next != miniFocus { miniFocus = next }
     }
@@ -920,12 +920,6 @@ final class AppModel {
         hookBlocker = installer.blocker()
         checkEndpoint()
         checkClaudeVersion()
-    }
-
-    /// 이 Claude Code 버전에 권하는 이벤트 중 등록되지 않은 것 (메뉴 배너)
-    var missingHookEvents: [String] {
-        guard case .installed(let events) = hookStatus else { return [] }
-        return HookSettingsEditor.missingEvents(installed: events, version: claudeVersion)
     }
 
     /// `claude --version`을 백그라운드에서 실행합니다. 10분 안에 확인했으면 다시 하지 않습니다(`force`면 바로).

@@ -36,16 +36,6 @@ public struct Pathfinder: Sendable {
         return Array(points.dropFirst())
     }
 
-    public func length(of path: [MapPoint], from start: MapPoint) -> Double {
-        var total = 0.0
-        var previous = start
-        for point in path {
-            total += previous.distance(to: point)
-            previous = point
-        }
-        return total
-    }
-
     // MARK: -
 
     private func nearestWalkable(to point: MapPoint) -> (Int, Int)? {

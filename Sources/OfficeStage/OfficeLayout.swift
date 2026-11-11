@@ -80,7 +80,6 @@ public struct OfficeLayout: Hashable, Sendable {
     public static let defaultHeight = 708.0
 
     /// 휴게 공간 (위쪽 왼쪽, 2026-11-08 셋째 수정): 소파 구역(3인용 소파 둘) → 빈 공간 → 안마 구역(안마 의자 둘)
-    public static let lounge = MapRect(0, 160, 600, 100)
     /// 3인용 소파 둘 (앉는 자리는 소파마다 세 곳). 사이를 36pt 띄웁니다.
     public static let sofas = [MapRect(14, 168, 136, 56), MapRect(186, 168, 136, 56)]
     /// 소파 구역 (러그)

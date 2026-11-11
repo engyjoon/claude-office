@@ -231,7 +231,12 @@ struct PathfinderTests {
         let path = finder.route(from: start, to: goal)
         #expect(path.count >= 2)
         check(path, from: start, finder: finder)
-        let length = finder.length(of: path, from: start)
+        var length = 0.0
+        var previous = start
+        for point in path {
+            length += previous.distance(to: point)
+            previous = point
+        }
         #expect(length < start.distance(to: goal) * 2.2)  // 행 끝을 돌아 올라갑니다
     }
 

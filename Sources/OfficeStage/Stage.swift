@@ -102,14 +102,14 @@ public struct StageEffect: Hashable, Sendable, Identifiable {
     }
 }
 
-/// 렌더러에 알릴 일회성 사건
+/// 무대에서 일어난 일회성 사건. 앱은 소리(`.sound`)만 읽고(효과는 `Stage.effects`를 그대로 그림),
+/// 행·직원의 등장과 퇴장은 테스트가 "그 사이 무대에서 내려간 적이 없다"를 확인하는 기록입니다.
 public enum StageEvent: Hashable, Sendable {
     case teamOpened(Team)
     case teamClosed(TeamID)
     case spawned(AgentID)
     case despawned(AgentID)
     case sound(SoundCue, AgentID?)
-    case effect(Effect)
 }
 
 public struct StageConfig: Hashable, Sendable {
@@ -370,7 +370,6 @@ public struct Stage: Sendable {
             }
         case .effect(let effect):
             addEffect(effect)
-            events.append(.effect(effect))
         case .sound(let cue):
             switch cue {
             case .bubble, .chatter:
@@ -397,7 +396,6 @@ public struct Stage: Sendable {
         case .effect(let effect):
             if case .paperPlane(let target) = effect, actors[target] == nil { break }
             addEffect(effect)
-            events.append(.effect(effect))
         case .sound(let cue):
             events.append(.sound(cue, nil))
         default:

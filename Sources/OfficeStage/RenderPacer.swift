@@ -95,11 +95,6 @@ public enum RenderPacer {
         return motion
     }
 
-    /// 무대에 움직임(일하는 중 이상)이 있는지
-    public static func isLively(_ stage: Stage) -> Bool {
-        motion(stage) != .still
-    }
-
     /// 빠르게 반복하는 자세: 타이핑(손 22rad/s), 손 들기(5.7rad/s, 승인 대기에서 흔듦).
     /// 안마(몸 38rad/s 미세 진동 0.7pt)는 쉬는 중 몇 분씩 이어지므로 잔잔함으로 칩니다 (낮은 빈도에서도 떨림으로 보임).
     public static func isFastPose(_ pose: Pose) -> Bool {

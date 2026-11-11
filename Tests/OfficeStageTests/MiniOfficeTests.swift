@@ -32,10 +32,10 @@ struct MiniOfficeTests {
          on("SubagentStart", #""agent_id":"\#(agent)","agent_type":"general-purpose""#, session)]
     }
 
-    func next(_ h: FloorHarness, _ previous: MiniFocus, selection: FloorSelection = .everyone, pinned: TeamID? = nil,
+    func next(_ h: FloorHarness, _ previous: MiniFocus, selection: FloorSelection = .everyone,
               autoSwitch: Bool = true, after seconds: Double = 0) -> MiniFocus {
         MiniFocus.next(
-            previous: previous, state: h.engine.state, selection: selection, pinned: pinned, autoSwitch: autoSwitch,
+            previous: previous, state: h.engine.state, selection: selection, autoSwitch: autoSwitch,
             now: h.epoch.addingTimeInterval(h.now + seconds))
     }
 
@@ -290,12 +290,13 @@ struct MiniOfficeTests {
         #expect(focus.tierAt == h.epoch.addingTimeInterval(5))
         #expect(focus.tiers == [m1: .completed, m2: .requested, m3: .requested])
 
-        // 답변 필요가 가장 먼저 (고정보다도), 자동 전환을 끄면 고정
+        // 답변 필요가 가장 먼저, 자동 전환을 끄면 완료한 행 그대로
         h.hook(toolHook("PreToolUse", "AskUserQuestion", "m2", "q1"), at: 6)
-        focus = next(h, focus, pinned: m3)
+        let before = focus
+        focus = next(h, focus)
         #expect(focus.team == m2 && focus.reason == .answer && focus.tiers[m2] == .answer)
-        #expect(next(h, focus, pinned: m3, autoSwitch: false).team == m3)
-        #expect(next(h, focus, pinned: m3, autoSwitch: false).reason == .pinned)
+        #expect(next(h, before, autoSwitch: false).team == m1)
+        #expect(next(h, before, autoSwitch: false).reason == .completed)
 
         // 답하면 다시 완료한 행
         h.hook(toolHook("PostToolUse", "AskUserQuestion", "m2", "q1"), at: 7)

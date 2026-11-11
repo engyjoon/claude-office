@@ -42,18 +42,18 @@ struct ResidentStageTests {
         h.hook(hook("SessionStart", session: "m1", cwd: "/w/m1"), at: 0)
         h.hook(hook("UserPromptSubmit", #""prompt":"x""#, session: "m1", cwd: "/w/m1"), at: 1)
         let m1 = try #require(h.engine.state.lead(of: SessionID("m1"))?.teamID)
-        let before = MiniFocus.next(previous: .empty, state: h.engine.state, pinned: nil, autoSwitch: true, now: h.epoch.addingTimeInterval(h.now))
+        let before = MiniFocus.next(previous: .empty, state: h.engine.state, autoSwitch: true, now: h.epoch.addingTimeInterval(h.now))
         #expect(before.team == m1 && before.reason == .requested)
 
         settle(&h, roll(h, [("a", "/w/office", 30), ("b", "/w/blog", 5)]))
-        let after = MiniFocus.next(previous: before, state: h.engine.state, pinned: nil, autoSwitch: true, now: h.epoch.addingTimeInterval(h.now))
+        let after = MiniFocus.next(previous: before, state: h.engine.state, autoSwitch: true, now: h.epoch.addingTimeInterval(h.now))
         #expect(after.team == m1 && after.reason == .requested)
         #expect(after.tiers.values.filter { $0 == .none }.count == 2)
 
         // 훅을 보낸 행이 없으면 먼저 앉힌 행(최근에 활동한 행이 먼저)을 보여 줌
         var fresh = FloorHarness(band: true)
         settle(&fresh, roll(fresh, [("a", "/w/office", 30), ("b", "/w/blog", 5)]))
-        let first = MiniFocus.next(previous: .empty, state: fresh.engine.state, pinned: nil, autoSwitch: true, now: fresh.epoch)
+        let first = MiniFocus.next(previous: .empty, state: fresh.engine.state, autoSwitch: true, now: fresh.epoch)
         #expect(first.team == fresh.engine.state.lead(of: SessionID("a"))?.teamID && first.reason == .none)
     }
 }
