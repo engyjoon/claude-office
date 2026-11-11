@@ -303,16 +303,10 @@ public struct Stage: Sendable {
             updateLayout()
             if Self.bubbleUnit(agent) != unit { promoteQueuedBubbles(in: unit) }
         case .despawn:
-            release(id)
-            let agent = actors[id]!.agent
-            actors[id] = nil
-            promoteQueuedBubbles(in: Self.bubbleUnit(agent))
             blocks[id] = nil
             queues[id] = nil
             forgetSignals(from: id)
-            events.append(.despawned(id))
-            compactionPending = true
-            finishClosingTeams()
+            takeDown(id)
         case .walk(let spot):
             walk(id, to: spot)
         case .sit:
@@ -431,6 +425,14 @@ public struct Stage: Sendable {
         blocks[id] = nil
         forgetSignals(from: id)
         for name in unsent { withdraw(signal: name) }
+        guard actors[id] != nil else { return }
+        takeDown(id)
+        updateLayout()
+    }
+
+    /// 무대에 선 직원을 내립니다 (퇴근 지시 `.despawn`과 `remove`가 함께 씀): 자리 예약을 풀고, 같은 행에서 기다리던 말풍선을 올리고,
+    /// 닫히던 행에 아무도 안 남았으면 마저 닫습니다. 대기열·막힘·신호는 부르는 쪽이 먼저 지웁니다.
+    private mutating func takeDown(_ id: AgentID) {
         guard let actor = actors[id] else { return }
         release(id)
         actors[id] = nil
@@ -438,7 +440,6 @@ public struct Stage: Sendable {
         events.append(.despawned(id))
         compactionPending = true
         finishClosingTeams()
-        updateLayout()
     }
 
     /// 보낼 사람이 이 무대에 없는 신호 (화면 밖 서브의 보고, 개선 5). 그 신호를 기다리거나 기다릴 사람은

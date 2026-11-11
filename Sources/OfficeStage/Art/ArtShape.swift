@@ -135,6 +135,9 @@ public enum Swatch: String, Hashable, Sendable, CaseIterable {
 
     public static let teamRugs: [Swatch] = [.rugA, .rugB, .rugC, .rugD]
     public static let teamColors: [Swatch] = [.mint, .peach, .lavender, .butter]
+
+    /// 행 색 (`Team.colorIndex`번째, 넘치면 처음부터 다시)
+    public static func team(_ colorIndex: Int) -> Swatch { teamColors[colorIndex % teamColors.count] }
 }
 
 /// 칠할 색. 캐릭터 부위 색은 직원 외형에 따라 정해집니다.

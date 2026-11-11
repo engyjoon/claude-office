@@ -102,6 +102,16 @@ public struct OfficeState: Sendable {
         agents.values.filter { $0.teamID == team }.sorted { ($0.seat, $0.serial) < ($1.seat, $1.serial) }
     }
 
+    /// 이 직원의 세션이 응답을 끝낸 때 (끝낸 적이 없으면 지금 상태가 된 때). 답변 필요·확인 안 한 응답이 "언제부터"인지 셀 때 씁니다.
+    public func completedAt(of agent: Agent) -> Date {
+        parts[agent.session]?.completedAt ?? agent.activitySince
+    }
+
+    /// 행 안 세션들이 가장 최근에 요청을 받은 때
+    public func lastPromptAt(in people: [Agent]) -> Date? {
+        Set(people.map(\.session)).compactMap { parts[$0]?.lastPromptAt }.max()
+    }
+
     /// 행 순서 (열린 순서 = 위에서 아래로)
     public var sortedTeams: [Team] {
         teams.values.sorted { $0.order < $1.order }

@@ -170,14 +170,13 @@ public struct MiniFocus: Hashable, Sendable {
 
     public static func status(of team: Team, state: OfficeState) -> Status {
         let people = state.agents(in: team.id)
-        func done(_ agent: Agent) -> Date { state.parts[agent.session]?.completedAt ?? agent.activitySince }
+        let done = state.completedAt(of:)
         let askingSince = people.filter(MiniCast.isAsking).map(\.activitySince).min()
         let replySince = people.filter { $0.cue == .reply }.map(done).min()
         let unread = people.filter { $0.cue == .unread }.max { done($0) < done($1) }
         let completedAt = unread.map(done)
         let answerSince = askingSince ?? replySince
-        let sessions = Set(people.map(\.session))
-        let lastPromptAt = sessions.compactMap { state.parts[$0]?.lastPromptAt }.max()
+        let lastPromptAt = state.lastPromptAt(in: people)
         let tier: Tier = answerSince != nil ? .answer : completedAt != nil ? .completed : lastPromptAt != nil ? .requested : .none
         let at = answerSince ?? completedAt ?? lastPromptAt
         return Status(

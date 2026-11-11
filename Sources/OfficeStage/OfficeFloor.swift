@@ -114,7 +114,7 @@ public struct FloorPlan: Hashable, Sendable {
     public static func lastActivity(of team: TeamID, in state: OfficeState) -> Date {
         let people = state.agents(in: team)
         let activity = people.map(\.activitySince).max() ?? .distantPast
-        let prompt = Set(people.map(\.session)).compactMap { state.parts[$0]?.lastPromptAt }.max() ?? .distantPast
+        let prompt = state.lastPromptAt(in: people) ?? .distantPast
         return max(activity, prompt)
     }
 
@@ -239,19 +239,9 @@ public struct OfficeFloor: Sendable {
         // 행·"+N"·칸을 맞추고 지시를 넘기는 동안 배치가 여러 번 바뀌어도 길찾기는 끝에 한 번만 (개선 5)
         stage.beginBatch()
         defer { stage.endBatch() }
-        let next = makePlan(engine)
-        let previous = plan
-        plan = next
+        // 방금 엔진에서 빠진 사람(퇴근 중)은 남겨 마지막 연출을 하게 둡니다. 미니에서 칸을 당겨 앉을 때는 걸어서 옮깁니다 (M6(9b))
+        let next = replan(engine, keepsLeaving: true, walking: isBand)
         let state = engine.state
-
-        // 숨게 된 사람은 바로 내립니다
-        for id in previous.visible.subtracting(next.visible).sorted() where state.agents[id] != nil {
-            stage.remove(id)
-        }
-        clearLeavingElsewhere(state)
-        syncTeams(state)
-        // 미니에서 칸을 당겨 앉을 때는 걸어서 옮깁니다 (M6(9b))
-        stage.setSeatMap(next.seatMap, walking: isBand)
 
         var spawned = Set<AgentID>()
         for directive in directives {
@@ -293,14 +283,8 @@ public struct OfficeFloor: Sendable {
         // 넘기지 않으면 메인의 대기열이 시간 제한(8초)까지 막혀 상태 칩·자세가 늦고, 그 뒤 아무도 없는 곳에 하이파이브합니다.
         for name in unsent { stage.withdraw(signal: name) }
 
-        // 지시와 상관없이 보이게 된 사람 (다른 행이 닫혀 행이 올라옴 등)
-        var entering: [Directive] = []
-        for id in next.visible.sorted() where !stage.knows(id) && !restored.contains(id) {
-            if let agent = state.agents[id] {
-                entering += engine.choreographer.restoreDirectives(for: agent, entering: true)
-            }
-        }
-        if !entering.isEmpty { stage.enqueue(entering) }
+        // 지시와 상관없이 보이게 된 사람 (다른 행이 닫혀 행이 올라옴 등)은 출입문에서 걸어 들어옵니다
+        restoreNewlyVisible(engine, entering: true, except: restored)
     }
 
     public mutating func update(dt: Double) {
@@ -328,26 +312,46 @@ public struct OfficeFloor: Sendable {
         resync(engine: engine)
     }
 
+    /// 선택·화면 크기가 바뀐 뒤: 새로 보이는 사람은 걷지 않고 그 자리에 바로 놓습니다
     private mutating func resync(engine: OfficeEngine) {
         stage.beginBatch()
         defer { stage.endBatch() }
+        replan(engine, keepsLeaving: false, walking: false)
+        restoreNewlyVisible(engine, entering: false)
+    }
+
+    /// 배치를 다시 세우고(`makePlan`) 숨게 된 사람을 바로 내린 뒤 무대의 행·"+N"·칸을 맞춥니다 (`apply`와 `resync`가 함께 씀).
+    /// - Parameters:
+    ///   - keepsLeaving: 보이던 사람 중 엔진에 없는 사람(퇴근 중)을 남길지. 지시를 넘길 때는 남겨 마지막 연출을 하게 두고,
+    ///     선택·화면 크기가 바뀔 때는 보이던 사람은 내리되 무대에만 남은 퇴근 중인 사람은 그대로 나가게 둡니다.
+    ///   - walking: 칸이 바뀐 사람을 걸어서 옮길지
+    @discardableResult
+    private mutating func replan(_ engine: OfficeEngine, keepsLeaving: Bool, walking: Bool) -> FloorPlan {
         let next = makePlan(engine)
         let previous = plan
         plan = next
-        for id in previous.visible.subtracting(next.visible).sorted() {
+        let state = engine.state
+        for id in previous.visible.subtracting(next.visible).sorted() where !keepsLeaving || state.agents[id] != nil {
             stage.remove(id)
         }
-        // 무대에 남아 있지만 이제 보이지 않을 사람 (퇴근 중인 사람은 그대로 나가게 둡니다)
-        for actor in stage.sortedActors where engine.state.agents[actor.id] != nil && !next.visible.contains(actor.id) {
-            stage.remove(actor.id)
+        if !keepsLeaving {
+            // 무대에 남아 있지만 이제 보이지 않을 사람
+            for actor in stage.sortedActors where state.agents[actor.id] != nil && !next.visible.contains(actor.id) {
+                stage.remove(actor.id)
+            }
         }
-        clearLeavingElsewhere(engine.state)
-        syncTeams(engine.state)
-        stage.setSeatMap(next.seatMap)
+        clearLeavingElsewhere(state)
+        syncTeams(state)
+        stage.setSeatMap(next.seatMap, walking: walking)
+        return next
+    }
+
+    /// 보여야 하는데 무대에 없는 사람을 엔진이 아는 지금 모습으로 세웁니다 (`entering`: 출입문에서 걸어 들어올지, 그 자리에 바로 놓을지)
+    private mutating func restoreNewlyVisible(_ engine: OfficeEngine, entering: Bool, except skipped: Set<AgentID> = []) {
         var placed: [Directive] = []
-        for id in next.visible.sorted() where !stage.knows(id) {
+        for id in plan.visible.sorted() where !stage.knows(id) && !skipped.contains(id) {
             if let agent = engine.state.agents[id] {
-                placed += engine.choreographer.restoreDirectives(for: agent, entering: false)
+                placed += engine.choreographer.restoreDirectives(for: agent, entering: entering)
             }
         }
         if !placed.isEmpty { stage.enqueue(placed) }

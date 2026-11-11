@@ -188,7 +188,7 @@ public enum Overlay {
             placed.append(frame)
             markerTops[selected] = frame.y
             let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
-            let team = Swatch.teamColors[colorIndex % Swatch.teamColors.count].color
+            let team = Swatch.team(colorIndex).color
             items.append(OverlayItem(
                 id: "selection:\(selected.raw)", kind: .selection, agent: selected, origin: MapPoint(frame.x + frame.width / 2, frame.maxY),
                 shapes: OverlayArt.selectionMarker(team: team, lighting: options.lighting, contrast: options.highContrast), frame: frame))

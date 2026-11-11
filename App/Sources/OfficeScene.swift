@@ -375,7 +375,7 @@ final class OfficeScene: SKScene {
             } else {
                 membersChanged = true
                 let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
-                node = CharacterNode(agent: actor.agent, teamColor: Swatch.teamColors[colorIndex % Swatch.teamColors.count].color)
+                node = CharacterNode(agent: actor.agent, teamColor: Swatch.team(colorIndex).color)
                 node.isSelected = actor.id == selectedAgent
                 node.alpha = 0
                 node.run(.fadeIn(withDuration: 0.2))

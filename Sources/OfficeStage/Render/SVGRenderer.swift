@@ -24,7 +24,7 @@ public enum SVGRenderer {
         func outline(_ actor: StageActor) -> [CharacterArt.OutlineLayer] {
             guard actor.id == selected else { return [] }
             let index = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
-            return CharacterArt.outlineLayers(team: Swatch.teamColors[index % Swatch.teamColors.count].color, lighting: lighting, contrast: contrast)
+            return CharacterArt.outlineLayers(team: Swatch.team(index).color, lighting: lighting, contrast: contrast)
         }
         var body = ""
         let layers = OfficeArt.layers(

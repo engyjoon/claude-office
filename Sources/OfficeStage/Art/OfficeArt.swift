@@ -447,7 +447,7 @@ public enum OfficeArt {
         let night = lighting == .night
         let ink: Paint = night ? .color(NightPalette.color(Swatch.ink.color)) : .swatch(.ink)
         let paper: Paint = night ? .color(NightPalette.color(Swatch.plate.color)) : .swatch(.plate)
-        let swatch = Swatch.teamColors[color % Swatch.teamColors.count]
+        let swatch = Swatch.team(color)
         let fill: Paint = night ? .color(swatch.color) : .swatch(swatch)
         var shapes: [ArtShape] = [
             ArtShape(

@@ -251,7 +251,7 @@ public struct StatusLine: Hashable, Sendable {
             colorIndex: team.colorIndex, folder: showsFolder ? shortFolder(team.name) : nil, head: main?.displayName,
             segment: Segment(text: "", tone: .muted))
         let entries = journal.entries.filter { $0.team == team.id }
-        func completed(_ agent: Agent) -> Date { state.parts[agent.session]?.completedAt ?? agent.activitySince }
+        let completed = state.completedAt(of:)
         /// 메인이 한 일은 그냥, 서브가 한 일은 "서브2가 …"
         func spoken(_ segment: Segment, by agent: AgentID, title: String) -> Segment {
             guard agent != main?.id else { return segment }

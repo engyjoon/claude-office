@@ -212,7 +212,7 @@ public struct Roster: Hashable, Sendable {
             kind: agent.profile.kind,
             status: RosterStatus.from(agent),
             detail: privacy == .detailed ? detail(for: agent) : nil,
-            since: agent.cue != nil ? part?.completedAt ?? agent.activitySince : agent.activitySince,
+            since: agent.cue != nil ? state.completedAt(of: agent) : agent.activitySince,
             appearance: agent.profile.appearance,
             teamName: team.name,
             session: agent.session,
