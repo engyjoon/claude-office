@@ -206,6 +206,52 @@ struct PathfinderTests {
         }
     }
 
+    /// 배치의 모든 접근 지점 (책상 뒤, 공용 구역 자리 앞)
+    func approaches(_ layout: OfficeLayout) -> [(String, MapPoint)] {
+        var points: [(String, MapPoint)] = [("출입문", layout.doorPoint)]
+        for row in layout.rows {
+            for desk in 0..<row.desks { points.append(("행 \(row.index) 책상 \(desk)", OfficeLayout.seat(row, Seat(desk: desk)).approach)) }
+        }
+        for zone in OfficeLayout.Zone.allCases {
+            for (index, slot) in layout.slots(zone).enumerated() { points.append(("\(zone.rawValue) \(index)", slot.approach)) }
+        }
+        return points
+    }
+
+    @Test("접근 지점은 가구 밖이고 길찾기 격자에서도 걸을 수 있는 칸이다 (책상 뒤 여유는 첫 행에서 1pt뿐)")
+    func approachesAreWalkable() {
+        // 사무실 창의 고정 크기와, 화면이 작아 줄일 때 쓰는 최소 크기 (행 간격 153·140)
+        for (width, height) in [(OfficeLayout.defaultWidth, OfficeLayout.defaultHeight), (OfficeLayout.minWidth, OfficeLayout.minHeight)] {
+            let rooms = (0..<OfficeLayout.maxRows).map { OfficeLayout.Room(team: TeamID("/w/r#\($0)"), desks: OfficeLayout.columns(width: width)) }
+            let layout = OfficeLayout(width: width, height: height, rooms: rooms)
+            let finder = Pathfinder(layout: layout)
+            for (name, point) in approaches(layout) {
+                #expect(layout.isWalkable(point), "\(name) 접근 지점 \(point)이 가구 안이거나 사무실 밖입니다 (높이 \(height))")
+                let cell = layout.cell(for: point)
+                #expect(
+                    finder.isWalkable(column: cell.column, row: cell.row),
+                    "\(name) 접근 지점 \(point)의 칸이 막혔습니다 (높이 \(height)): 길찾기가 옆 칸으로 돌아갑니다")
+            }
+        }
+    }
+
+    @Test("책상 뒤 접근 지점의 칸은 책상 발자국에 여유를 더한 영역 밖이다 (숫자를 바꾸면 여기서 먼저 걸림)")
+    func deskApproachMargin() {
+        let layout = OfficeLayout(rooms: [.init(team: main, desks: 1)])
+        let row = layout.rows[0]
+        let approach = OfficeLayout.seat(row, .main).approach
+        let cell = layout.cell(for: approach)
+        let center = layout.cellCenter(column: cell.column, row: cell.row)
+        let blocked = OfficeLayout.deskFootprint(x: OfficeLayout.deskX(0), y: row.deskY).insetBy(-OfficeLayout.obstacleMargin)
+        // 첫 행: 칸 가운데 y 328, 막힌 영역 위 끝 329 → 여유 1pt
+        #expect(blocked.y - center.y == 1)
+        #expect(!blocked.contains(center))
+        // 그림의 책상과 장애물이 같은 폭·같은 위 끝
+        let desk = OfficeArt.desk("t", x: OfficeLayout.deskX(0), y: row.deskY, chair: 0, plate: nil, plant: false)
+        let top = desk.first { $0.name == "desk-t" }?.shapes.first
+        #expect(top?.geometry == .rect(MapRect(blocked.x + 4, blocked.y + 4, OfficeLayout.deskWidth, 11), radius: 4))
+    }
+
     @Test("문에서 모든 책상과 구역까지 가구를 뚫지 않고 간다")
     func doorToEverywhere() {
         let layout = self.layout

@@ -78,13 +78,15 @@ public enum OfficeArt {
         let top = min(area.y, 0)
         let bottom = max(area.maxY, layout.height)
         let width = right - left
+        // 벽 · 걸레받이(벽 아래 10pt) · 바닥
+        let wall = OfficeLayout.wallBottom
         var shapes: [ArtShape] = [
-            .rect(left, top, width, 160 - top, fill: .swatch(.wall), outline: false),
-            .rect(left, 150, width, 10, fill: .swatch(.baseboard), outline: false),
-            .rect(left, 160, width, bottom - 160, fill: .swatch(.floor), outline: false),
+            .rect(left, top, width, wall - top, fill: .swatch(.wall), outline: false),
+            .rect(left, wall - 10, width, 10, fill: .swatch(.baseboard), outline: false),
+            .rect(left, wall, width, bottom - wall, fill: .swatch(.floor), outline: false),
         ]
         // 바닥 줄눈: 가로줄은 36pt마다, 세로줄은 210pt마다 한 줄씩 엇갈립니다 (사무실 밖으로도 같은 무늬)
-        var y = 196.0
+        var y = wall + 36
         var row = 0
         let limit = extent == nil ? bottom : bottom + 36  // 화면을 채울 때는 맨 아래 반쪽 줄까지
         while y < limit {
@@ -112,7 +114,7 @@ public enum OfficeArt {
             let m = OfficeLayout.massageArea
             shapes.append(.rect(m.x, m.y + 4, m.width, m.height - 6, r: 22, fill: .color(ArtColor(0xD4E2F2)), outline: false, opacity: 0.85))
         }
-        shapes.append(.rect(layout.doorX + 4, 162, 64, 10, r: 5, fill: .swatch(.rugC)))
+        shapes.append(.rect(layout.doorX + 4, wall + 2, OfficeLayout.doorWidth - 8, 10, r: 5, fill: .swatch(.rugC)))
         return shapes
     }
 
@@ -128,21 +130,22 @@ public enum OfficeArt {
         // 화이트보드 (위로 올림: 윗변 y = wallArtTop)
         let board = MapPoint(layout.whiteboardX - 512, OfficeLayout.wallArtTop - 36)
         shapes += [
-            .rect(512, 36, 128, 80, r: 6, fill: .swatch(.board)),
+            .rect(512, 36, OfficeLayout.whiteboardWidth, 80, r: 6, fill: .swatch(.board)),
             .line("M528,54 h8 v8 h-8 z M542,58 h56 M528,72 h8 v8 h-8 z M542,76 h44 M528,90 h8 v8 h-8 z M542,94 h66", width: 1.5),
             .line("M529,57 l3,3 l5,-6 M529,75 l3,3 l5,-6", width: 2, color: .swatch(.check)),
             .rect(532, 116, 88, 6, r: 3, fill: .swatch(.wallTrim)),
             .rect(600, 111, 12, 5, r: 2, fill: .swatch(.alert), outline: false),
         ].transformed(offset: board)
-        // 출입문
+        // 출입문 (벽과 바닥의 경계에 섭니다)
         let door = layout.doorX
+        let wall = OfficeLayout.wallBottom
         shapes += [
-            .rect(door, 48, 72, 112, r: 6, fill: .swatch(.woodDark)),
-            .rect(door + 8, 56, 56, 104, r: 4, fill: .swatch(.wood)),
+            .rect(door, wall - 112, OfficeLayout.doorWidth, 112, r: 6, fill: .swatch(.woodDark)),
+            .rect(door + 8, wall - 104, OfficeLayout.doorWidth - 16, 104, r: 4, fill: .swatch(.wood)),
             .rect(door + 20, 68, 32, 30, r: 4, fill: .swatch(.sky)),
             .circle(door + 54, 114, 3.5, fill: .swatch(.butter)),
         ]
-        shapes += pantry().transformed(offset: MapPoint(layout.pantryX - 908, 0))
+        shapes += pantry().transformed(offset: MapPoint(layout.pantryX - pantryDesignX, 0))
         // 풍경 창 (뒷벽 왼쪽, 가로로 긴 액자): 낮에는 정원, 밤에는 밤하늘
         let window = lighting == .night ? nightWindow(in: layout.gardenFrame) : garden(in: layout.gardenFrame)
         return [ArtLayer("wall", depth: -.infinity, window + shapes.lit(lighting))]
@@ -292,6 +295,9 @@ public enum OfficeArt {
         ]
     }
 
+    /// 탕비 코너 그림의 왼쪽 끝 x (아래 도형들은 x 908부터 `OfficeLayout.pantryWidth`만큼의 폭에 그린 좌표입니다)
+    static let pantryDesignX = 908.0
+
     /// 탕비 코너 (오른쪽 벽): 냉장고, 정수기, 프린터
     static func pantry() -> [ArtShape] {
         var shapes: [ArtShape] = [
@@ -363,14 +369,18 @@ public enum OfficeArt {
 
     /// 책상 하나: 의자(직원 뒤, 깊이 y-1)와 책상(직원 앞, 깊이 y+3). (x, y)는 앉은 직원의 발 위치입니다.
     static func desk(_ name: String, x: Double, y: Double, chair: Int, plate: String?, plant: Bool) -> [ArtLayer] {
+        // 상판(위 11pt)과 앞판: 폭과 위·아래 끝은 길찾기 장애물(`OfficeLayout.deskFootprint`)과 같은 값
+        let width = OfficeLayout.deskWidth
+        let left = x - width / 2
+        let top = y + OfficeLayout.deskTop
         var desk: [ArtShape] = [
-            .rect(x - 41, y - 33, 82, 11, r: 4, fill: .swatch(.woodTop)),
-            .rect(x - 41, y - 24, 82, 27, r: 5, fill: .swatch(.wood)),
+            .rect(left, top, width, 11, r: 4, fill: .swatch(.woodTop)),
+            .rect(left, top + 9, width, y + OfficeLayout.deskBottom - (top + 9), r: 5, fill: .swatch(.wood)),
             .rect(x - 40, y - 46, 26, 14, r: 3, fill: .swatch(.metal)),
             .circle(x - 27, y - 39, 2, fill: .swatch(.metalDot), outline: false),
         ]
         if let plate {
-            let (text, textWidth) = fitted(plate, size: plateFontSize, maxWidth: 78 - 2 * platePadding)
+            let (text, textWidth) = fitted(plate, size: plateFontSize, maxWidth: width - 4 - 2 * platePadding)
             let width = max(textWidth, 28) + 2 * platePadding
             // 책상 앞판에서 보이는 부분(상판 아래 y-22 ~ y+3)의 세로 가운데보다 조금 위에 답니다
             // (상판 테두리 때문에 기하학적 가운데는 화면에서 아래로 치우쳐 보입니다)
@@ -411,9 +421,9 @@ public enum OfficeArt {
     static let signFontSize = 10.5
     /// 행 표지 글자 최대 폭 (넘으면 "…", 굵은 글자 기준 영문 약 22자)
     static let signMaxTextWidth = 136.0
-    /// 행 표지 높이와 위치 (책상 앞판 아래 끝 deskY+3에서 4pt 아래부터)
+    /// 행 표지 높이와 위치 (책상 앞판 아래 끝에서 4pt 아래부터)
     static let signHeight = 20.0
-    static let signTop = 7.0
+    static let signTop = OfficeLayout.deskBottom + 4
     /// 행 표지 글자 앞 여백 (폴더 아이콘 자리)과 뒤 여백
     static let signTextInset = 20.0
     static let signTrailing = 10.0
@@ -501,21 +511,27 @@ public enum OfficeArt {
 
     static func lounge() -> [ArtLayer] {
         var layers: [ArtLayer] = []
-        // 3인용 소파 (앉는 자리 y 214): 등받이는 앉은 직원 뒤, 앉는 판과 팔걸이는 앞
+        // 3인용 소파 (앉는 자리는 `OfficeLayout.sofaSeatY`): 등받이는 앉은 직원 뒤, 앉는 판과 팔걸이는 앞
+        let seatY = OfficeLayout.sofaSeatY
+        let seats = OfficeLayout.sofaSeatOffsets
         for (index, sofa) in OfficeLayout.sofas.enumerated() {
             let x = sofa.x
+            let y = sofa.y
             let w = sofa.width
-            layers.append(ArtLayer("sofa-back-\(index)", depth: 184, [
-                .rect(x + 6, 172, w - 12, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
+            layers.append(ArtLayer("sofa-back-\(index)", depth: y + 16, [
+                .rect(x + 6, y + 4, w - 12, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
             ]))
-            // 직원(214) 바로 앞, 앉은 다리(214 + CharacterArt.seatedLegsDepth)보다 뒤
-            layers.append(ArtLayer("sofa-front-\(index)", depth: 215.5, [
-                .rect(x + 10, 200, w - 20, 26, r: 10, fill: .color(ArtColor(0xB3A7E2))),
-                .rect(x + 47, 202, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false),
-                .rect(x + 87, 202, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false),
-                .rect(x - 2, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
-                .rect(x + w - 16, 184, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
-            ]))
+            // 직원(앉는 자리) 바로 앞, 앉은 다리(앉는 자리 + CharacterArt.seatedLegsDepth)보다 뒤
+            var front: [ArtShape] = [.rect(x + 10, y + 32, w - 20, 26, r: 10, fill: .color(ArtColor(0xB3A7E2)))]
+            // 앉는 자리 사이 칸막이 선
+            for (a, b) in zip(seats, seats.dropFirst()) {
+                front.append(.rect(x + (a + b) / 2 - 1, y + 34, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false))
+            }
+            front += [
+                .rect(x - 2, y + 16, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
+                .rect(x + w - 16, y + 16, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
+            ]
+            layers.append(ArtLayer("sofa-front-\(index)", depth: seatY + 1.5, front))
         }
         // 안마 의자: 등판·팔걸이(직원 뒤) → 롤러(움직임, liveLayers) → 직원 → 앉는 판·발판(앞) → 앉은 다리
         // 팔걸이는 팔꿈치 높이(발 위치 -30)로 낮춰 직원 뒤에 그립니다: 안마 자세의 팔(30°)이 팔걸이 위에 얹히고, 몸통 옆을 가리지 않습니다.

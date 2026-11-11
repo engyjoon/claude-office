@@ -49,6 +49,7 @@ public struct Place: Hashable, Sendable {
 ///   책장은 없앴습니다 (파일 읽기는 자기 책상에서).
 public struct OfficeLayout: Hashable, Sendable {
     public static let tile = 16.0
+    /// 뒷벽과 바닥의 경계. 벽 가구(출입문·냉장고·정수기)는 이 선에 서 있고, 그림(`OfficeArt.background`)도 이 선에서 벽과 바닥을 나눕니다.
     public static let wallBottom = 160.0
     public static let walkTop = 172.0
     /// 첫 행의 책상 줄 y (앉은 직원의 발 위치)
@@ -65,14 +66,21 @@ public struct OfficeLayout: Hashable, Sendable {
     public static let mainGap = 18.0
     public static let deskSpacing = 92.0
     public static let deskWidth = 82.0
+    /// 책상 상판 위 끝과 앞판 아래 끝 (앉은 직원의 발 위치 기준 y). 그림(`OfficeArt.desk`)과 장애물(`deskFootprint`)이 함께 씁니다.
+    public static let deskTop = -33.0
+    public static let deskBottom = 3.0
+    /// 책상 뒤에서 의자로 들어가는 접근 지점까지 (발 위치에서 위로)
     public static let approachOffset = 46.0
+    /// 행이 차지하는 띠: 책상 줄에서 위(책상 뒤 통로)·아래(책상 앞)로 이만큼
+    public static let rowAbove = 90.0
+    public static let rowBelow = 40.0
     /// 행 끝 "+N" 표시 자리
     public static let moreBadgeWidth = 46.0
     /// 맨 아래 행 밑의 여백
     public static let bottomMargin = 36.0
     /// 이보다 작은 화면에서는 사무실을 줄여서 보여 줍니다. 폭은 휴게 공간과 뒷벽 가구(정원 액자·화이트보드·출입문·탕비 코너)가 겹치지 않는 최소 크기,
     /// 높이는 3행(`maxRows`)이 최소 간격으로 모두 들어가는 크기입니다 (사무실 창도 이보다 낮아지지 않게 막습니다).
-    public static let minWidth = massageArea.maxX - 20 + whiteboardToDoor + doorToPantry + 212
+    public static let minWidth = massageArea.maxX - 20 + whiteboardToDoor + doorToPantry + pantryWidth
     public static let minHeight = firstDeskY + minRowSpacing * Double(maxRows - 1) + bottomMargin
     /// 사무실 창의 사무실 크기 (M5(9)부터 창 크기 고정: 사무실 영역 = 이 크기 + 둘레 여백, 그 아래 현황 줄과 오른쪽 패널을 더함).
     /// 높이가 고정이라 행 간격도 이 높이에서 정해집니다 (`rowSpacing(height: 708)` = 153).
@@ -82,6 +90,11 @@ public struct OfficeLayout: Hashable, Sendable {
     /// 휴게 공간 (위쪽 왼쪽, 2026-11-08 셋째 수정): 소파 구역(3인용 소파 둘) → 빈 공간 → 안마 구역(안마 의자 둘)
     /// 3인용 소파 둘 (앉는 자리는 소파마다 세 곳). 사이를 36pt 띄웁니다.
     public static let sofas = [MapRect(14, 168, 136, 56), MapRect(186, 168, 136, 56)]
+    /// 소파에 앉는 자리 (발 위치): 소파 왼쪽 끝에서 x로 이만큼, y는 `sofaSeatY`. 소파 앞 `sofaApproachY`에서 들어가 앉습니다.
+    /// 그림(`OfficeArt.lounge`)의 앉는 판 칸막이와 깊이도 이 값을 따릅니다.
+    public static let sofaSeatOffsets = [28.0, 68, 108]
+    public static let sofaSeatY = 214.0
+    public static let sofaApproachY = 250.0
     /// 소파 구역 (러그)
     public static let sofaArea = MapRect(6, 176, 324, 78)
     /// 안마 구역 (러그). 소파 구역과 빈 공간을 두고 떨어져 있습니다.
@@ -143,8 +156,8 @@ public struct OfficeLayout: Hashable, Sendable {
 
         public var deskY: Double { OfficeLayout.firstDeskY + spacing * Double(index) }
         /// 행이 차지하는 띠 (책상 뒤 통로부터 책상 앞까지)
-        public var top: Double { deskY - 90 }
-        public var bottom: Double { deskY + 40 }
+        public var top: Double { deskY - OfficeLayout.rowAbove }
+        public var bottom: Double { deskY + OfficeLayout.rowBelow }
         public func deskX(_ desk: Int) -> Double { OfficeLayout.deskX(desk) }
         /// 행 끝 (마지막 책상 오른쪽 가장자리)
         public var endX: Double { deskX(desks - 1) + OfficeLayout.deskWidth / 2 }
@@ -213,13 +226,17 @@ public struct OfficeLayout: Hashable, Sendable {
 
     // MARK: - 뒷벽 가구 (화면 폭에 맞춰 놓음)
 
+    /// 화이트보드·출입문·탕비 코너(냉장고부터 프린터까지)의 폭. 그림(`OfficeArt.wallFurniture`)과 자리 계산이 함께 씁니다.
+    public static let whiteboardWidth = 128.0
+    public static let doorWidth = 72.0
+    public static let pantryWidth = 212.0
     /// 탕비 코너 왼쪽 x (오른쪽 벽에 붙임)
-    public var pantryX: Double { width - 212 }
+    public var pantryX: Double { width - Self.pantryWidth }
     /// 출입문 왼쪽 x
     public var doorX: Double { pantryX - Self.doorToPantry }
-    /// 출입문 왼쪽 → 탕비 코너 왼쪽, 화이트보드 왼쪽 → 출입문 왼쪽 거리 (화이트보드 폭 128 + 넉넉한 사이 72)
+    /// 출입문 왼쪽 → 탕비 코너 왼쪽, 화이트보드 왼쪽 → 출입문 왼쪽 거리 (화이트보드 폭 + 넉넉한 사이 72)
     static let doorToPantry = 140.0
-    static let whiteboardToDoor = 200.0
+    static let whiteboardToDoor = whiteboardWidth + 72
     /// 화이트보드 왼쪽 x
     public var whiteboardX: Double { doorX - Self.whiteboardToDoor }
     /// 뒷벽 그림·화이트보드 윗변 y (휴게 공간 가구 등판과 넉넉히 띄우려고 위로 올림)
@@ -230,7 +247,7 @@ public struct OfficeLayout: Hashable, Sendable {
     public var gardenFrame: MapRect {
         MapRect(28, Self.wallArtTop, max(160, clockCenter.x - 18 - 40 - 28), 74)
     }
-    public var doorPoint: MapPoint { MapPoint(doorX + 36, 182) }
+    public var doorPoint: MapPoint { MapPoint(doorX + Self.doorWidth / 2, 182) }
 
     public enum Zone: String, Hashable, Sendable, CaseIterable {
         case whiteboard, lounge, massageChair, pantry
@@ -245,7 +262,9 @@ public struct OfficeLayout: Hashable, Sendable {
         case .lounge:
             // 3인용 소파 둘에 세 자리씩, 소파 앞에서 들어가 앉습니다
             points = Self.sofas.flatMap { sofa in
-                [sofa.x + 28, sofa.x + 68, sofa.x + 108].map { x in (MapPoint(x, 214), MapPoint(x, 250)) as (MapPoint, MapPoint?) }
+                Self.sofaSeatOffsets.map { offset in
+                    (MapPoint(sofa.x + offset, Self.sofaSeatY), MapPoint(sofa.x + offset, Self.sofaApproachY)) as (MapPoint, MapPoint?)
+                }
             }
         case .massageChair:
             // 의자 앞에서 앉습니다
@@ -307,12 +326,20 @@ public struct OfficeLayout: Hashable, Sendable {
         var rects: [MapRect] = []
         for row in rows {
             for desk in 0..<row.desks {
-                rects.append(MapRect(Self.deskX(desk) - Self.deskWidth / 2, row.deskY - 33, Self.deskWidth, 38))
+                rects.append(Self.deskFootprint(x: Self.deskX(desk), y: row.deskY))
             }
         }
         rects += Self.sofas + Self.massageSeats.map(Self.massageChair)
         return rects
     }
+
+    /// 걸어서 지나갈 수 없는 책상 발자국: 상판 위 끝부터 앞판 아래 2pt까지. (x, y)는 앉은 직원의 발 위치입니다.
+    public static func deskFootprint(x: Double, y: Double) -> MapRect {
+        MapRect(x - deskWidth / 2, y + deskTop, deskWidth, deskBottom - deskTop + 2)
+    }
+
+    /// 길찾기 격자에서 가구 둘레에 더 두는 여유 (칸 가운데가 가구에서 이만큼 안이면 못 걷는 칸)
+    static let obstacleMargin = 4.0
 
     public var gridColumns: Int { Int((width / Self.tile).rounded(.up)) }
     public var gridRows: Int { Int((height / Self.tile).rounded(.up)) }
@@ -338,7 +365,7 @@ public struct OfficeLayout: Hashable, Sendable {
             for column in 0..<gridColumns {
                 let center = cellCenter(column: column, row: row)
                 let inside = center.x >= 8 && center.x <= width - 8 && center.y >= Self.walkTop && center.y <= height - 8
-                grid[row * gridColumns + column] = inside && !obstacles.contains { $0.insetBy(-4).contains(center) }
+                grid[row * gridColumns + column] = inside && !obstacles.contains { $0.insetBy(-Self.obstacleMargin).contains(center) }
             }
         }
         return grid

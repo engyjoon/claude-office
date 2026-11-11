@@ -30,6 +30,8 @@ public enum CharacterArt {
     // MARK: - 부위 위치
 
     public static let headOrigin = MapPoint(0, -62)
+    /// 머리 꼭대기 (발 위치 기준 y, 머리 모양에 따라 조금씩 다름). 머리 위 그림(`Overlay`)은 이 위에 놓입니다.
+    public static let crown = -85.0
     public static let leftShoulder = MapPoint(-14, -38)
     public static let rightShoulder = MapPoint(14, -38)
     public static let heldPropOrigin = MapPoint(0, -28)

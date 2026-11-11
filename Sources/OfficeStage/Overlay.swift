@@ -93,10 +93,10 @@ public struct OverlayItem: Hashable, Sendable, Identifiable {
 /// - 겹치면 옆으로 비켜 보고, 그래도 겹치면 위로 쌓습니다. 화면 가장자리에서는 안쪽으로 밀고 꼬리가 주인을 가리킵니다
 /// - 표시 수준이 "비공개"면 말풍선과 상태 칩 없이 아이콘과 표정만, "요약"이면 상태 칩을 툴 종류로 보여줍니다
 public enum Overlay {
-    /// 발 위치에서 머리 위 기준점까지 (머리 꼭대기 -85 바로 위)
-    public static let headTop = -90.0
+    /// 발 위치에서 머리 위 기준점까지 (머리 꼭대기 `CharacterArt.crown` 바로 위 5pt)
+    public static let headTop = CharacterArt.crown - 5
     /// 발 위치에서 배지 가운데까지 (머리 왼쪽 위, M6(4))
-    public static let badgeOffset = MapPoint(-25, -86)
+    public static let badgeOffset = MapPoint(-25, CharacterArt.crown - 1)
     /// 고른 직원 ▼ 크기 (M6(15)). 끝이 머리(칩) 위 2pt를 가리킵니다.
     public static let markerSize = MapPoint(18, 11)
     static let markerGap = 2.0

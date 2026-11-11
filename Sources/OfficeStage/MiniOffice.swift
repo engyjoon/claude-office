@@ -12,7 +12,7 @@ public enum MiniOffice {
     /// 보여 주는 지도 영역 위쪽 (첫 행 직원의 상태 칩이 들어가는 높이. 말풍선이 있던 때의 높이를 아직 그대로 둠)
     public static let top = OfficeLayout.firstDeskY - 140
     /// 보여 주는 지도 영역 아래쪽 (첫 행 띠의 아래 끝)
-    public static let bottom = OfficeLayout.firstDeskY + 40
+    public static let bottom = OfficeLayout.firstDeskY + OfficeLayout.rowBelow
     public static var sceneHeight: Double { bottom - top }
     /// 패널 위 머리줄 높이
     public static let headerHeight = 20.0
