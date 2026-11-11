@@ -94,9 +94,12 @@ final class SoundPlayer {
 
     private func startIfNeeded() -> Bool {
         if engine.isRunning { return true }
+        // 마지막 소리 2초 뒤 멈추므로, 조용하다가 처음 울리는 소리마다 메인 스레드에서 엔진을 다시 켭니다 (개선 10: 걸린 시간을 계측에 남김)
+        let started = Date()
         engine.prepare()
         do {
             try engine.start()
+            PerfProbe.shared?.measured("sound.start", ms: Date().timeIntervalSince(started) * 1000)
             return true
         } catch {
             return false  // 출력 장치가 없으면 조용히 넘어갑니다

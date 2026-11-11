@@ -29,6 +29,8 @@ final class PerfProbe {
     private var modelTicks = 0
     /// 진단용 카운터 (펄스 요청 수 등)
     private var counters: [String: Int] = [:]
+    /// 진단용 걸린 시간 (ms, 효과음 엔진 시작 등. 개선 10)
+    private var timings: [String: [Double]] = [:]
     private var applyLatencies: [Double] = []
     private var screenLatencies: [Double] = []
     private var pending: [Date] = []
@@ -42,7 +44,7 @@ final class PerfProbe {
         let logs = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Claude Office", isDirectory: true)
         try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         logURL = logs.appendingPathComponent("perf.log")
-        write("# 시작: pid \(ProcessInfo.processInfo.processIdentifier), 텍스처 배율 \(ShapeBaker.scale)")
+        write("# 시작: pid \(ProcessInfo.processInfo.processIdentifier), 텍스처 배율 \(ShapeBaker.scalesDescription)")
         let timer = Timer(timeInterval: Self.window, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.flush() }
         }
@@ -61,6 +63,11 @@ final class PerfProbe {
 
     func count(_ key: String) {
         counters[key, default: 0] += 1
+    }
+
+    /// 걸린 시간 하나 (ms). 10초 구간마다 백분위로 남깁니다.
+    func measured(_ key: String, ms: Double) {
+        timings[key, default: []].append(ms)
     }
 
     func modelTicked() {
@@ -110,7 +117,8 @@ final class PerfProbe {
         parts.append(String(format: "model %.1fHz", Double(modelTicks) / span))
         parts.append("hook→stage ms \(LatencySummary(applyLatencies))")
         parts.append("hook→screen ms \(LatencySummary(screenLatencies))" + (unseen > 0 ? " (안 보임 \(unseen))" : ""))
-        parts.append(String(format: "textures %d (%.1fMB) large %@", ShapeBaker.cachedCount, Double(ShapeBaker.cachedBytes) / 1_048_576,
+        for (key, values) in timings.sorted(by: { $0.key < $1.key }) { parts.append("\(key) ms \(LatencySummary(values))") }
+        parts.append(String(format: "textures %d (%.1fMB) scale %@ large %@", ShapeBaker.cachedCount, Double(ShapeBaker.cachedBytes) / 1_048_576, ShapeBaker.scalesDescription,
             ShapeBaker.largeBytes.map { "\($0.key)=\(String(format: "%.1f", Double($0.value) / 1_048_576))MB" }.sorted().joined(separator: ",")))
         if !counters.isEmpty { parts.append(counters.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")) }
         // 이 구간의 프로세스 CPU (모든 스레드, 코어 하나 = 100%). 훅이 없고 active가 없는 구간이 대기 값입니다.
@@ -121,6 +129,7 @@ final class PerfProbe {
 
         frames.removeAll()
         counters.removeAll()
+        timings.removeAll()
         paceTime.removeAll()
         modelTicks = 0
         applyLatencies.removeAll()
