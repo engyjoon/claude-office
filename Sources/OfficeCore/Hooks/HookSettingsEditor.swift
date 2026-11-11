@@ -12,18 +12,64 @@ public struct ClaudeVersion: Comparable, Hashable, Sendable, CustomStringConvert
         self.patch = patch
     }
 
-    /// "2.1.318 (Claude Code)" 같은 문자열에서 첫 번째 x.y.z를 찾습니다.
+    /// `claude --version` 출력("2.1.318 (Claude Code)")에서 버전을 읽습니다.
+    ///
+    /// 로그인 셸을 거치면 앞에 셸 설정이 찍은 배너(예: "nvm 0.39.7", "Welcome to zsh 5.9")가 섞일 수 있어서
+    /// 아무 x.y.z나 집지 않습니다: "Claude Code"가 든 줄을 먼저 보고, 없으면 버전으로 시작하는 마지막 줄만 받습니다.
     public init?(parsing text: String) {
-        guard let match = text.firstMatch(of: /(\d+)\.(\d+)\.(\d+)/),
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.split(whereSeparator: \.isWhitespace) }
+        let found: (Int, Int, Int)?
+        if let claudeLine = lines.last(where: { $0.joined(separator: " ").localizedCaseInsensitiveContains("Claude Code") }) {
+            found = claudeLine.lazy.compactMap(Self.version(token:)).first
+        } else {
+            found = lines.reversed().lazy.compactMap { $0.first.flatMap(Self.version(token:)) }.first
+        }
+        guard let found else { return nil }
+        self.init(found.0, found.1, found.2)
+    }
+
+    /// 낱말 하나가 통째로 x.y.z(앞에 v 허용)일 때만 버전으로 봅니다. "1.2.3.4"나 "5.9-dev"는 아닙니다.
+    private static func version(token: Substring) -> (Int, Int, Int)? {
+        let trimmed = token.trimmingCharacters(in: CharacterSet(charactersIn: "(),;:"))
+        guard let match = trimmed.wholeMatch(of: /v?(\d+)\.(\d+)\.(\d+)/),
             let major = Int(match.1), let minor = Int(match.2), let patch = Int(match.3)
         else { return nil }
-        self.init(major, minor, patch)
+        return (major, minor, patch)
     }
 
     public var description: String { "\(major).\(minor).\(patch)" }
 
     public static func < (lhs: ClaudeVersion, rhs: ClaudeVersion) -> Bool {
         (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
+    }
+}
+
+/// 훅이 등록돼 있어도 Claude Code가 실행하지 않게 만드는 설정
+public enum HookBlocker: Hashable, Sendable {
+    /// `disableAllHooks: true`. `managed`면 관리 설정(조직 정책)에 있음
+    case disableAllHooks(managed: Bool)
+    /// 관리 설정의 `allowManagedHooksOnly: true`
+    case managedHooksOnly
+
+    /// 연동 화면과 메뉴 배너에 보여 줄 문구
+    public var message: String {
+        switch self {
+        case .disableAllHooks(managed: false):
+            "~/.claude/settings.json에 \"disableAllHooks\": true가 있어 모든 훅이 꺼져 있어요. 이 줄을 지우거나 false로 바꾼 뒤 Claude Code 세션을 다시 시작해 주세요."
+        case .disableAllHooks(managed: true):
+            "조직의 관리 설정(managed-settings.json)에 \"disableAllHooks\": true가 있어 모든 훅이 꺼져 있어요. 관리자에게 문의해 주세요."
+        case .managedHooksOnly:
+            "조직의 관리 설정(managed-settings.json)에 \"allowManagedHooksOnly\": true가 있어 관리 설정의 훅만 실행돼요. Claude Office 훅은 실행되지 않으니 관리자에게 문의해 주세요."
+        }
+    }
+
+    /// 항목 표에 쓰는 짧은 값
+    public var shortValue: String {
+        switch self {
+        case .disableAllHooks(managed: false): "꺼짐 · settings.json의 disableAllHooks"
+        case .disableAllHooks(managed: true): "꺼짐 · 관리 설정의 disableAllHooks"
+        case .managedHooksOnly: "막힘 · 관리 설정의 allowManagedHooksOnly"
+        }
     }
 }
 
@@ -90,6 +136,22 @@ public enum HookSettingsEditor {
         hooks = result.hooks
         root["hooks"] = hooks.isEmpty ? nil : .object(hooks)
         return (.object(root), result.removed)
+    }
+
+    /// 버전으로 권하는 이벤트 중 등록되지 않은 것. 버전을 모르면 비교하지 않습니다(빈 배열).
+    public static func missingEvents(installed: [String], version: ClaudeVersion?) -> [String] {
+        guard version != nil else { return [] }
+        let have = Set(installed)
+        return recommendedEvents(for: version).filter { !have.contains($0) }
+    }
+
+    /// 설정 파일이 우리 훅을 막는 까닭. `managed`는 관리 설정(조직 정책) 파일인지입니다.
+    /// - `disableAllHooks: true`: 모든 훅이 꺼집니다(사용자·관리 설정 모두).
+    /// - `allowManagedHooksOnly: true`: 관리 설정에서만 의미가 있고, 사용자 설정의 훅(우리 훅)은 실행되지 않습니다.
+    public static func blocker(in settings: JSONValue, managed: Bool) -> HookBlocker? {
+        if settings["disableAllHooks"]?.boolValue == true { return .disableAllHooks(managed: managed) }
+        if managed, settings["allowManagedHooksOnly"]?.boolValue == true { return .managedHooksOnly }
+        return nil
     }
 
     public static func installedEvents(in settings: JSONValue, marker: String = defaultMarker) -> [String] {

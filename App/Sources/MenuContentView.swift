@@ -44,7 +44,10 @@ struct MenuContentView: View {
             footer
         }
         .frame(width: 340)
-        .onAppear { model.registerOpenWindow(openWindow) }
+        .onAppear {
+            model.registerOpenWindow(openWindow)
+            model.refreshHookStatus()  // 배너: Claude Code를 올렸거나 settings.json을 고쳤을 때
+        }
     }
 
     private var header: some View {
@@ -76,7 +79,14 @@ struct MenuContentView: View {
         case .settingsUnreadable(let reason):
             Banner(systemImage: "doc.badge.ellipsis", tint: .red, text: "~/.claude/settings.json을 읽을 수 없어요. \(reason)")
         case .installed:
-            EmptyView()
+            if let blocker = model.hookBlocker {
+                Banner(systemImage: "hand.raised.fill", tint: .red, text: blocker.message)
+            } else if !model.missingHookEvents.isEmpty, let version = model.claudeVersion {
+                Banner(systemImage: "arrow.triangle.2.circlepath", tint: .orange,
+                       text: "Claude Code \(version)에서 받을 수 있는 이벤트 \(model.missingHookEvents.count)개가 빠져 있어요.") {
+                    Button("다시 설치") { model.installHooks() }.disabled(model.isInstalling)
+                }
+            }
         }
     }
 

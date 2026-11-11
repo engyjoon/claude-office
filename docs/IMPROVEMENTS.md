@@ -10,7 +10,7 @@
 
 | # | 항목 | 추천 모델 (노력도) | 상태 | 결과 |
 |---|---|---|---|---|
-| 1 | 훅 버전 감지·연동 진단 | Opus 5.5 (medium) | 대기 | |
+| 1 | 훅 버전 감지·연동 진단 | Opus 5.5 (medium) | 완료(커밋) | 알려진 경로로 버전 감지, 빠진 이벤트·`disableAllHooks`·관리 설정 진단, 배너·연동 탭 표시. 화면 확인 필요 |
 | 2 | 질문·계획 승인 기록 닫기 | Sonnet 5.5 (medium) | 대기 | |
 | 3 | 비밀값 가림 순서·규칙 | Sonnet 5.5 (medium) | 대기 | |
 | 4 | 끝 이벤트 없는 턴·도구·세션 복구 | Fable 5.2 (high) | 대기 | |
@@ -50,7 +50,14 @@
 
 **완료 기준**: GUI 환경을 흉내 낸 테스트에서 버전을 찾고, 9종만 등록된 설정을 넣으면 다시 설치를 권합니다. 설치 자체(파일 쓰기)는 사용자가 앱에서 누릅니다.
 
-**결과**:
+**결과**: 완료 (2026-11-11). 문제 세 가지를 모두 재현으로 확인한 뒤 고쳤습니다.
+
+- **버전 감지**: `ClaudeVersionDetector`가 `~/.local/bin/claude` → `~/.claude/local/claude` → `/opt/homebrew/bin/claude` → `/usr/local/bin/claude` → PATH 순으로 직접 실행하고, 없을 때만 로그인 셸을 씁니다. `env -i … PATH=/usr/bin:/bin:/usr/sbin:/sbin ~/.local/bin/claude --version`이 `2.1.321 (Claude Code)`를 내는 것을 확인했습니다.
+- **버전 읽기**: `ClaudeVersion(parsing:)`은 "Claude Code"가 든 줄의 x.y.z(낱말 전체가 버전일 때만)를 받고, 표지가 없으면 버전으로 시작하는 마지막 줄만 받습니다. "nvm 0.39.7"·"zsh 5.9.0"·"node v20.11.1" 같은 배너를 집지 않습니다.
+- **빠진 이벤트**: `HookSettingsEditor.missingEvents(installed:version:)`과 `HookHealth.missingEvents`. 기본 9종만 있고 버전이 2.1.318 이상이면 "settings.json 등록"이 경고("5개 빠짐 (…)")가 되고 머리줄이 "다시 설치"를 권합니다. 버전을 모르면 따지지 않습니다. 메뉴 배너도 같은 경우 "다시 설치" 버튼을 보여 줍니다. 앱은 켤 때·메뉴를 열 때·연동 탭을 볼 때 버전을 확인하되 10분에 한 번만 다시 실행합니다(Claude Code 자동 업데이트를 잡으려고).
+- **막힌 훅**: `HookBlocker`(`disableAllHooks`는 사용자·관리 설정, `allowManagedHooksOnly`는 관리 설정만). `HookInstaller.blocker()`가 `~/.claude/settings.json`, `/Library/Application Support/ClaudeCode/managed-settings.json`, `managed-settings.d/*.json`을 읽을 수 있을 때만 읽습니다. 연동 탭 머리줄이 오류와 구체적인 문구, 항목에 "훅 실행"이 붙고, 메뉴에도 빨간 배너가 뜹니다. 두 키가 2.1.321 실행 파일에 있는 것은 확인했고, `managed-settings.d` 폴더는 Claude Code 문서를 따른 것입니다(이 맥에는 관리 설정이 없음).
+- 테스트: `HookSettingsEditorTests`(배너 섞인 버전 읽기, 빠진 이벤트, 막는 설정), `HookHealthTests`(GUI PATH를 흉내 낸 임시 홈의 가짜 `~/.local/bin/claude`를 셸 없이 찾음, 기본 9종 + 2.1.321 → 다시 설치 권함, 막힘 문구, 관리 설정 파일 읽기). `make test` 411개 통과, `make app` 빌드 성공.
+- **화면 확인 필요**: 이 맥에서 새로 빌드한 앱을 켜면 메뉴 배너("Claude Code 2.1.321에서 받을 수 있는 이벤트 5개가 빠져 있어요" + 다시 설치)와 연동 탭 경고가 보여야 합니다. 설치된 앱은 바꾸지 않았으므로 실제 "다시 설치"는 사용자가 새 앱을 설치한 뒤 누릅니다.
 
 ## 2. 질문·계획 승인 기록 닫기
 

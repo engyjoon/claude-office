@@ -79,6 +79,40 @@ struct HookSettingsEditorTests {
         #expect(HookSettingsEditor.recommendedEvents(for: ClaudeVersion(2, 1, 318)).contains("SubagentStart"))
         #expect(HookSettingsEditor.recommendedEvents(for: ClaudeVersion(3, 0, 0)).contains("PermissionRequest"))
     }
+
+    @Test("버전 읽기: 로그인 셸 배너의 다른 버전 문자열을 집지 않는다")
+    func versionIgnoresBanners() {
+        #expect(ClaudeVersion(parsing: "2.1.321 (Claude Code)\n") == ClaudeVersion(2, 1, 321))
+        #expect(ClaudeVersion(parsing: "nvm 0.39.7 loaded\nWelcome to zsh 5.9.0\n2.1.321 (Claude Code)") == ClaudeVersion(2, 1, 321))
+        #expect(ClaudeVersion(parsing: "Last login: Tue Nov 11 on ttys001\nPython 3.12.4\n2.1.321 (Claude Code)") == ClaudeVersion(2, 1, 321))
+        // "Claude Code" 표지가 없으면 버전으로 시작하는 마지막 줄만 받습니다
+        #expect(ClaudeVersion(parsing: "oh-my-zsh 1.2.3 update available\n2.1.400") == ClaudeVersion(2, 1, 400))
+        #expect(ClaudeVersion(parsing: "Welcome to zsh 5.9.0\nzsh: command not found: claude") == nil)
+        #expect(ClaudeVersion(parsing: "node v20.11.1 is installed") == nil)
+        #expect(ClaudeVersion(parsing: "1.2.3.4") == nil)
+    }
+
+    @Test("버전에 견줘 빠진 이벤트: 기본 9종만 있으면 확장 5종이 빠짐, 버전을 모르면 따지지 않음")
+    func missingEvents() {
+        let base = HookSettingsEditor.baseEvents
+        #expect(HookSettingsEditor.missingEvents(installed: base, version: ClaudeVersion(2, 1, 321)) == HookSettingsEditor.extendedEvents)
+        #expect(HookSettingsEditor.missingEvents(installed: base, version: ClaudeVersion(2, 1, 0)).isEmpty)
+        #expect(HookSettingsEditor.missingEvents(installed: base, version: nil).isEmpty)
+        let all = base + HookSettingsEditor.extendedEvents
+        #expect(HookSettingsEditor.missingEvents(installed: all.reversed(), version: ClaudeVersion(2, 1, 321)).isEmpty)
+    }
+
+    @Test("훅을 막는 설정: disableAllHooks, 관리 설정의 allowManagedHooksOnly")
+    func blockers() {
+        #expect(HookSettingsEditor.blocker(in: ["disableAllHooks": true], managed: false) == .disableAllHooks(managed: false))
+        #expect(HookSettingsEditor.blocker(in: ["disableAllHooks": false], managed: false) == nil)
+        #expect(HookSettingsEditor.blocker(in: ["disableAllHooks": true], managed: true) == .disableAllHooks(managed: true))
+        #expect(HookSettingsEditor.blocker(in: ["allowManagedHooksOnly": true], managed: true) == .managedHooksOnly)
+        // 사용자 설정의 allowManagedHooksOnly는 효과가 없으므로 경고하지 않습니다
+        #expect(HookSettingsEditor.blocker(in: ["allowManagedHooksOnly": true], managed: false) == nil)
+        #expect(HookSettingsEditor.blocker(in: ["model": "opus"], managed: true) == nil)
+        #expect(HookBlocker.disableAllHooks(managed: false).message.contains("disableAllHooks"))
+    }
 }
 
 @Suite("에이전트 정의 파일")

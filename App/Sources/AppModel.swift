@@ -43,6 +43,13 @@ final class AppModel {
     private(set) var lastHookAt: Date?
     /// 훅 스크립트 파일 상태 (있는지, 실행 가능한지, 앱과 같은 버전인지)
     private(set) var hookScript: HookScriptState = .missing
+    /// `claude --version`으로 알아낸 버전 (모르면 nil, 그땐 이벤트가 모자란지 따지지 않음)
+    private(set) var claudeVersion: ClaudeVersion?
+    /// 훅을 막는 설정 (`disableAllHooks`, 관리 설정의 `allowManagedHooksOnly`)
+    private(set) var hookBlocker: HookBlocker?
+    /// 마지막으로 버전을 확인한 때. Claude Code는 스스로 업데이트하므로 가끔 다시 봅니다.
+    private var versionCheckedAt: Date?
+    private var isCheckingVersion = false
     /// 테스트 이벤트를 보내는 중 (설정 → 연동)
     private(set) var isSendingTest = false
     /// 동작 줄이기 설정과 macOS 손쉬운 사용 값 (설계서 §10, M5(8))
@@ -821,6 +828,29 @@ final class AppModel {
     func refreshHookStatus() {
         hookStatus = installer.status()
         hookScript = installer.scriptState()
+        hookBlocker = installer.blocker()
+        checkClaudeVersion()
+    }
+
+    /// 이 Claude Code 버전에 권하는 이벤트 중 등록되지 않은 것 (메뉴 배너)
+    var missingHookEvents: [String] {
+        guard case .installed(let events) = hookStatus else { return [] }
+        return HookSettingsEditor.missingEvents(installed: events, version: claudeVersion)
+    }
+
+    /// `claude --version`을 백그라운드에서 실행합니다. 10분 안에 확인했으면 다시 하지 않습니다(`force`면 바로).
+    private func checkClaudeVersion(force: Bool = false, now: Date = Date()) {
+        guard !isCheckingVersion else { return }
+        if !force, let checked = versionCheckedAt, now.timeIntervalSince(checked) < 600 { return }
+        isCheckingVersion = true
+        Task.detached(priority: .utility) {
+            let version = ClaudeVersionDetector.detect()
+            await MainActor.run {
+                self.isCheckingVersion = false
+                self.versionCheckedAt = Date()
+                self.claudeVersion = version
+            }
+        }
     }
 
     /// 설정 → 연동의 훅 상태 (M5(8)). `now`가 바뀌면 "12초 전"도 바뀝니다.
@@ -833,7 +863,7 @@ final class AppModel {
         }
         return HookHealth.evaluate(
             .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
-                  eventCount: receivedHooks),
+                  eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker),
             now: now)
     }
 
@@ -845,7 +875,11 @@ final class AppModel {
         Task.detached(priority: .userInitiated) {
             let version = ClaudeVersionDetector.detect()
             let result = Result { try installer.install(version: version) }
-            await MainActor.run { self.finishInstall(result) }
+            await MainActor.run {
+                self.claudeVersion = version
+                self.versionCheckedAt = Date()
+                self.finishInstall(result)
+            }
         }
     }
 

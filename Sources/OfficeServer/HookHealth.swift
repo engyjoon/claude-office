@@ -38,8 +38,10 @@ public struct HookHealth: Hashable, Sendable {
     public let level: Level
     public let headline: String
     public let items: [Item]
-    /// 다시 설치를 권할지 (스크립트가 없거나 옛 버전, 실행 권한 없음)
+    /// 다시 설치를 권할지 (스크립트가 없거나 옛 버전, 실행 권한 없음, 이 버전에서 받을 수 있는 이벤트가 빠짐)
     public let suggestsReinstall: Bool
+    /// 이 Claude Code 버전에 권하는 이벤트 중 settings.json에 없는 것 (버전을 모르면 빈 배열)
+    public let missingEvents: [String]
 
     public struct Input: Hashable, Sendable {
         public var status: HookInstaller.Status
@@ -50,9 +52,15 @@ public struct HookHealth: Hashable, Sendable {
         public var serverError: String?
         public var lastEventAt: Date?
         public var eventCount: Int
+        /// `claude --version`으로 알아낸 버전. 모르면 nil이고, 이벤트가 모자란지 따지지 않습니다.
+        public var version: ClaudeVersion?
+        /// 훅을 막는 설정 (`disableAllHooks`, 관리 설정의 `allowManagedHooksOnly`)
+        public var blocker: HookBlocker?
 
         public init(status: HookInstaller.Status, script: HookScriptState, port: UInt16?, serverError: String? = nil,
-                    lastEventAt: Date?, eventCount: Int) {
+                    lastEventAt: Date?, eventCount: Int, version: ClaudeVersion? = nil, blocker: HookBlocker? = nil) {
+            self.version = version
+            self.blocker = blocker
             self.status = status
             self.script = script
             self.port = port
@@ -67,13 +75,21 @@ public struct HookHealth: Hashable, Sendable {
 
         // settings.json 등록
         let registered: Bool
+        var missing: [String] = []
         switch input.status {
         case .notInstalled:
             registered = false
             items.append(Item(label: "settings.json 등록", value: "안 됨", level: .idle))
         case .installed(let events), .scriptMissingOrOutdated(let events):
             registered = true
-            items.append(Item(label: "settings.json 등록", value: "됨 · 이벤트 \(events.count)개", level: .ok))
+            missing = HookSettingsEditor.missingEvents(installed: events, version: input.version)
+            if missing.isEmpty {
+                items.append(Item(label: "settings.json 등록", value: "됨 · 이벤트 \(events.count)개", level: .ok))
+            } else {
+                items.append(Item(label: "settings.json 등록",
+                                  value: "됨 · 이벤트 \(events.count)개, \(missing.count)개 빠짐 (\(missing.joined(separator: ", ")))",
+                                  level: .warning))
+            }
         case .settingsUnreadable(let reason):
             registered = false
             items.append(Item(label: "settings.json 등록", value: "읽을 수 없음 · \(reason)", level: .error))
@@ -103,7 +119,14 @@ public struct HookHealth: Hashable, Sendable {
         items.append(Item(label: "마지막 이벤트", value: last, level: input.lastEventAt == nil ? .idle : .ok))
         items.append(Item(label: "받은 이벤트", value: "\(input.eventCount)개 (앱을 켠 뒤)", level: input.eventCount > 0 ? .ok : .idle))
 
-        let suggestsReinstall = registered && input.script != .current
+        // Claude Code 버전과 훅을 막는 설정
+        items.append(Item(label: "Claude Code", value: input.version.map { "\($0)" } ?? "버전을 확인하지 못함", level: input.version == nil ? .idle : .ok))
+        if let blocker = input.blocker {
+            items.append(Item(label: "훅 실행", value: blocker.shortValue, level: .error))
+        }
+
+        let scriptNeedsFix = registered && input.script != .current
+        let suggestsReinstall = scriptNeedsFix || !missing.isEmpty
         let level: Level
         let headline: String
         if case .settingsUnreadable = input.status {
@@ -112,14 +135,20 @@ public struct HookHealth: Hashable, Sendable {
         } else if input.port == nil {
             level = .error
             headline = "서버가 멈춰 있어요. \"서버 다시 시작\"을 눌러 주세요."
+        } else if let blocker = input.blocker {
+            level = .error
+            headline = blocker.message
         } else if !registered {
             level = .idle
             headline = input.script == .missing
                 ? "훅이 설치되지 않았어요. \"훅 설치\"를 누르면 Claude Code 세션이 사무실에 나타나요."
                 : "settings.json에 훅이 없어요. \"훅 설치\"로 다시 등록해 주세요."
-        } else if suggestsReinstall {
+        } else if scriptNeedsFix {
             level = .warning
             headline = "훅 스크립트를 고쳐야 해요. \"다시 설치\"를 눌러 주세요."
+        } else if !missing.isEmpty {
+            level = .warning
+            headline = "Claude Code \(input.version.map { "\($0)" } ?? "")에서 받을 수 있는 이벤트 \(missing.count)개가 등록되지 않았어요. \"다시 설치\"를 눌러 주세요."
         } else if input.lastEventAt == nil {
             level = .ok
             headline = "설치됨 · 아직 받은 이벤트가 없어요. 이미 실행 중인 Claude Code 세션은 다시 시작해야 이벤트가 와요."
@@ -127,6 +156,7 @@ public struct HookHealth: Hashable, Sendable {
             level = .ok
             headline = "정상 작동 중 · 마지막 이벤트 \(last)"
         }
-        return HookHealth(level: level, headline: headline, items: items, suggestsReinstall: suggestsReinstall)
+        return HookHealth(level: level, headline: headline, items: items, suggestsReinstall: suggestsReinstall,
+                          missingEvents: missing)
     }
 }

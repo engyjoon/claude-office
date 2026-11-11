@@ -50,9 +50,15 @@ public struct HookInstaller: Sendable {
     }
 
     public var home: URL
+    /// 관리 설정(조직 정책) 폴더. macOS에서 Claude Code는 여기의 `managed-settings.json`과
+    /// `managed-settings.d/*.json`을 읽습니다. 읽을 수 없으면 확인하지 않습니다.
+    public var managedDirectory: URL
 
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    public static let defaultManagedDirectory = URL(fileURLWithPath: "/Library/Application Support/ClaudeCode")
+
+    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, managedDirectory: URL = defaultManagedDirectory) {
         self.home = home
+        self.managedDirectory = managedDirectory
     }
 
     public var scriptURL: URL { home.appendingPathComponent(".claude/hooks/claude-office.sh") }
@@ -82,6 +88,28 @@ public struct HookInstaller: Sendable {
         guard !events.isEmpty else { return .notInstalled }
         let current = try? String(contentsOf: scriptURL, encoding: .utf8)
         return current == Self.bundledScript ? .installed(events: events) : .scriptMissingOrOutdated(events: events)
+    }
+
+    /// 훅이 등록돼 있어도 실행되지 않게 막는 설정. 사용자 설정을 먼저, 그다음 관리 설정을 봅니다.
+    /// 읽을 수 없거나 깨진 파일은 건너뜁니다(사용자 설정이 깨진 경우는 `status()`가 알립니다).
+    public func blocker() -> HookBlocker? {
+        if let settings = try? readSettings(), let found = HookSettingsEditor.blocker(in: settings, managed: false) {
+            return found
+        }
+        let fileManager = FileManager.default
+        var files = [managedDirectory.appendingPathComponent("managed-settings.json")]
+        let dropIns = managedDirectory.appendingPathComponent("managed-settings.d")
+        if let names = try? fileManager.contentsOfDirectory(atPath: dropIns.path) {
+            files += names.filter { $0.hasSuffix(".json") && !$0.hasPrefix(".") }.sorted().map { dropIns.appendingPathComponent($0) }
+        }
+        for file in files {
+            guard fileManager.isReadableFile(atPath: file.path), let data = try? Data(contentsOf: file),
+                let settings = try? JSONValue.parse(data),
+                let found = HookSettingsEditor.blocker(in: settings, managed: true)
+            else { continue }
+            return found
+        }
+        return nil
     }
 
     /// 스크립트를 쓰고, settings.json을 백업한 뒤 훅을 병합합니다. 여러 번 해도 결과가 같습니다.
@@ -144,11 +172,38 @@ public struct HookInstaller: Sendable {
     }
 }
 
-/// `claude --version`을 로그인 셸로 실행해 버전을 알아냅니다.
-/// macOS 앱은 터미널과 PATH가 달라서 셸을 거쳐야 `~/.local/bin/claude` 같은 위치를 찾습니다.
+/// `claude --version`을 실행해 버전을 알아냅니다.
+///
+/// Finder·로그인 항목으로 켠 앱은 PATH가 `/usr/bin:/bin:/usr/sbin:/sbin`뿐이고, 로그인 zsh도 `~/.zshrc`를 읽지 않아
+/// `~/.local/bin/claude`를 못 찾습니다. 그래서 알려진 설치 위치와 PATH를 먼저 직접 실행하고, 그래도 없으면 로그인 셸을 씁니다.
 public enum ClaudeVersionDetector {
-    public static func detect(timeout: TimeInterval = 5) -> ClaudeVersion? {
-        let shells = [ProcessInfo.processInfo.environment["SHELL"], "/bin/zsh", "/bin/bash"].compactMap { $0 }
+    /// 직접 실행해 볼 위치: 기본 설치기(`~/.local/bin`), 예전 로컬 설치(`~/.claude/local`), Homebrew, npm 전역, 그다음 PATH
+    public static func candidates(home: URL, environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        var paths = [
+            home.appendingPathComponent(".local/bin/claude").path,
+            home.appendingPathComponent(".claude/local/claude").path,
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+        ]
+        for directory in (environment["PATH"] ?? "").split(separator: ":") where !directory.isEmpty {
+            paths.append(URL(fileURLWithPath: String(directory)).appendingPathComponent("claude").path)
+        }
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
+    }
+
+    public static func detect(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        shells: [String]? = nil,
+        timeout: TimeInterval = 5
+    ) -> ClaudeVersion? {
+        for path in candidates(home: home, environment: environment) where FileManager.default.isExecutableFile(atPath: path) {
+            if let output = run(path, ["--version"], timeout: timeout), let version = ClaudeVersion(parsing: output) {
+                return version
+            }
+        }
+        let shells = shells ?? [environment["SHELL"], "/bin/zsh", "/bin/bash"].compactMap { $0 }
         for shell in shells where FileManager.default.isExecutableFile(atPath: shell) {
             if let output = run(shell, ["-lc", "claude --version"], timeout: timeout), let version = ClaudeVersion(parsing: output) {
                 return version
