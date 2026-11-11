@@ -127,7 +127,7 @@ struct OfficeWindowView: View {
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, model.selectedAgent != nil,
-                      event.window?.title == OfficeWindowView.title else { return event }
+                      OfficeWindow.owns(event.window) else { return event }
                 model.select(nil)
                 return nil
             }

@@ -14,6 +14,9 @@ public struct OfficeEngine: Sendable {
     /// 언제 macOS 알림을 띄우고 지울지 (설계서 §10 알림, M5(3))
     public private(set) var notices = NotificationPlanner()
     private var pendingNotices: [NoticeAction] = []
+    /// `tick`이 상태를 바꾼 횟수 (출근 중 → 쉬는 중, 정리 중 시간 초과, 오래 조용한 턴·서브 닫기). 연출 지시가 없어도 올라갑니다.
+    /// 앱은 tick 뒤에 이 값이 달라졌을 때만 명단·현황 줄·알림을 다시 맞춥니다 (개선 11: 화면 주기마다 다시 만들지 않게).
+    public private(set) var tickChanges = 0
 
     public init(
         privacy: PrivacyLevel = .detailed, config: ChoreographyConfig = .init(), book: DialogueBook = .korean,
@@ -74,8 +77,9 @@ public struct OfficeEngine: Sendable {
     public mutating func tick(at now: Date) -> [Directive] {
         // 끝 신호 없이 오래 "정리 중"인 세션을 풀고 (M6(2)), 출근 중을 넘기고, 아주 오래 조용한 턴·서브를 닫습니다 (개선 4)
         var out: [Directive] = []
-        state.settleArrivals(at: now)
+        let settled = state.settleArrivals(at: now)
         let beats = state.expireCompaction(at: now) + state.expireSilence(at: now)
+        if settled || !beats.isEmpty { tickChanges += 1 }
         if !beats.isEmpty {
             journal.record(beats, in: state, at: now)
             pendingNotices += notices.plan(beats, state: state, privacy: privacy)

@@ -411,11 +411,15 @@ public struct OfficeState: Sendable {
     }
 
     /// `arrivalGrace`가 지난 "출근 중"을 쉬는 중(세션)·생각 중(서브)으로 넘깁니다 (앱이 화면 주기마다 부름).
-    /// 연출은 출근할 때 이미 그 모습이라 비트는 없고, 쉰 시간은 출근한 때부터 셉니다.
-    public mutating func settleArrivals(at now: Date, after grace: TimeInterval = arrivalGrace) {
+    /// 연출은 출근할 때 이미 그 모습이라 비트는 없고, 쉰 시간은 출근한 때부터 셉니다. 넘긴 사람이 있으면 true.
+    @discardableResult
+    public mutating func settleArrivals(at now: Date, after grace: TimeInterval = arrivalGrace) -> Bool {
+        var settled = false
         for (id, agent) in agents where agent.activity == .arriving && now.timeIntervalSince(agent.activitySince) >= grace {
             agents[id]!.activity = agent.role == .lead ? .idle : .thinking
+            settled = true
         }
+        return settled
     }
 
     /// `silenceLimit` 동안 훅이 없는 바쁜 세션의 턴을 닫고, 그만큼 조용한 서브를 퇴근시킵니다 (앱이 화면 주기마다 부름).

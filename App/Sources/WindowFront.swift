@@ -45,11 +45,36 @@ enum WindowFront {
     }
 }
 
-/// 사무실 창 (`Window(OfficeWindowView.title, id: WindowID.office)`)
+/// 사무실 창 (`Window(OfficeWindowView.title, id: WindowID.office)`). SwiftUI 창은 객체를 직접 받을 수 없어 제목으로 찾고,
+/// 찾는 곳은 여기 하나입니다 (개선 11).
+@MainActor
 enum OfficeWindow {
+    /// 이 창이 사무실 창인지
+    static func owns(_ window: NSWindow?) -> Bool {
+        window?.title == OfficeWindowView.title
+    }
+
+    /// 조건에 맞는 사무실 창 (앱이 아직 준비되지 않았으면 nil)
+    static func first(where condition: (NSWindow) -> Bool = { _ in true }) -> NSWindow? {
+        NSApp?.windows.first { owns($0) && condition($0) }
+    }
+
     /// 떠 있든 최소화돼 있든 닫힌 뒤 남아 있든, 사무실 창 객체
-    @MainActor static var window: NSWindow? {
-        NSApp.windows.first { $0.title == OfficeWindowView.title }
+    static var window: NSWindow? { first() }
+
+    /// 떠 있음 (최소화·닫힘이 아님)
+    static var isOpen: Bool {
+        first { $0.isVisible && !$0.isMiniaturized } != nil
+    }
+
+    /// 떠 있거나 Dock에 최소화돼 있음 (닫지 않음)
+    static var isOpenOrMinimized: Bool {
+        first { $0.isVisible || $0.isMiniaturized } != nil
+    }
+
+    /// 떠 있는 사무실 창을 닫습니다
+    static func close() {
+        first { $0.isVisible }?.close()
     }
 }
 

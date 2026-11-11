@@ -248,10 +248,11 @@ final class AppModel {
         let token = HookRequestPolicy.makeToken()
         let directory = desktopSessions
         let server = HookServer(token: token) { [weak self] delivery in
-            // 정보 파일은 전달 큐(백그라운드)에서 읽고, 메인 액터에는 결과만 넘깁니다
+            // 정보 파일 읽기와 훅 본문 파싱은 전달 큐(백그라운드)에서 한 번만 하고, 메인 액터에는 결과만 넘깁니다 (개선 11)
             let hint = delivery.hostSession.flatMap { directory.hint(forHostSession: $0) }
+            let hook = ParsedHook(delivery, hint: hint)
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.receive(delivery, hint: hint) }
+                MainActor.assumeIsolated { self?.receive(hook) }
             }
         }
         do {
@@ -350,6 +351,13 @@ final class AppModel {
         if abs(interval - tickInterval) > 1e-6 { scheduleTicks(interval: interval) }
     }
 
+    /// 지금부터 `seconds` 동안은 30fps로 그립니다 (등장·퇴장 페이드, 고른 사람 고리, 조명 크로스페이드). 이미 더 길게 잡혀 있으면
+    /// 줄이지 않습니다. `repace`면 다음 tick을 기다리지 않고 바로 장면 빈도를 맞춥니다.
+    private func keepLively(for seconds: TimeInterval = RenderPacer.settleTime, from now: Date = Date(), repace: Bool = true) {
+        settleUntil = max(settleUntil, now.addingTimeInterval(seconds))
+        if repace { updatePacing(now: now) }
+    }
+
     private var anySceneVisible: Bool {
         officeScene.isVisibleOnScreen || miniScene.isVisibleOnScreen
     }
@@ -367,9 +375,18 @@ final class AppModel {
         tickAccumulator += dt
         if tickAccumulator >= 0.25 - 1e-3 {
             tickAccumulator = 0
-            record(engine.tick(at: now))
+            let changes = engine.tickChanges
+            let directives = engine.tick(at: now)
+            if engine.tickChanges != changes {
+                // tick이 상태를 바꿈 (출근 중 → 쉬는 중, 정리 중 시간 초과, 오래 조용한 턴 닫기): 목록·현황 줄·알림까지 바로 맞춥니다.
+                // 예전에는 다음 훅이나 5초마다 도는 데스크톱 세션 확인 때에야 보였습니다 (개선 11).
+                commit(directives, at: now)
+            } else {
+                // 연출만 흘러감 (쉬러 가기, 긴 명령 ⏳ 등): 상태는 그대로라 목록·현황 줄을 다시 만들지 않습니다 (설계서 §8.3)
+                record(directives)
+                refreshMiniFocus(now: now)
+            }
             refreshLighting(now: now)
-            refreshMiniFocus(now: now)
             syncMiniPanel()
             // 30초 넘게 안 보이는 장면은 가구 텍스처를 놓습니다 (닫힌 사무실 창이 미니만 보일 때 메모리를 잡고 있지 않게)
             officeScene.releaseFurnitureIfHidden(for: 30, now: now)
@@ -398,29 +415,78 @@ final class AppModel {
         }
     }
 
-    private func receive(_ delivery: HookDelivery, hint: SessionHint?) {
+    /// 전달 큐에서 미리 읽어 둔 훅 하나: 파싱한 이벤트(모르는 이벤트면 nil)와 로그 한 줄, 읽지 못했으면 그 오류
+    struct ParsedHook: Sendable {
+        let delivery: HookDelivery
+        let event: OfficeEvent?
+        let summary: String
+        let error: String?
+
+        init(_ delivery: HookDelivery, hint: SessionHint?) {
+            self.delivery = delivery
+            do {
+                let payload = try JSONValue.parse(delivery.body)
+                var event = HookParser.parse(payload, term: delivery.term, receivedAt: delivery.receivedAt)
+                event?.hint = hint
+                self.event = event
+                summary = Self.summary(of: payload, delivery: delivery, hint: hint)
+                error = nil
+            } catch {
+                event = nil
+                summary = "훅"
+                self.error = "\(error)"
+            }
+        }
+
+        private static func summary(of payload: JSONValue, delivery: HookDelivery, hint: SessionHint?) -> String {
+            var parts = [payload["hook_event_name"]?.stringValue ?? "?"]
+            if let tool = payload["tool_name"]?.stringValue { parts.append(tool) }
+            if let type = payload["agent_type"]?.stringValue, !type.isEmpty { parts.append("[\(type)]") }
+            if let cwd = payload["cwd"]?.stringValue { parts.append("· \((cwd as NSString).lastPathComponent)") }
+            if let term = delivery.term { parts.append("· \(term)") }
+            if let hint {
+                parts.append(hint.ancestors.isEmpty ? "· 데스크톱 메인" : "· 데스크톱 하위(\(hint.ancestors.count)단계)")
+            } else if delivery.hostSession != nil {
+                parts.append("· 데스크톱 정보 없음")
+            }
+            return parts.joined(separator: " ")
+        }
+    }
+
+    private func receive(_ hook: ParsedHook) {
+        let delivery = hook.delivery
         receivedHooks += 1
         lastHookAt = delivery.receivedAt
-        do {
-            var directives: [Directive] = []
-            if var event = try HookParser.parse(delivery.body, term: delivery.term, receivedAt: delivery.receivedAt) {
-                event.hint = hint
-                if let testSessionID, event.session.raw == testSessionID { testHooksArrived += 1 }
-                var ended = false
-                if case .sessionEnded = event.kind { ended = true }
-                sessionProcesses.note(session: event.session, process: delivery.process, app: delivery.app,
-                                      desktop: delivery.hostSession != nil, ended: ended)
-                directives = engine.handle(event)
-            }
-            append(.hook, Self.summary(of: delivery, hint: hint))
-            record(directives)
-            PerfProbe.shared?.hookApplied(receivedAt: delivery.receivedAt, anyVisible: anySceneVisible)
-            notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
-        } catch {
+        if let error = hook.error {
             append(.system, "읽을 수 없는 훅을 받았어요: \(error)")
+            commit([], at: delivery.receivedAt)
+            return
         }
+        var directives: [Directive] = []
+        if let event = hook.event {
+            if let testSessionID, event.session.raw == testSessionID { testHooksArrived += 1 }
+            var ended = false
+            if case .sessionEnded = event.kind { ended = true }
+            sessionProcesses.note(session: event.session, process: delivery.process, app: delivery.app,
+                                  desktop: delivery.hostSession != nil, ended: ended)
+            directives = engine.handle(event)
+        }
+        append(.hook, hook.summary)
+        commit(directives, at: delivery.receivedAt) {
+            PerfProbe.shared?.hookApplied(receivedAt: delivery.receivedAt, anyVisible: self.anySceneVisible)
+        }
+    }
+
+    /// 엔진이 바뀐 뒤 할 일을 한 곳에서 합니다 (개선 11). 훅·프로세스 확인·데스크톱 세션 맞추기·응답 확인·tick이 모두 이것을 부릅니다:
+    /// 지시를 무대에 넘기고(로그) → 알림 → 직원 목록 → 미니 초점 → 고른 사람 정리 → 현황 줄.
+    /// 목록·초점·현황 줄은 값이 달라졌을 때만 화면에 알리므로(`!=` 비교) 여러 번 불러도 SwiftUI는 바뀐 것만 다시 그립니다.
+    /// - Parameter staged: 지시를 무대에 넘긴 바로 뒤에 부를 것 (훅 → 무대 지연 측정)
+    private func commit(_ directives: [Directive], at now: Date, staged: (() -> Void)? = nil) {
+        record(directives)
+        staged?()
+        notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
         updateRoster()
-        refreshMiniFocus(now: delivery.receivedAt)
+        refreshMiniFocus(now: now)
         // 고른 직원이 퇴근하면 카드를 닫습니다
         if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
         refreshStatusLine()
@@ -438,8 +504,7 @@ final class AppModel {
         if let id { acknowledge(id) }
         refreshStatusLine()
         // 발밑 고리를 바로 그립니다 (잠잠함 3fps를 기다리지 않음, 키보드로 고를 때 늦어 보이지 않게)
-        settleUntil = max(settleUntil, Date().addingTimeInterval(RenderPacer.settleTime))
-        updatePacing()
+        keepLively()
     }
 
     /// 목록을 다시 만들고, 바뀌었으면 장면의 VoiceOver 요소와 알림을 맞춥니다 (M6(7))
@@ -479,17 +544,16 @@ final class AppModel {
         systemIncreaseContrast = on
         officeScene.setHighContrast(on)
         miniScene.setHighContrast(on)
-        settleUntil = max(settleUntil, Date().addingTimeInterval(RenderPacer.settleTime))
+        keepLively(repace: false)
     }
 
     /// 캐릭터를 눌렀으면 그 세션의 응답을 본 것으로 칩니다 (M6(4): ✉ 확인 안 함 배지를 내림. "?" 답변 필요는 답할 때까지 그대로)
     private func acknowledge(_ id: AgentID) {
         guard let agent = engine.state.agents[id], agent.cue == .unread else { return }
-        let directives = engine.acknowledge(agent.session, at: Date())
+        let now = Date()
+        let directives = engine.acknowledge(agent.session, at: now)
         guard !directives.isEmpty else { return }
-        record(directives)
-        updateRoster()
-        refreshMiniFocus()
+        commit(directives, at: now)
     }
 
     /// 현황 줄과 인스펙터 타임라인을 다시 만듭니다 (훅을 받았을 때, 고른 사람·디렉토리·표시 수준이 바뀌었을 때)
@@ -512,8 +576,7 @@ final class AppModel {
         stageStore.floor.apply(directives, engine: engine)
         miniStore.floor.apply(directives, engine: engine)
         // 받은 지시를 바로 30fps로 그립니다 (다음 tick을 기다리지 않음, 훅 → 화면 지연)
-        settleUntil = Date().addingTimeInterval(RenderPacer.settleTime)
-        updatePacing()
+        keepLively()
         updateHidden()
         for directive in directives {
             append(.directive, directive.description)
@@ -571,11 +634,7 @@ final class AppModel {
             append(.system, "\(name): Claude Code 프로세스가 끝나 퇴근했어요")
             record(engine.handle(event))
         }
-        notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
-        updateRoster()
-        refreshMiniFocus(now: now)
-        if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
-        refreshStatusLine()
+        commit([], at: now)
     }
 
     /// 데스크톱 앱에 열려 있는 세션을 사무실에 맞춥니다 (M5(5)): 새로 앉는 사람은 쉬는 중으로 조용히, 닫힌 세션은 퇴근.
@@ -588,12 +647,7 @@ final class AppModel {
         let arrived = after.subtracting(before).count, left = before.subtracting(after).count
         if arrived > 0 { append(.system, "데스크톱 앱에 열려 있는 세션 \(arrived)개를 쉬는 중으로 앉혔어요") }
         if left > 0 { append(.system, "데스크톱 앱에서 닫은 세션 \(left)명이 퇴근했어요") }
-        record(directives)
-        notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
-        updateRoster()
-        refreshMiniFocus(now: now)
-        if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
-        refreshStatusLine()
+        commit(directives, at: now)
     }
 
     /// 패널 "세션" 목록에 보여 줄 것 (고른 디렉토리의 메인과 그 서브만)
@@ -690,7 +744,7 @@ final class AppModel {
         let destination = SessionDestination.resolve(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term,
                                                      app: target.session.flatMap { sessionProcesses.app(for: $0) })
         focus(destination, name: name, via: "알림 열기")
-        if let id = target.agent, roster.row(for: id) != nil, isOfficeWindowOpen {
+        if let id = target.agent, roster.row(for: id) != nil, OfficeWindow.isOpen {
             if visibleRoster.row(for: id) == nil { selectAllFolders() }  // 다른 디렉토리를 보고 있었으면 모두로
             select(id)
         }
@@ -779,7 +833,7 @@ final class AppModel {
     /// 미니 사무실은 켜져 있고 사무실 창이 닫혀 있을 때만 보입니다 (사무실 창을 닫으면 다시 나타남).
     /// 최소화는 그냥 최소화입니다 (화면 확인: 최소화 버튼으로는 미니가 나타나지 않기를 원함).
     private func syncMiniPanel() {
-        let wanted = miniSettings.enabled && !isOfficeWindowOpenOrMinimized && Date() >= miniHiddenUntil
+        let wanted = miniSettings.enabled && !OfficeWindow.isOpenOrMinimized && Date() >= miniHiddenUntil
         guard let miniPanel, wanted != miniPanel.isShown else { return }
         wanted ? miniPanel.show() : miniPanel.hide()
     }
@@ -788,7 +842,7 @@ final class AppModel {
     func switchToMini() {
         miniHiddenUntil = .distantPast
         if !miniSettings.enabled { setMiniEnabled(true) }
-        NSApp?.windows.first { $0.title == OfficeWindowView.title && $0.isVisible }?.close()
+        OfficeWindow.close()
         syncMiniPanel()
     }
 
@@ -843,17 +897,6 @@ final class AppModel {
         }
     }
 
-    /// 사무실 창이 떠 있거나 Dock에 최소화돼 있음 (닫지 않음)
-    private var isOfficeWindowOpenOrMinimized: Bool {
-        guard let app = NSApp else { return false }
-        return app.windows.contains { $0.title == OfficeWindowView.title && ($0.isVisible || $0.isMiniaturized) }
-    }
-
-    private var isOfficeWindowOpen: Bool {
-        guard let app = NSApp else { return false }
-        return app.windows.contains { $0.title == OfficeWindowView.title && $0.isVisible && !$0.isMiniaturized }
-    }
-
     // MARK: - 설정
 
     func setSoundSettings(_ settings: SoundSettings) {
@@ -900,8 +943,7 @@ final class AppModel {
         officeScene.setLighting(lighting)
         miniScene.setLighting(lighting)
         // 크로스페이드 동안 30fps로 그립니다
-        settleUntil = max(settleUntil, now.addingTimeInterval(OfficeScene.lightingFade + 0.1))
-        updatePacing(now: now)
+        keepLively(for: OfficeScene.lightingFade + 0.1, from: now)
     }
 
     /// 지금 동작을 줄이는지 (설정과 macOS 손쉬운 사용 값으로 정함)
@@ -1099,20 +1141,5 @@ final class AppModel {
         if log.count > Self.maxLogEntries {
             log.removeFirst(log.count - Self.maxLogEntries)
         }
-    }
-
-    private static func summary(of delivery: HookDelivery, hint: SessionHint?) -> String {
-        guard let payload = try? JSONValue.parse(delivery.body) else { return "훅" }
-        var parts = [payload["hook_event_name"]?.stringValue ?? "?"]
-        if let tool = payload["tool_name"]?.stringValue { parts.append(tool) }
-        if let type = payload["agent_type"]?.stringValue, !type.isEmpty { parts.append("[\(type)]") }
-        if let cwd = payload["cwd"]?.stringValue { parts.append("· \((cwd as NSString).lastPathComponent)") }
-        if let term = delivery.term { parts.append("· \(term)") }
-        if let hint {
-            parts.append(hint.ancestors.isEmpty ? "· 데스크톱 메인" : "· 데스크톱 하위(\(hint.ancestors.count)단계)")
-        } else if delivery.hostSession != nil {
-            parts.append("· 데스크톱 정보 없음")
-        }
-        return parts.joined(separator: " ")
     }
 }

@@ -575,6 +575,33 @@ struct ImplicitEndTests {
         #expect(state.agents.values.first { $0.role == .member }?.activity == .thinking)
     }
 
+    @Test("tick이 상태를 바꿀 때만 tickChanges가 오른다: 연출만 흘러갈 때(쉬러 가기)는 그대로 (앱이 목록·현황 줄을 다시 만들지 정함)")
+    func tickChangesOnlyWhenStateChanges() {
+        var h = EngineHarness()
+        h.advance(to: 1)
+        #expect(h.engine.tickChanges == 0)
+        h.send(hook.make("SessionStart"), at: 1)
+        h.advance(to: 1 + OfficeState.arrivalGrace - 0.5)
+        #expect(h.engine.tickChanges == 0)
+        #expect(h.engine.state.lead(of: session)?.activity == .arriving)
+        // 출근 중 → 쉬는 중: 지시는 없지만 상태가 바뀜
+        h.advance(to: 1 + OfficeState.arrivalGrace + 0.5)
+        #expect(h.engine.state.lead(of: session)?.activity == .idle)
+        #expect(h.engine.tickChanges == 1)
+        // 1분 뒤 소파로 쉬러 감: 연출 지시는 나오지만 상태는 그대로
+        let before = h.log.count
+        h.advance(to: 200)
+        #expect(h.log.count > before)
+        #expect(h.engine.tickChanges == 1)
+        // 훅으로 바뀐 것은 세지 않음 (앱이 훅마다 맞춤)
+        h.send(hook.make("UserPromptSubmit", ["prompt": "해 줘"]), at: 201)
+        #expect(h.engine.tickChanges == 1)
+        // 1시간 침묵으로 턴을 닫음
+        h.advance(to: 201 + OfficeState.silenceLimit + 1)
+        #expect(h.engine.state.lead(of: session)?.isResting == true)
+        #expect(h.engine.tickChanges == 2)
+    }
+
     @Test("아주 오래 조용한 서브는 퇴근한다 (SubagentStop을 못 받은 백그라운드 서브). 승인을 기다리는 세션은 그대로")
     func silentMemberLeaves() {
         var state = OfficeState()
