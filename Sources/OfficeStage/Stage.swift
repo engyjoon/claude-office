@@ -154,6 +154,9 @@ public struct Stage: Sendable {
     public private(set) var time: Double = 0
     /// 행 끝 "+N": 화면에 다 못 보여 줘서 숨긴 사람 수 (`OfficeFloor`가 정함)
     public private(set) var hiddenCounts: [TeamID: Int] = [:]
+    /// 행 표지에 덧붙일 메인 세션 제목 (개선 8). 같은 폴더의 행이 둘 이상 보일 때 그 행들만, 제목을 알 때만 (`OfficeFloor`가 정함).
+    /// 표시 수준이 "상세"가 아니면 렌더러가 쓰지 않습니다.
+    public private(set) var signTitles: [TeamID: String] = [:]
     /// 실제 책상 대신 앉힐 책상 (미니 사무실: 고른 서브를 1·2번 칸에, `OfficeFloor`가 정함)
     public private(set) var seatMap: [AgentID: Seat] = [:]
     /// 지금 그리는 효과
@@ -468,7 +471,8 @@ public struct Stage: Sendable {
     }
 
     /// 보여 줄 행 (위에서부터)과 행마다 숨긴 사람 수. 빠진 행은 남은 직원이 나간 뒤 닫습니다.
-    public mutating func setTeams(_ teams: [Team], hidden: [TeamID: Int]) {
+    public mutating func setTeams(_ teams: [Team], hidden: [TeamID: Int], titles: [TeamID: String] = [:]) {
+        signTitles = titles
         for team in teams where self.teams[team.id] == nil || closingTeams.contains(team.id) {
             performGlobal(.openTeam(team))
         }

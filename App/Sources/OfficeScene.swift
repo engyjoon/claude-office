@@ -570,6 +570,8 @@ final class OfficeScene: SKScene {
         var layout: OfficeLayout
         var teams: [Team]
         var nameplates: [TeamID: [Seat: String]]
+        /// 행 표지의 세션 제목 (개선 8, 표시 수준 "상세"일 때만)
+        var signTitles: [TeamID: String]
         var lighting: Lighting
         var contrast: Bool
     }
@@ -598,7 +600,8 @@ final class OfficeScene: SKScene {
         // 배경 크기는 4pt 단위로만 다시 그립니다 (창을 끄는 동안 매 프레임 다시 그리지 않도록)
         let key = FurnitureKey(
             fit: [extent.x, extent.width, extent.height].map { Int(($0 / 4).rounded()) }, layout: stage.layout, teams: teams,
-            nameplates: stage.nameplates, lighting: store.lighting, contrast: store.highContrast)
+            nameplates: stage.nameplates, signTitles: store.privacy == .detailed ? stage.signTitles : [:], lighting: store.lighting,
+            contrast: store.highContrast)
         guard key != furnitureKey else { return }
         furnitureKey = key
 
@@ -606,7 +609,7 @@ final class OfficeScene: SKScene {
         let height = stage.layout.height
         let layers = OfficeArt.layers(
             layout: stage.layout, teams: teams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
-            lighting: store.lighting, contrast: store.highContrast)
+            lighting: store.lighting, contrast: store.highContrast, signTitles: key.signTitles)
 
         // 가구는 비트맵으로 구워 둡니다 (M6(1)). 깊이가 같은 층(한 행의 책상들, 의자들, 바닥·벽·표지)은 한 장으로 합칩니다:
         // 깊이가 같으면 SpriteKit도 넣은 순서대로 그리므로 순서가 같고, 그릴 노드 수가 줄어 매 프레임 순회 비용이 줄어듭니다.

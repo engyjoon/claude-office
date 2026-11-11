@@ -423,7 +423,10 @@ public struct Choreographer: Sendable {
             resolveWaiting(member.id, into: &out)
             setPill(member.id, nil, into: &out)
             out.append(Directive(member.id, .prop(nil)))
-            if let lead, presences[lead.id] != nil {
+            // 메인이 승인을 기다리거나(외침·"!"), 쉬거나(소파·안마 의자·잠, Zz·♪), 대화를 정리하는 중이면 메인 쪽 연출(하이파이브·"고마워요"·
+            // 반짝이)을 하지 않습니다 (개선 8: 그 연출이 메인의 아이콘·표정을 덮어 "!"·Zz가 사라졌음). 그때는 서브도 메인에게 가지 않고
+            // 신호·`await`~`awaitEnd` 짝도 만들지 않아 메인의 대기열이 막히지 않습니다. 서브는 제자리에서 뿌듯해하고 퇴근합니다.
+            if let lead, let leadPresence = presences[lead.id], !leadPresence.waiting, leadPresence.rest == .none, !leadPresence.compacting {
                 let cue = "report:\(member.id.raw)"
                 move(member.id, to: .beside(lead.id), into: &out)
                 out.append(Directive(member.id, .signal(cue)))
@@ -446,6 +449,10 @@ public struct Choreographer: Sendable {
                 out.append(Directive(lead.id, .awaitEnd(cue)))
                 setEmote(lead.id, nil, into: &out)
                 out.append(Directive(lead.id, .express(.neutral)))
+            } else if let lead, presences[lead.id] != nil {
+                out.append(Directive(member.id, .express(.proud)))
+                out.append(Directive(member.id, .sound(.memberReport)))
+                out.append(Directive(member.id, .wait(1.2)))
             }
             // 가끔 탕비 코너에서 물 한 잔 마시고 퇴근합니다 (출입문 옆이라 크게 돌아가지 않음)
             if chance(member.id, "leave", percent: config.pantryOnLeavePercent), reservePantry(member.id, at: now) {

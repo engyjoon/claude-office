@@ -327,7 +327,7 @@ extension SKView {
     }
 }
 
-/// 메뉴바 아이콘 (설계서 §10, M5(3)): 작은 건물 + 상태 점(초록: 작업 중, 노랑: 승인 대기, 회색: 쉬는 중).
+/// 메뉴바 아이콘 (설계서 §10, M5(3)): 작은 건물 + 상태 점(초록: 작업 중, 노랑: 승인 대기, 파랑: 답변 필요만 남음(개선 8), 회색: 쉬는 중).
 /// 아무도 없으면 점 없이 빈 건물. 승인 대기가 있으면 옆에 그 수를 숫자로.
 /// 연동이 고장 나면(개선 6) 오른쪽 위에 느낌표 표시(빨강: 서버·설정 고장, 주황: 설치·업데이트 필요)를 달고 VoiceOver도 먼저 읽습니다.
 struct MenuBarLabel: View {
@@ -378,7 +378,8 @@ enum MenuBarIcon {
             let appearance = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua])
             let isDark = appearance.map { $0 == .darkAqua } ?? dark
             let ink = isDark ? NSColor.white : NSColor.black
-            let symbolName = mood == .idle || mood == .empty ? "building.2" : "building.2.fill"
+            // 아무도 일하지 않으면(쉬는 중·답변 필요만 남음) 빈 건물
+            let symbolName = mood == .idle || mood == .empty || mood == .reply ? "building.2" : "building.2.fill"
             let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
                 .applying(.init(paletteColors: [ink.withAlphaComponent(mood == .empty ? 0.55 : 0.9)]))
             if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
@@ -419,6 +420,8 @@ enum MenuBarIcon {
         switch mood {
         case .working: NSColor.systemGreen
         case .attention: NSColor.systemYellow
+        // 사무실 머리 위 "?" 배지와 같은 파랑
+        case .reply: OverlayArt.replyBlue.skColor
         case .idle: NSColor.systemGray
         case .empty: nil
         }
@@ -428,6 +431,7 @@ enum MenuBarIcon {
         switch mood {
         case .working: "Claude Office · 작업 중"
         case .attention: "Claude Office · 승인 대기"
+        case .reply: "Claude Office · 답변 필요"
         case .idle: "Claude Office · 쉬는 중"
         case .empty: "Claude Office"
         }

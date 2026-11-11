@@ -22,6 +22,18 @@ struct RosterTests {
         #expect(Roster.make(from: idle, privacy: .detailed).mood == .idle)
     }
 
+    @Test("개선 8: 일하는 사람 없이 답변 필요만 남으면 reply (작업 중이 아님). 승인 대기 > 작업 중 > 답변 필요 > 쉬는 중")
+    func replyMood() {
+        typealias A = AccessibilityTextTests
+        #expect(A.roster([A.row("a", status: .awaitingReply, detail: nil)]).mood == .reply)
+        #expect(A.roster([A.row("a", status: .awaitingReply, detail: nil), A.row("b", status: .idle), A.row("c", status: .unread)]).mood == .reply)
+        #expect(A.roster([A.row("a", status: .awaitingReply, detail: nil), A.row("b", status: .editing)]).mood == .working)
+        #expect(A.roster([A.row("a", status: .awaitingReply, detail: nil), A.row("b", status: .waitingForPermission)]).mood == .attention)
+        #expect(A.roster([A.row("a", status: .unread), A.row("b", status: .idle)]).mood == .idle)
+        // VoiceOver 문구도 "답변 필요"로 읽습니다 (메뉴바 점의 파랑과 같은 뜻)
+        #expect(AccessibilityText.menuBar(A.roster([A.row("a", status: .awaitingReply, detail: nil)])) == "Claude Office, 답변 필요 1명")
+    }
+
     @Test("메인이 먼저, 서브는 책상 순서. 상태와 대상이 보인다")
     func rows() throws {
         let s = state([

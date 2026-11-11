@@ -140,6 +140,8 @@ public struct Roster: Hashable, Sendable {
         /// 모두 쉬는 중
         case idle
         case working
+        /// 일하는 사람 없이 "답변 필요"가 남음 (개선 8). 메뉴바 점을 사무실의 "?" 배지와 같은 파랑으로 칠합니다.
+        case reply
         /// 승인 대기가 있음
         case attention
     }
@@ -154,7 +156,9 @@ public struct Roster: Hashable, Sendable {
         if !waiting.isEmpty { return .attention }
         let rows = teams.flatMap(\.rows)
         if rows.isEmpty { return .empty }
-        return rows.contains { $0.status.tone != .calm } ? .working : .idle
+        // 승인 대기 > 작업 중 > 답변 필요 > 쉬는 중. "답변 필요"(톤 .reply)는 일하는 것이 아니라 내 답을 기다리는 것입니다.
+        if rows.contains(where: { $0.status.tone != .calm && $0.status.tone != .reply }) { return .working }
+        return rows.contains { $0.status.tone == .reply } ? .reply : .idle
     }
 
     public static let empty = Roster(teams: [], waiting: [])

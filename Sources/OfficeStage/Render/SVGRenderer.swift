@@ -29,7 +29,7 @@ public enum SVGRenderer {
         var body = ""
         let layers = OfficeArt.layers(
             layout: layout, teams: stage.sortedTeams, nameplates: stage.nameplates, extent: extent, lounge: !stage.config.commonAreasAtDesk,
-            lighting: lighting)
+            lighting: lighting, signTitles: (overlay?.privacy ?? .detailed) == .detailed ? stage.signTitles : [:])
             + OfficeArt.liveLayers(stage: stage, lighting: lighting)
 
         // 맨 뒤 층: 바탕(바닥·러그) → 책상 불빛 → 나머지 (앱도 같은 순서)

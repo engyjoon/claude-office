@@ -103,6 +103,12 @@ public enum Overlay {
     static let gap = 3.0
     static let pillHeight = 17.0
     static let maxPillCharacters = 28
+    /// 마우스를 올리거나 고른 사람의 칩 (말풍선의 마우스 올림과 같은 한도, 개선 8)
+    static let expandedPillCharacters = 60
+    /// 칩 글자 앞뒤 여백 (툴 종류 점 17 + 뒤 9)
+    static let pillPadding = 26.0
+    /// 옆 사람과 너무 붙어 있어도 칩은 이만큼은 둡니다 (점 + 글자 서너 자). 그래도 겹치면 위로 쌓습니다.
+    static let minPillWidth = 56.0
     /// 같은 공용 구역(화이트보드·탕비 코너 …)에서 이만큼 넘게 칩이 뜨면 하나로 묶습니다 ("화이트보드 · 3명 계획 정리 중")
     public static let pillGroupThreshold = 3
 
@@ -135,19 +141,38 @@ public enum Overlay {
                     id: "pill:zone:\(group.zone.rawValue)", kind: .pill, agent: nil, origin: MapPoint(frame.x, frame.y),
                     shapes: OverlayArt.pill(text: text, width: width, category: group.category, lighting: options.lighting, contrast: options.highContrast), frame: frame, text: text))
             }
+            // 칩은 제 머리 위 자기 몫의 가로 자리(옆 사람까지 거리의 절반)에 맞춰 자르고(말줄임), 겹치면 옆으로 밀지 않고 위로 쌓습니다 (개선 8).
+            // 마우스를 올리거나 고른 사람의 칩만 전체를 보여 주고, 맨 나중에 다른 칩 위에 덮어 그립니다.
+            let expanded = Set([options.hovered, options.selected].compactMap { $0 })
+            var expandedPills: [(StageActor, StatusPill)] = []
             for actor in actors where !grouped.contains(actor.id) {
                 guard let pill = actor.pill else { continue }
+                if expanded.contains(actor.id) {
+                    expandedPills.append((actor, pill))
+                    continue
+                }
                 let label = options.privacy == .summary ? pill.summary : pill.text
-                let text = truncate(label, maxPillCharacters)
-                let width = TextMetrics.width(text, size: 9.5) + 26
-                let anchor = actor.position + MapPoint(0, headTop)
-                var frame = MapRect(anchor.x - width / 2, anchor.y - pillHeight, width, pillHeight)
-                frame = place(frame, avoiding: placed, in: area)
+                let room = pillRoom(for: actor, among: stage.sortedActors, in: area)
+                let (text, width) = fitPill(truncate(label, maxPillCharacters), maxWidth: room.left + room.right)
+                var frame = MapRect(actor.position.x - width / 2, actor.position.y + headTop - pillHeight, width, pillHeight)
+                // 한쪽 자리가 좁으면 넓은 쪽으로 옮겨 자기 몫 안에 둡니다 (머리는 늘 칩 아래에 남음)
+                frame.x = min(max(frame.x, actor.position.x - room.left), actor.position.x + room.right - width)
+                frame = place(frame, avoiding: placed, in: area, sideways: false)
                 placed.append(frame)
                 pillTops[actor.id] = frame.y
-                let origin = MapPoint(frame.x, frame.y)
                 items.append(OverlayItem(
-                    id: "pill:\(actor.id.raw)", kind: .pill, agent: actor.id, origin: origin,
+                    id: "pill:\(actor.id.raw)", kind: .pill, agent: actor.id, origin: MapPoint(frame.x, frame.y),
+                    shapes: OverlayArt.pill(text: text, width: width, category: pill.category, lighting: options.lighting, contrast: options.highContrast), frame: frame, text: text))
+            }
+            for (actor, pill) in expandedPills {
+                let label = options.privacy == .summary ? pill.summary : pill.text
+                let (text, width) = fitPill(truncate(label, expandedPillCharacters), maxWidth: area.width)
+                // 다른 칩을 피하지 않고 제 머리 위에 덮습니다 (옆 사람 칩을 밀어 올리지 않게). 말풍선은 이 칩을 피합니다.
+                let frame = clamp(MapRect(actor.position.x - width / 2, actor.position.y + headTop - pillHeight, width, pillHeight), in: area)
+                placed.append(frame)
+                pillTops[actor.id] = frame.y
+                items.append(OverlayItem(
+                    id: "pill:\(actor.id.raw)", kind: .pill, agent: actor.id, origin: MapPoint(frame.x, frame.y),
                     shapes: OverlayArt.pill(text: text, width: width, category: pill.category, lighting: options.lighting, contrast: options.highContrast), frame: frame, text: text))
             }
         }
@@ -198,7 +223,7 @@ public enum Overlay {
                 let local = MapRect(frame.x - tip.x, frame.y - tip.y, frame.width, frame.height)
                 items.append(OverlayItem(
                     id: "bubble:\(actor.id.raw)", kind: .bubble, agent: actor.id, origin: tip, scale: scale, opacity: 0.4 + 0.6 * t,
-                    shapes: OverlayArt.bubble(bubble.kind, text: text, frame: local), frame: frame, text: text))
+                    shapes: OverlayArt.bubble(bubble.kind, text: text, frame: local, lighting: options.lighting), frame: frame, text: text))
             }
         }
 
@@ -214,7 +239,7 @@ public enum Overlay {
             items.append(OverlayItem(
                 id: "emote:\(actor.id.raw)", kind: .emote, agent: actor.id,
                 origin: actor.position + side + MapPoint(0, bounce), scale: 0.4 + 0.6 * appear, opacity: appear,
-                shapes: OverlayArt.emote(emote)))
+                shapes: OverlayArt.emote(emote, lighting: options.lighting)))
         }
 
         // 4) 배지 (M6(4)): 머리 왼쪽 위에 가만히. 오른쪽 위는 Zz·♪ 자리라 겹치지 않고, 계속 움직이지 않아 쉬는 장면의
@@ -242,7 +267,7 @@ public enum Overlay {
                 let t = 1 - pow(1 - progress, 2)
                 let point = quad(from, control, to, t)
                 let ahead = quad(from, control, to, min(t + 0.02, 1)) - quad(from, control, to, max(t - 0.02, 0))
-                let angle = atan2(ahead.y, ahead.x)
+                let angle = OverlayArt.snappedPlaneAngle(atan2(ahead.y, ahead.x))
                 items.append(OverlayItem(
                     id: "fx:\(effect.id)", kind: .effect, origin: point, opacity: progress > 0.85 ? (1 - progress) / 0.15 : 1,
                     shapes: OverlayArt.paperPlane(angle: angle)))
@@ -311,8 +336,36 @@ public enum Overlay {
         return String(text.prefix(limit - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    /// 겹치지 않는 자리를 찾습니다: 화면 안으로 밀고 → 옆으로 비켜 보고 → 위로 쌓습니다.
-    static func place(_ rect: MapRect, avoiding placed: [MapRect], in area: MapRect) -> MapRect {
+    /// 상태 칩이 쓸 가로 자리: 머리 가운데에서 왼쪽·오른쪽으로 (개선 8).
+    /// 칩 높이에서 겹칠 수 있는 사람(머리 높이 차이가 칩 높이 + 간격 안)과의 거리 절반까지가 제 몫입니다.
+    /// 칩이 없는 사람도 셉니다: 그 사람의 Zz·♪·배지 자리를 덮지 않고, 옆 칩이 생기거나 없어져도 폭이 흔들리지 않게.
+    /// 책상 간격 92면 한쪽 44.5(칩 89), 메인과 첫 서브 사이(110)는 53.5. 옆 사람이 없는 쪽은 화면 끝까지입니다.
+    static func pillRoom(for actor: StageActor, among others: [StageActor], in area: MapRect) -> (left: Double, right: Double) {
+        let x = actor.position.x
+        var left = x - area.x, right = area.maxX - x
+        for other in others where other.id != actor.id && abs(other.position.y - actor.position.y) < pillHeight + gap {
+            let dx = other.position.x - x
+            if dx > 0.5 {
+                right = min(right, dx / 2 - gap / 2)
+            } else if dx < -0.5 {
+                left = min(left, -dx / 2 - gap / 2)
+            }
+        }
+        return (max(left, 0), max(right, 0))
+    }
+
+    /// 칩 글자를 폭에 맞춰 줄입니다 (말줄임). 돌려주는 폭은 여백을 더한 칩 전체 폭입니다.
+    static func fitPill(_ label: String, maxWidth: Double) -> (text: String, width: Double) {
+        let size = 9.5
+        let (text, textWidth) = OfficeArt.fitted(label, size: size, maxWidth: max(maxWidth, minPillWidth) - pillPadding) {
+            TextMetrics.width($0, size: size)
+        }
+        return (text, textWidth + pillPadding)
+    }
+
+    /// 겹치지 않는 자리를 찾습니다: 화면 안으로 밀고 → 옆으로 비켜 보고(`sideways`) → 위로 쌓습니다.
+    /// 상태 칩은 옆으로 비키지 않습니다: 옆으로 밀린 칩은 옆 사람 머리 위에 놓여 주인이 헷갈립니다 (개선 8).
+    static func place(_ rect: MapRect, avoiding placed: [MapRect], in area: MapRect, sideways: Bool = true) -> MapRect {
         var frame = clamp(rect, in: area)
         func hits(_ r: MapRect) -> [MapRect] { placed.filter { $0.intersects(r, gap: gap) } }
         let blockers = hits(frame)
@@ -325,7 +378,7 @@ public enum Overlay {
             shifts.append(blocker.maxX + gap - frame.x)
             shifts.append(blocker.x - gap - frame.maxX)
         }
-        for shift in shifts.sorted(by: { abs($0) < abs($1) }) where abs(shift) <= limit {
+        for shift in shifts.sorted(by: { abs($0) < abs($1) }) where sideways && abs(shift) <= limit {
             var moved = frame
             moved.x += shift
             if moved.x >= area.x, moved.maxX <= area.maxX, hits(moved).isEmpty { return moved }
@@ -401,16 +454,20 @@ extension MapRect {
 
 /// 글자 폭 어림 (Apple SD Gothic Neo 실측 비율). 말풍선 크기를 렌더러와 무관하게 정하려고 씁니다.
 public enum TextMetrics {
+    /// 글자를 먼저 합치고(NFC: 맥 파일 이름의 풀어 쓴 한글 "ㅎ+ㅏ+ㄴ" → "한"), 화면에 한 글자로 보이는 묶음(grapheme)마다
+    /// 첫 글자의 폭만 셉니다. 그래서 합치지 못한 옛 한글 자모, 이모지의 ZWJ 잇기·변형 선택자·피부색, 국기 두 글자가 한 글자 폭이 됩니다 (개선 8).
     public static func width(_ text: String, size: Double, bold: Bool = false) -> Double {
         var em = 0.0
-        for scalar in text.unicodeScalars {
-            em += advance(scalar)
+        for character in text.precomposedStringWithCanonicalMapping {
+            guard let first = character.unicodeScalars.first else { continue }
+            em += advance(first)
         }
         return em * size * (bold ? 1.05 : 1)
     }
 
     static func advance(_ scalar: Unicode.Scalar) -> Double {
         switch scalar.value {
+        case 0x200B...0x200F, 0x2060, 0xFE00...0xFE0F, 0xFEFF: 0  // 홀로 남은 폭 없는 글자 (ZWJ·변형 선택자 등)
         case 0xAC00...0xD7A3, 0x1100...0x11FF, 0x3130...0x318F, 0x3000...0x30FF, 0x4E00...0x9FFF, 0xFF00...0xFFEF, 0x2026: 0.87
         case 0x20, 0x21, 0x27, 0x2C, 0x2E, 0x3A, 0x3B, 0x7C, 0x69, 0x6A, 0x6C: 0.26
         case 0xB7: 0.31
@@ -455,8 +512,8 @@ public enum OverlayArt {
         }
     }
 
-    /// 말풍선. `frame`은 꼬리 끝(원점) 기준 상자입니다.
-    public static func bubble(_ kind: BubbleKind, text: String, frame f: MapRect) -> [ArtShape] {
+    /// 말풍선. `frame`은 꼬리 끝(원점) 기준 상자입니다. 밤이면 외침 풍선 바깥의 터지는 선을 밝게 칠합니다 (개선 8).
+    public static func bubble(_ kind: BubbleKind, text: String, frame f: MapRect, lighting: Lighting = .day) -> [ArtShape] {
         let style = BubbleStyle(kind)
         let tip = MapPoint(0, 0)
         let label = ArtShape.text(
@@ -494,7 +551,7 @@ public enum OverlayArt {
                 + "M\(n(f.maxX + 6)),\(n(f.y + 8)) l7,0 M\(n(f.x - 6)),\(n(f.y + 8)) l-7,0"
             return [
                 ArtShape(.path(tailRect(f, radius: style.radius, tip: tip)), fill: .swatch(.butter), stroke: .swatch(.ink), lineWidth: 2.4),
-                .line(burst, width: 1.8),
+                .line(burst, width: 1.8, color: strokeInk(lighting)),
                 // 왼쪽 위 "!" 원은 없앰 (M5(9) 화면 확인: 머리 위 "!" 아이콘과 겹쳐 두 번 보임)
                 label,
             ]
@@ -582,8 +639,16 @@ public enum OverlayArt {
         }
     }
 
-    /// 머리 위 아이콘 (원점: 아이콘 가운데)
-    public static func emote(_ emote: Emote) -> [ArtShape] {
+    /// 밤에 잉크색만 쓰던 선·글자(♪·Zz·전구 빛줄기·외침 선)를 칠할 색 (개선 8). 밤 벽(#3E4468)·바닥(#5B4F63) 위에서 잉크(#3A3247)는
+    /// 대비가 1.3~1.6:1이라 묻혔습니다. 고른 직원 테(`CharacterArt.nightOutlineEdge`)와 같은 따뜻한 흰색으로 칠해 7:1 안팎이 됩니다.
+    /// 색을 채운 도형(전구 알, "!" 원, 땀방울, 반짝이)은 잉크 테두리 그대로 둡니다 (채운 색이 밝아 이미 보임).
+    public static func strokeInk(_ lighting: Lighting) -> Paint {
+        lighting == .night ? .color(CharacterArt.nightOutlineEdge) : .swatch(.ink)
+    }
+
+    /// 머리 위 아이콘 (원점: 아이콘 가운데). 밤이면 잉크색 선·글자를 밝게 칠합니다 (`strokeInk`, 개선 8).
+    public static func emote(_ emote: Emote, lighting: Lighting = .day) -> [ArtShape] {
+        let line = strokeInk(lighting)
         switch emote {
         case .exclamation:
             return [.circle(0, 0, 8.5, fill: .swatch(.alert)), .text("!", 0, 0, size: 13, bold: true, color: .swatch(.white), baseline: .central)]
@@ -591,7 +656,7 @@ public enum OverlayArt {
             return [.circle(0, 0, 8.5, fill: .swatch(.lavender)), .text("?", 0, 0, size: 13, bold: true, color: .swatch(.ink), baseline: .central)]
         case .bulb:
             return [
-                .line("M-12,-4 l-4,-2 M12,-4 l4,-2 M0,-15 l0,-4 M-9,-12 l-3,-3 M9,-12 l3,-3", width: 1.6),
+                .line("M-12,-4 l-4,-2 M12,-4 l4,-2 M0,-15 l0,-4 M-9,-12 l-3,-3 M9,-12 l3,-3", width: 1.6, color: line),
                 .circle(0, -3, 8, fill: .swatch(.butter)),
                 .rect(-4, 5, 8, 5, r: 1.5, fill: .swatch(.metal)),
             ]
@@ -604,13 +669,13 @@ public enum OverlayArt {
             ]
         case .zzz:
             return [
-                .text("z", -2, 4, size: 13, bold: true, color: .swatch(.ink)),
-                .text("Z", 8, -6, size: 16, bold: true, color: .swatch(.ink)),
+                .text("z", -2, 4, size: 13, bold: true, color: line),
+                .text("Z", 8, -6, size: 16, bold: true, color: line),
             ]
         case .note:
             return [
-                .ellipse(-2.5, 4, 4.2, 3.2, fill: .swatch(.ink)),
-                .line("M1.4,3.5 L1.4,-11 Q6,-9 7.5,-4", width: 2),
+                .ellipse(-2.5, 4, 4.2, 3.2, fill: line),
+                .line("M1.4,3.5 L1.4,-11 Q6,-9 7.5,-4", width: 2, color: line),
             ]
         case .hourglass:
             // 모래시계 ⏳: 위 모래가 줄고 아래 모래가 쌓인 모습
@@ -629,8 +694,11 @@ public enum OverlayArt {
     /// 답변 필요 = 파란 말풍선에 흰 "?" (승인 대기 "!"의 주황 원과 색·모양이 다름),
     /// 확인 안 함 = 흰 원 안 편지 ✉ + 파란 점 (데스크톱 앱 사이드바의 안 읽음 점과 같은 뜻).
     /// 대비 증가(M6(7))면 "?" 풍선에 테두리(낮 잉크, 밤 흰색)를 두르고 ✉ 원 테두리를 굵게 합니다.
+    /// 답변 필요 파랑 ("?" 배지, 메뉴바의 답변 필요 점도 같은 색, 개선 8)
+    public static let replyBlue = ArtColor(0x5B8DEF)
+
     public static func badge(_ cue: SessionCue, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
-        let blue = Paint.color(ArtColor(0x5B8DEF))
+        let blue = Paint.color(replyBlue)
         switch cue {
         case .reply:
             var shapes: [ArtShape] = []
@@ -673,7 +741,17 @@ public enum OverlayArt {
         ]
     }
 
-    /// 종이비행기 (원점: 비행기 가운데, `angle` 방향으로 날아감)
+    /// 종이비행기 기울기 단위 (15°). 회전을 좌표에 구워 넣으므로 각도가 조금만 달라도 새 그림이 됩니다.
+    /// 이 단위로 맞추면 한 바퀴에 그림이 24가지뿐이라, 앱의 굽기 캐시(`ShapeBaker`, 도형이 키)가 날아갈 때마다 같은 텍스처를 다시 씁니다 (개선 8).
+    public static let planeAngleStep = Double.pi / 12
+
+    /// 날아가는 방향을 15° 단위로 맞춥니다 (−0은 0으로)
+    public static func snappedPlaneAngle(_ angle: Double) -> Double {
+        let snapped = (angle / planeAngleStep).rounded() * planeAngleStep
+        return snapped == 0 ? 0 : snapped
+    }
+
+    /// 종이비행기 (원점: 비행기 가운데, `angle` 방향으로 날아감). 무대는 `snappedPlaneAngle`로 맞춘 각도를 넘깁니다.
     public static func paperPlane(angle: Double) -> [ArtShape] {
         let c = cos(angle), s = sin(angle)
         let rotate: (MapPoint) -> MapPoint = { MapPoint($0.x * c - $0.y * s, $0.x * s + $0.y * c) }

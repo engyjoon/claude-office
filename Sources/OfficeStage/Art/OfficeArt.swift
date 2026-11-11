@@ -13,9 +13,10 @@ public enum OfficeArt {
     ///   - lighting: 밤이면 벽·바닥·가구를 밤 팔레트로 칠하고, 창밖을 밤하늘로, 휴게 공간에 스탠드를 켭니다 (M6(6)).
     ///     사람 있는 책상의 불빛은 자리에 따라 바뀌므로 따로 `deskLight(at:)`로 그립니다.
     ///   - contrast: 시스템 "대비 증가" (M6(7)). 명패·행 표지·"+N" 테두리를 굵게 합니다.
+    ///   - signTitles: 행 표지 둘째 줄에 덧붙일 세션 제목 (개선 8, `Stage.signTitles`). 표시 수준이 "상세"일 때만 넘깁니다.
     public static func layers(
         layout: OfficeLayout, teams: [Team], nameplates: [TeamID: [Seat: String]] = [:], extent: MapRect? = nil, lounge: Bool = true,
-        lighting: Lighting = .day, contrast: Bool = false
+        lighting: Lighting = .day, contrast: Bool = false, signTitles: [TeamID: String] = [:]
     ) -> [ArtLayer] {
         var layers = [ArtLayer("background", depth: -.infinity, background(layout: layout, teams: teams, extent: extent, lounge: lounge))]
         var signs: [ArtLayer] = []
@@ -25,7 +26,9 @@ public enum OfficeArt {
             if let team {
                 signs.append(ArtLayer(
                     "row-sign-\(row.team.raw)", depth: -.infinity,
-                    sign(team.name, at: MapPoint(OfficeLayout.deskX(0), row.deskY), color: team.colorIndex, lighting: lighting, contrast: contrast)))
+                    sign(
+                        team.name, title: signTitles[team.id], at: MapPoint(OfficeLayout.deskX(0), row.deskY), color: team.colorIndex,
+                        lighting: lighting, contrast: contrast)))
             }
         }
         if lounge { layers += self.lounge() }
@@ -352,6 +355,8 @@ public enum OfficeArt {
         if full <= maxWidth { return (text, full) }
         var cut = text
         while !cut.isEmpty, measure(cut + "…") > maxWidth { cut.removeLast() }
+        // "파일 …"처럼 말줄임 앞에 빈칸이 남지 않게 (개선 8)
+        while cut.last?.isWhitespace == true { cut.removeLast() }
         let result = cut + "…"
         return (result, measure(result))
     }
@@ -412,15 +417,30 @@ public enum OfficeArt {
     /// 행 표지 글자 앞 여백 (폴더 아이콘 자리)과 뒤 여백
     static let signTextInset = 20.0
     static let signTrailing = 10.0
+    /// 세션 제목 줄 (개선 8): 9pt 보통 글자, 표지 높이 20 → 30
+    static let signTitleFontSize = 9.0
+    static let signTitleHeight = 30.0
+    static let signTitleMiddle = 21.0
+    /// 세션 제목 글자 최대 폭. 제목 줄이 메인 책상과 그 옆 틈 안에 들어가 첫 서브 책상 앞까지 뻗지 않게 합니다
+    /// (책상 간격 110 − 틈 4 − 여백 30 = 76, 한글 약 9자).
+    static let signTitleMaxWidth = OfficeLayout.deskSpacing + OfficeLayout.mainGap - 4 - signTextInset - signTrailing
 
     /// 행 표지 (메인 책상 바로 아래, M6(8) 행 색 칩): 행 색 바탕 + 폴더 아이콘 + 굵은 폴더 이름.
     /// 행 러그와 같은 색이라 어느 줄의 폴더인지 이어 보이고, 모서리를 6으로 줄여 상태 칩(알약)과 모양을 달리합니다.
     /// 밤에도 행 색은 낮 색 그대로 두고(명패처럼 밝게), 테두리·글자만 밤 잉크로 칠합니다. 이미 조명을 맞춘 색이므로 `lit`을 거치지 않습니다.
-    static func sign(_ label: String, at desk: MapPoint, color: Int, lighting: Lighting = .day, contrast: Bool = false) -> [ArtShape] {
+    ///
+    /// 같은 폴더의 행이 둘 이상 보이면 `title`(메인 세션 제목)을 폴더 이름 아래 둘째 줄에 작게 덧붙입니다 (개선 8).
+    /// 제목 줄은 `signTitleMaxWidth`까지 줄이고(말줄임), 폴더 이름 줄의 폭 규칙은 그대로입니다.
+    static func sign(
+        _ label: String, title: String? = nil, at desk: MapPoint, color: Int, lighting: Lighting = .day, contrast: Bool = false
+    ) -> [ArtShape] {
         let (text, textWidth) = fitted(label, size: signFontSize, maxWidth: signMaxTextWidth) {
             TextMetrics.width($0, size: signFontSize, bold: true)
         }
-        let width = textWidth + signTextInset + signTrailing
+        let subtitle = title.map { title in
+            fitted(title, size: signTitleFontSize, maxWidth: signTitleMaxWidth) { TextMetrics.width($0, size: signTitleFontSize) }
+        }
+        let width = max(textWidth, subtitle?.1 ?? 0) + signTextInset + signTrailing
         let x = desk.x - OfficeLayout.deskWidth / 2
         let top = desk.y + signTop
         let middle = top + signHeight / 2
@@ -429,11 +449,19 @@ public enum OfficeArt {
         let paper: Paint = night ? .color(NightPalette.color(Swatch.plate.color)) : .swatch(.plate)
         let swatch = Swatch.teamColors[color % Swatch.teamColors.count]
         let fill: Paint = night ? .color(swatch.color) : .swatch(swatch)
-        return [
-            ArtShape(.rect(MapRect(x, top, width, signHeight), radius: 6), fill: fill, stroke: ink, lineWidth: contrast ? 2.2 : 1.4),
+        var shapes: [ArtShape] = [
+            ArtShape(
+                .rect(MapRect(x, top, width, subtitle == nil ? signHeight : signTitleHeight), radius: 6), fill: fill, stroke: ink,
+                lineWidth: contrast ? 2.2 : 1.4),
             folderIcon(center: MapPoint(x + 11, middle + 0.3), ink: ink, fill: paper),
             .text(text, x + signTextInset, middle + plateTextDrop, size: signFontSize, bold: true, color: ink, anchor: .start, baseline: .central),
         ]
+        if let subtitle {
+            shapes.append(.text(
+                subtitle.0, x + signTextInset, top + signTitleMiddle + plateTextDrop, size: signTitleFontSize, color: ink, anchor: .start,
+                baseline: .central))
+        }
+        return shapes
     }
 
     /// 폴더 아이콘 (폭 10, 높이 7.4): 왼쪽 위 탭이 있는 서류철

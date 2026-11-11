@@ -154,6 +154,59 @@ struct ChoreographerTests {
         #expect(!h.engine.choreographer.isPresent(member))
     }
 
+    /// 보고 뒤 메인에게 간 지시 (보고 연출의 메인 쪽)
+    func leadReportActions(_ h: EngineHarness, since index: Int) -> [Directive.Action] {
+        h.log.dropFirst(index).filter { $0.directive.agent == lead }.map(\.directive.action)
+    }
+
+    @Test("개선 8: 메인이 승인을 기다리는 중에 서브가 보고하면 메인 쪽 연출을 건너뛴다 (\"!\"·외침을 지우지 않음)")
+    func reportWhileLeadWaits() throws {
+        var h = EngineHarness()
+        started(&h)
+        h.send(hook.make("UserPromptSubmit"), at: 0.5)
+        h.send(hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "조사", "subagent_type": "general-purpose"]), at: 1)
+        h.send(hook.make("SubagentStart", ["agent_id": "x1", "agent_type": "general-purpose"]), at: 1.2)
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"]), at: 5)
+        h.send(hook.tool("PermissionRequest", "Bash", id: "b1", input: ["command": "npm test"]), at: 5.2)
+        h.advance(to: 7)
+        #expect(h.actions(of: lead).contains(.emote(.exclamation)))
+        let before = h.log.count
+        h.send(hook.make("SubagentStop", ["agent_id": "x1", "agent_type": "general-purpose"]), at: 10)
+        h.advance(to: 20)
+        let leadAfter = leadReportActions(h, since: before)
+        #expect(!leadAfter.contains { if case .await = $0 { true } else { false } }, "\(leadAfter)")
+        #expect(!leadAfter.contains(.gesture(.highFive)))
+        #expect(!leadAfter.contains(.emote(.sparkle)) && !leadAfter.contains(.emote(nil)))
+        // 서브는 메인에게 가지 않고(신호 없음) 제자리에서 뿌듯해한 뒤 퇴근합니다
+        let member = AgentID("member-2")
+        let report = Array(h.log.dropFirst(before).filter { $0.directive.agent == member }.map(\.directive.action))
+        #expect(!report.contains { if case .signal = $0 { true } else { false } })
+        #expect(!report.walks.contains(.beside(lead)))
+        #expect(report.contains(.express(.proud)))
+        #expect(report.last == .despawn)
+        #expect(h.all.sounds.contains(.memberReport))
+    }
+
+    @Test("개선 8: 쉬는(소파·안마 의자·잠) 메인에게는 보고 연출을 하지 않아 Zz·♪가 남는다. 평소에는 하이파이브")
+    func reportWhileLeadRests() {
+        var h = EngineHarness()
+        started(&h)
+        h.send(hook.make("UserPromptSubmit"), at: 0.5)
+        h.send(hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "긴 조사", "subagent_type": "Explore", "run_in_background": true]), at: 1)
+        h.send(hook.make("SubagentStart", ["agent_id": "x1", "agent_type": "Explore"]), at: 1.2)
+        h.send(hook.tool("PostToolUse", "Agent", id: "a1", input: [:]), at: 1.5)
+        h.send(hook.make("Stop"), at: 2)
+        h.advance(to: 700)
+        #expect(h.actions(of: lead).contains(.pose(.sleeping)))
+        let before = h.log.count
+        h.send(hook.make("SubagentStop", ["agent_id": "x1", "agent_type": "Explore"]), at: 701)
+        h.advance(to: 720)
+        let leadAfter = leadReportActions(h, since: before)
+        #expect(!leadAfter.contains { if case .await = $0 { true } else { false } }, "\(leadAfter)")
+        #expect(!leadAfter.contains(.emote(nil)) && !leadAfter.contains(.express(.proud)))
+        #expect(!h.log.dropFirst(before).map(\.directive.action).walks.contains(.beside(lead)))
+    }
+
     @Test("쉼 단계: 1분 → 휴게 공간, 3분 → 안마 의자, 10분 → 안마 의자에서 잠듦. 새 프롬프트가 오면 깬다")
     func restStages() {
         var h = EngineHarness()

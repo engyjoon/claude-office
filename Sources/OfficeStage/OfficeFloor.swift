@@ -367,6 +367,20 @@ public struct OfficeFloor: Sendable {
         let teams = plan.rows.compactMap { state.teams[$0.team] }
         var hidden: [TeamID: Int] = [:]
         for row in plan.rows { hidden[row.team] = row.hidden }
-        stage.setTeams(teams, hidden: hidden)
+        stage.setTeams(teams, hidden: hidden, titles: Self.signTitles(teams, state: state))
+    }
+
+    /// 같은 폴더의 행이 둘 이상 보이면 그 행들의 표지에 메인 세션 제목을 덧붙입니다 (개선 8: 둘 다 "claude-office"라 구별이 안 됐음).
+    /// 제목을 모르는 행(터미널 세션 등)은 폴더 이름 그대로입니다.
+    static func signTitles(_ teams: [Team], state: OfficeState) -> [TeamID: String] {
+        var counts: [String: Int] = [:]
+        for team in teams { counts[team.folder, default: 0] += 1 }
+        var titles: [TeamID: String] = [:]
+        for team in teams where counts[team.folder, default: 0] > 1 {
+            guard let main = state.main(of: team.id), let title = state.parts[main.session]?.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty else { continue }
+            titles[team.id] = title
+        }
+        return titles
     }
 }
