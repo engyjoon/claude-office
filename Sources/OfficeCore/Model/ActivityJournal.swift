@@ -70,7 +70,7 @@ public struct ActivityJournal: Hashable, Sendable {
                 case .failure: .failed
                 case .interrupted: .interrupted
                 }
-                if let index = openToolIndex(of: agent.id, matching: call) {
+                if let index = openToolIndex(of: agent.id, matching: call, includePermission: true) {
                     entries[index].state = result
                 } else {
                     // 시작을 못 받은 툴 (Post가 먼저 왔거나 기록을 시작하기 전에 시작함)
@@ -135,10 +135,16 @@ public struct ActivityJournal: Hashable, Sendable {
     }
 
     /// 아직 열린 그 사람의 툴 기록 (tool_use_id가 같으면 그것, 없으면 이름이 같은 가장 최근 것)
-    private func openToolIndex(of agent: AgentID, matching call: ToolCall?, allowAny: Bool = false) -> Int? {
-        let open = entries.indices.filter { entries[$0].agent == agent && entries[$0].state.isOpen && entries[$0].toolCall != nil }
-        if let id = call?.id, let index = open.last(where: { entries[$0].toolCall?.id == id }) { return index }
-        if let name = call?.name, let index = open.last(where: { entries[$0].toolCall?.name == name }) { return index }
+    private func openToolIndex(of agent: AgentID, matching call: ToolCall?, allowAny: Bool = false, includePermission: Bool = false) -> Int? {
+        // 질문·계획 승인은 `.permission(call)` 항목이라, 끝날 때(includePermission)는 그것도 닫습니다
+        func target(_ index: Int) -> ToolCall? {
+            if let call = entries[index].toolCall { return call }
+            if includePermission, case .permission(let call?) = entries[index].kind { return call }
+            return nil
+        }
+        let open = entries.indices.filter { entries[$0].agent == agent && entries[$0].state.isOpen && target($0) != nil }
+        if let id = call?.id, let index = open.last(where: { target($0)?.id == id }) { return index }
+        if let name = call?.name, let index = open.last(where: { target($0)?.name == name }) { return index }
         return allowAny ? open.last(where: { entries[$0].state == .running }) : nil
     }
 

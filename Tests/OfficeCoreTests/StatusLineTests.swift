@@ -272,6 +272,36 @@ struct StatusLineTests {
         #expect(office.texts(at: 10) == ["a-sdn-portal · 메인 · 서브가 Bash rm -rf build 승인 대기 (6초째)"])
     }
 
+    @Test("질문에 답하면 질문 대기 기록이 닫히고 현황 줄에서 사라짐, 계획 승인도 같음")
+    func askAnswered() {
+        var office = Office()
+        office.send(hook.make("UserPromptSubmit", ["prompt": "계획 세워 줘"]))
+        office.send(hook.tool("PreToolUse", "AskUserQuestion", id: "q1", input: ["questions": []]))
+        #expect(office.engine.journal.entries.last?.state == .awaitingPermission)
+        office.send(hook.tool("PostToolUse", "AskUserQuestion", id: "q1", input: ["questions": []], extra: [("tool_response", [:])]))
+        #expect(!office.engine.journal.entries.contains { $0.state == .awaitingPermission })
+        #expect(office.engine.journal.entries.filter { $0.agent == office.main }.count == 1)  // 덧붙인 항목 없음 (덧붙인 항목 없음)
+        #expect(office.texts(at: 400) == ["a-sdn-portal · 메인 · 질문 답함 (6분 전)"])
+
+        office.send(hook.tool("PreToolUse", "ExitPlanMode", id: "p1", input: ["plan": "x"]))
+        #expect(office.texts(at: 20).joined().contains("승인 대기"))
+        office.send(hook.tool("PostToolUse", "ExitPlanMode", id: "p1", input: ["plan": "x"], extra: [("tool_response", [:])]), at: 30)
+        #expect(!office.engine.journal.entries.contains { $0.state == .awaitingPermission })
+        #expect(office.texts(at: 1200) == ["a-sdn-portal · 메인 · 계획 승인함 (19분 전)"])
+    }
+
+    @Test("일반 도구의 승인 대기는 그대로: Pre → PermissionRequest → Post")
+    func ordinaryPermission() {
+        var office = Office()
+        office.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "rm -rf build"]))
+        office.send(hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "rm -rf build"]))
+        #expect(office.engine.journal.entries.last?.state == .awaitingPermission)
+        #expect(office.texts().joined().contains("승인 대기"))
+        office.send(hook.tool("PostToolUse", "Bash", id: "b1", input: ["command": "rm -rf build"], extra: [("tool_response", [:])]))
+        #expect(office.engine.journal.entries.count == 1)
+        #expect(office.engine.journal.entries.last?.state == .succeeded)
+    }
+
     @Test("notify-demo 흐름: 명령 승인 대기 중에는 행 줄도 승인 대기, 끝나면 새 응답, 확인하면 쉬는 중")
     func notifyDemo() {
         var office = Office()

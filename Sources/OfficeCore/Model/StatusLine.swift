@@ -380,6 +380,12 @@ public struct StatusLine: Hashable, Sendable {
             }
         }
 
+        /// 질문·계획 승인이 끝난 뒤의 문구: "질문 답함", "계획 승인함" (실패·거부 등은 도구 이름 + 결과)
+        func answeredText(_ call: ToolCall, _ state: ActivityEntry.State) -> String {
+            guard state == .succeeded else { return call.name + Self.suffix(state) }
+            return call.name == "AskUserQuestion" ? "질문 답함" : "계획 승인함"
+        }
+
         /// 일 하나(또는 묶음): "Read 3개", "Edit auth.ts", "Bash npm test 승인 대기", "서브2에게 위임".
         /// 진행 중이면 `since`, 끝났으면 마지막 기록의 때 `at`.
         func agentSegment(_ group: Group) -> Segment {
@@ -390,7 +396,8 @@ public struct StatusLine: Hashable, Sendable {
                 text = group.count > 1 ? "\(toolLabel(call)) \(group.count)개" : toolText(call) + Self.suffix(entry.state)
             case .permission(let call):
                 if let call, call.asksUser {
-                    text = entry.state == .denied ? "\(call.name) 거부됨" : call.waitLabel
+                    // 답하거나 승인한 뒤에는 "대기"가 아니라 도구 이름만 (열린 동안만 대기 문구)
+                    text = entry.state == .awaitingPermission ? call.waitLabel : answeredText(call, entry.state)
                 } else {
                     text = (call.map(toolText).map { $0 + " " } ?? "") + (entry.state == .denied ? "거부됨" : "승인 대기")
                 }

@@ -155,4 +155,16 @@ struct AgentTimelineTests {
         #expect(AgentTimeline.ago(7200) == "2시간 전")
         #expect(AgentTimeline.ago(86400 * 3 + 5) == "3일 전")
     }
+
+    @Test("질문·계획 승인에 답하면 타임라인 항목이 승인 대기에서 끝난 일로")
+    func askAnswered() {
+        var office = Office()
+        office.send(hook.tool("PreToolUse", "AskUserQuestion", id: "q1", input: ["questions": []]))
+        #expect(office.timeline(office.main).items.count == 1)
+        #expect(office.engine.journal.entries.last?.state == .awaitingPermission)
+        office.send(hook.tool("PostToolUse", "AskUserQuestion", id: "q1", input: ["questions": []], extra: [("tool_response", [:])]))
+        #expect(office.timeline(office.main).items.count == 1)
+        #expect(office.engine.journal.entries.last?.state == .succeeded)
+        #expect(!office.lines(office.main, at: 900).joined().contains("대기"))
+    }
 }
