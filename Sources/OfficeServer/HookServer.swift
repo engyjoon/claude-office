@@ -46,6 +46,8 @@ public final class HookServer: @unchecked Sendable {
     private var rejections: [Int: Int] = [:]
     private let deadline: TimeInterval
     private let connectionLimit: Int
+    /// 테스트용: 202를 보낸 직후 그 연결 스레드에서 부릅니다 (스레드가 늦게 깨는 경우를 시간 없이 재현). 시작 전에만 정합니다.
+    var afterAcceptResponse: (@Sendable (HookDelivery) -> Void)?
     private let connectionQueue = DispatchQueue(label: "claude-office.hook.connections", attributes: .concurrent)
     private let deliveryQueue = DispatchQueue(label: "claude-office.hook.delivery")
     private let acceptQueue = DispatchQueue(label: "claude-office.hook.accept")
@@ -56,6 +58,13 @@ public final class HookServer: @unchecked Sendable {
         self.deadline = deadline
         self.connectionLimit = maxConnections
         self.handler = handler
+    }
+
+    /// 지금 처리 중인 연결 수 (테스트가 시간 대신 이 조건을 기다림)
+    public var activeConnectionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return activeConnections
     }
 
     /// 거절한 요청 수 (상태 코드 → 수). 서버를 만든 뒤부터 셉니다.
@@ -267,11 +276,14 @@ public final class HookServer: @unchecked Sendable {
                 let process = hostSession == nil
                     ? HookRequestPolicy.hookParentPID(request.headers).flatMap(ProcessInspector.claudeProcess(fromHookParent:))
                     : nil
-                respond(client, status: 202)
                 let delivery = HookDelivery(body: body, term: term, hostSession: hostSession, process: process,
                                             app: HookRequestPolicy.appBundleID(request.headers), receivedAt: Date())
                 let handler = self.handler
+                // 줄에 먼저 넣고 나서 답합니다. 답한 뒤에 넣으면, 202를 받은 Claude Code가 바로 보낸 다음 훅이 다른 연결
+                // 스레드에서 먼저 줄에 들어가 순서가 뒤집힐 수 있었습니다(부하 테스트에서 재현, 개선 7(5)).
                 deliveryQueue.async { handler(delivery) }
+                respond(client, status: 202)
+                afterAcceptResponse?(delivery)
             }
         }
     }

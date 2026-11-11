@@ -240,6 +240,11 @@
 - **(3) 다시 설치 진단**: 설치된 `~/.claude/hooks/claude-office.sh`는 이전 번들(`9f3ebdb`)과 바이트까지 같고 새 번들과 다릅니다 → `scriptState` `.outdated` → `HookAlert.scriptNeedsFix` "훅 스크립트를 업데이트해야 해요"[다시 설치]가 뜹니다. 다시 설치 전까지는 옛 스크립트로 전처럼 동작하고 PID 퇴근·앱 구별만 빠집니다. 이미 실행 중인 세션도 스크립트 파일을 매번 새로 읽으므로 다시 설치하면 다음 훅부터 PID가 옵니다.
 - **Cursor 구별**: `SessionDestination.resolve(hostSession:term:app:)` — 번들 id가 그 `TERM_PROGRAM`의 후보에 있으면 맨 앞에 두고 이름도 그 앱("Cursor"). 후보에 없는 값(tmux를 띄운 iTerm 등)은 쓰지 않아 버튼이 보이는지는 `term`만으로 정합니다. 앱의 `focusAgent`·알림 열기가 씁니다.
 - **넣지 않은 것**: `PostToolBatch` 훅(페이로드 미수집, 아래 "새로 발견한 것" 그대로). 본문 상한 올리기.
+- **간헐 실패 (개선 7(5))**: 코어를 채운 부하(`yes` 16개)에서 `swift test`가 15번 중 2~3번 실패했고, 7번 전 커밋도 같은 부하에서 15번 중 1번 실패하는 것을 보고 원인을 찾아 고쳤습니다. 원인 셋은 다음과 같습니다.
+  - (1) `endToEndWithCurl`: 테스트 프로세스의 첫 curl이 부하에서 뜨는 데만 3초 가까이 걸려 `-m 3`에 걸렸습니다(`000`, 서버 거절 0). `-m`은 멈춤 막이(30)로만 둡니다.
+  - (2) 7번 서버 테스트의 경과 시간 검사와 고정 sleep: 시간을 재는 대신 서버의 긴 제한·408 자체·연결 수(`activeConnectionCount`)를 조건으로 기다립니다. PID 끝에서 끝 테스트는 가짜 curl로 헤더를 보고, 서버의 PID 해석은 프로세스 안 요청으로 봅니다.
+  - (3) **제품 경합**: 서버가 202를 보낸 뒤에 훅을 전달 줄에 넣어, 답을 받고 곧바로 온 다음 훅이 앞지를 수 있었습니다(부하에서 순서가 뒤집힌 것을 봄. 7번 전부터 있던 것). 줄에 넣은 뒤 답하게 고쳤고, 테스트용 훅(`afterAcceptResponse`)으로 첫 연결 스레드를 붙잡아 시간 없이 재현합니다. 옛 순서면 5번 모두 `[1, 0]`으로 실패합니다.
+  - 고친 뒤 같은 부하에서 35번, 그리고 두 벌을 동시에 10번씩 돌려 모두 통과했습니다(490개).
 - **테스트**: `OfficeServerTests`(엔드포인트 소유·rename, 링크 settings, 바뀐 것 없으면 안 씀·백업 5개, 머리줄 토큰 먼저·거절 수, 408, 503, 깨진 엔드포인트면 curl 안 부름), `SessionProcessTests` 5개(헤더 꼴, 죽은 PID → 퇴근·산 PID·PID 없음·데스크톱 → 그대로 + 30초 규칙, 기억 규칙, 프로세스 찾기·셸 건너뛰기·번호 재사용, 실제 스크립트 → 서버 PID·앱), `HookAlertTests.endpointLost`, `HookHealthTests.rejectedRequests`, `HookSettingsEditorTests.handlerLevelRemoval`, `SessionDestinationTests.launchingApp`. "실제 훅 스크립트 → 서버 → 엔진"·"앱이 꺼져 있어도 조용히 성공"은 그대로 통과합니다.
 - **화면 확인 필요**:
   1. 다시 설치: 연동 띠·메뉴에 "훅 스크립트를 업데이트해야 해요"가 뜨고, [다시 설치] 뒤 settings.json 백업이 새로 생기지 않아야 합니다(훅 목록이 같으면). 백업 폴더(`~/.claude`)의 `settings.json.bak-*`이 5개 넘게 있었다면 오래된 것이 지워집니다.

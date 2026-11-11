@@ -160,8 +160,19 @@ func openSocket(port: UInt16) throws -> Int32 {
     return fd
 }
 
-/// 날 요청을 보내고 응답 첫 줄을 읽습니다 (`wait`초 안에 답이 없으면 빈 문자열)
-func rawRequest(port: UInt16, _ text: String, wait: TimeInterval = 2) throws -> String {
+/// 조건이 될 때까지 기다립니다 (`limit`초는 멈춤 막이일 뿐, 보통은 곧바로 참). 끝내 참이 아니면 false.
+func until(limit: TimeInterval = 30, _ condition: () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(limit)
+    while !condition() {
+        if Date() > deadline { return false }
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return true
+}
+
+/// 날 요청을 보내고 응답 첫 줄을 읽습니다. `wait`초는 멈춤 막이일 뿐입니다(서버는 늘 답하거나 연결 제한으로 닫음).
+/// 그 안에 답이 없으면 빈 문자열.
+func rawRequest(port: UInt16, _ text: String, wait: TimeInterval = 30) throws -> String {
     let fd = try openSocket(port: port)
     defer { close(fd) }
     var timeout = timeval(tv_sec: Int(wait), tv_usec: Int32((wait - floor(wait)) * 1_000_000))
@@ -183,8 +194,10 @@ struct HookServerTests {
         defer { server.stop() }
         #expect(port > 0)
         let url = "http://127.0.0.1:\(port)/v1/hook"
+        // -m는 멈춤 막이일 뿐입니다. 부하가 크면 테스트 프로세스의 첫 curl이 뜨는 데만 3초 가까이 걸려(실측)
+        // -m 3이면 서버가 아무것도 거절하지 않았는데도 000이 나왔습니다. 속도는 훅 스크립트 테스트가 봅니다.
         func curl(_ extra: [String]) throws -> String {
-            try run("/usr/bin/env", ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "3", "-X", "POST",
+            try run("/usr/bin/env", ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "30", "-X", "POST",
                                      "-H", "Content-Type: application/json", "--data-binary", #"{"session_id":"s","hook_event_name":"Stop"}"#, url] + extra).output
         }
         #expect(try curl(["-H", "X-Office-Token: tkn", "-H", "X-Office-Term: vscode"]) == "202")
@@ -199,14 +212,13 @@ struct HookServerTests {
 
     @Test("머리줄만 와도 토큰이 틀리면 본문을 기다리지 않고 거절하고, 거절 수를 상태 코드별로 센다 (개선 7)")
     func earlyRejectAndCounts() throws {
-        let server = HookServer(token: "tkn") { _ in }
+        // 서버의 연결 제한을 아주 길게: 본문을 기다렸다면 401이 아니라 아무 답도 오지 않음 (시간을 재지 않음)
+        let server = HookServer(token: "tkn", deadline: 600) { _ in }
         let port = try server.start(preferredPort: 0)
         defer { server.stop() }
-        // 본문 10바이트를 약속하고 보내지 않는 요청: 토큰이 틀리면 바로 401
-        let started = Date()
+        // 본문 10바이트를 약속하고 보내지 않는 요청: 토큰이 틀리면 본문 없이 401
         let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: nope\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n")
         #expect(status.hasPrefix("HTTP/1.1 401"))
-        #expect(Date().timeIntervalSince(started) < 1)
         // 토큰이 맞고 본문이 너무 크면 413 (본문을 받기 전에)
         let large = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\nContent-Length: 5000000\r\n\r\n")
         #expect(large.hasPrefix("HTTP/1.1 413"))
@@ -216,32 +228,55 @@ struct HookServerTests {
 
     @Test("연결마다 전체 시간 제한이 있어 천천히 보내는 연결은 408로 끊는다 (개선 7)")
     func connectionDeadline() throws {
-        let server = HookServer(token: "tkn", deadline: 0.5) { _ in }
+        // 머리줄을 끝내지 않는 요청: 제한이 없다면 서버는 영원히 기다림. 408이 온 것 자체가 제한이 걸렸다는 뜻 (시간을 재지 않음)
+        let server = HookServer(token: "tkn", deadline: 0.3) { _ in }
         let port = try server.start(preferredPort: 0)
         defer { server.stop() }
-        let started = Date()
-        let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\n", wait: 3)
+        let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\n")
         #expect(status.hasPrefix("HTTP/1.1 408"))
-        #expect(Date().timeIntervalSince(started) < 2)
         #expect(server.rejectedCounts[408] == 1)
     }
 
     @Test("동시 연결이 상한을 넘으면 503으로 거절하고, 자리가 나면 다시 받는다 (개선 7)")
     func connectionLimit() async throws {
         let inbox = Inbox()
-        let server = HookServer(token: "tkn", deadline: 1.5, maxConnections: 1) { inbox.append($0) }
+        // 자리를 잡은 연결이 시간 초과로 먼저 풀리지 않게 제한을 길게 두고, 시간 대신 서버의 연결 수를 기다립니다
+        let server = HookServer(token: "tkn", deadline: 600, maxConnections: 1) { inbox.append($0) }
         let port = try server.start(preferredPort: 0)
         defer { server.stop() }
         let idle = try openSocket(port: port)  // 아무것도 보내지 않고 자리를 잡음
-        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(await until { server.activeConnectionCount == 1 })
         let busy = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
         #expect(busy.hasPrefix("HTTP/1.1 503"))
         close(idle)
-        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await until { server.activeConnectionCount == 0 })
         let body = #"{"session_id":"s","hook_event_name":"Stop"}"#
         let ok = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)")
         #expect(ok.hasPrefix("HTTP/1.1 202"))
         #expect(server.rejectedCounts[503] == 1)
+    }
+
+    @Test("답을 받고 바로 보낸 다음 훅이 앞 훅을 앞지르지 않는다 (줄에 넣은 뒤 답함, 개선 7(5))")
+    func deliveryOrder() async throws {
+        let inbox = Inbox()
+        let server = HookServer(token: "tkn") { inbox.append($0) }
+        // 첫 훅의 연결 스레드가 202를 보낸 뒤 늦게 깨는 경우를 시간 없이 만듭니다: 다음 훅이 도착할 때까지 붙잡아 둠.
+        // 답한 뒤에 줄에 넣던 코드라면 이때 다음 훅이 먼저 줄에 들어가 순서가 반드시 뒤집힙니다(부하 테스트에서 가끔 재현됨).
+        server.afterAcceptResponse = { delivery in
+            guard (try? JSONValue.parse(delivery.body))?["n"]?.intValue == 0 else { return }
+            let deadline = Date().addingTimeInterval(10)  // 멈춤 막이
+            while inbox.deliveries.count < 2 && Date() < deadline { usleep(1_000) }
+        }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        for index in 0..<2 {
+            let body = #"{"session_id":"s","hook_event_name":"Stop","n":\#(index)}"#
+            let status = try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)")
+            #expect(status.hasPrefix("HTTP/1.1 202"))
+        }
+        let delivered = await inbox.wait(for: 2, timeout: 30)
+        #expect(delivered.compactMap { (try? JSONValue.parse($0.body))?["n"]?.intValue } == [0, 1])
     }
 
     @Test("선호 포트가 사용 중이면 다음 포트를 쓴다")

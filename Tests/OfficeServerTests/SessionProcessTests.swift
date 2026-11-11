@@ -87,43 +87,68 @@ struct SessionProcessTests {
         #expect(ProcessInspector.claudeProcess(fromHookParent: Int32.max) == nil)
 
         // 셸(sh) 아래에서: 셸의 PID를 주면 그 부모(이 테스트 실행기)를 찾음
+        // (셸은 입력이 닫힐 때까지 살아 있음: 시간에 기대지 않음. posix_spawn이 돌아오면 이미 셸로 바뀌어 있음)
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
-        shell.arguments = ["-c", "sleep 2; :"]
+        shell.arguments = ["-c", "read line; :"]
+        let input = Pipe()
+        shell.standardInput = input
         try shell.run()
-        defer { shell.terminate() }
-        Thread.sleep(forTimeInterval: 0.1)
+        defer {
+            try? input.fileHandleForWriting.close()
+            shell.waitUntilExit()
+        }
         #expect(ProcessInspector.claudeProcess(fromHookParent: shell.processIdentifier)?.pid == me)
     }
 
-    @Test("실제 훅 스크립트가 보낸 PID·앱을 서버가 프로세스로 바꿔 넘긴다")
-    func endToEnd() async throws {
+    @Test("실제 훅 스크립트는 $PPID와 __CFBundleIdentifier를 헤더로 보낸다 (curl 대신 인자를 적는 가짜 curl)")
+    func scriptHeaders() throws {
+        // 진짜 curl은 부하가 크면 뜨는 데만 수 초가 걸려(실측) -m 1에 걸릴 수 있습니다. 헤더만 보면 되니 가짜로 바꿉니다.
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let inbox = Inbox()
-        let token = HookRequestPolicy.makeToken()
-        let server = HookServer(token: token) { inbox.append($0) }
-        let port = try server.start(preferredPort: 0)
-        defer { server.stop() }
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let record = directory.appendingPathComponent("args")
+        let fake = bin.appendingPathComponent("curl")
+        try "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '\(record.path)'; done\ncat >/dev/null\n"
+            .write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
         let endpoint = directory.appendingPathComponent("endpoint")
-        try EndpointFile.write(port: port, token: token, to: endpoint)
+        try EndpointFile.write(port: 1234, token: "tok", to: endpoint)
         let script = directory.appendingPathComponent("claude-office.sh")
         try HookInstaller.bundledScript.write(to: script, atomically: true, encoding: .utf8)
         var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = bin.path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
         environment["CLAUDE_OFFICE_ENDPOINT"] = endpoint.path
-        environment["CLAUDE_CODE_HOST_SESSION_ID"] = nil
         environment["__CFBundleIdentifier"] = "com.todesktop.230313mzl4w4u92"
         // 이 테스트 실행기가 Claude Code 자리 (스크립트의 $PPID)
         let result = try run("/bin/sh", [script.path], stdin: #"{"session_id":"p","hook_event_name":"Stop"}"#, environment: environment)
         #expect(result.status == 0 && result.output.isEmpty)
-        let delivered = try #require(await inbox.wait(for: 1).first)
-        #expect(delivered.process?.pid == ProcessInfo.processInfo.processIdentifier)
-        #expect(delivered.app == "com.todesktop.230313mzl4w4u92")
+        let args = try String(contentsOf: record, encoding: .utf8).split(separator: "\n").map(String.init)
+        #expect(args.contains("X-Office-Pid: \(ProcessInfo.processInfo.processIdentifier)"))
+        #expect(args.contains("X-Office-App: com.todesktop.230313mzl4w4u92"))
+        #expect(args.contains("http://127.0.0.1:1234/v1/hook"))
+    }
 
-        // 데스크톱 앱 세션이면 프로세스를 보지 않음
-        environment["CLAUDE_CODE_HOST_SESSION_ID"] = "local_abc-1"
-        _ = try run("/bin/sh", [script.path], stdin: #"{"session_id":"q","hook_event_name":"Stop"}"#, environment: environment)
-        let second = await inbox.wait(for: 2)
-        #expect(second.count == 2 && second[1].process == nil)
+    @Test("서버는 X-Office-Pid를 Claude Code 프로세스로 바꿔 넘기고, 데스크톱 세션이면 보지 않는다")
+    func serverResolvesProcess() async throws {
+        let inbox = Inbox()
+        let server = HookServer(token: "tkn") { inbox.append($0) }
+        let port = try server.start(preferredPort: 0)
+        defer { server.stop() }
+        let me = ProcessInfo.processInfo.processIdentifier
+        func post(_ session: String, host: String) throws -> String {
+            let body = #"{"session_id":"\#(session)","hook_event_name":"Stop"}"#
+            return try rawRequest(port: port, "POST /v1/hook HTTP/1.1\r\nX-Office-Token: tkn\r\nContent-Type: application/json\r\n"
+                + "X-Office-Pid: \(me)\r\nX-Office-App: com.apple.Terminal\r\nX-Office-Host-Session: \(host)\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)")
+        }
+        #expect(try post("p", host: "").hasPrefix("HTTP/1.1 202"))
+        #expect(try post("q", host: "local_abc-1").hasPrefix("HTTP/1.1 202"))
+        let delivered = await inbox.wait(for: 2, timeout: 30)
+        #expect(delivered.count == 2)
+        #expect(delivered.first?.process?.pid == me)
+        #expect(delivered.first?.app == "com.apple.Terminal")
+        #expect(delivered.last?.process == nil)
     }
 }
