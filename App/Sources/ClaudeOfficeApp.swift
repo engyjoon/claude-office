@@ -279,6 +279,11 @@ final class OfficeSKView: AccessibleSKView {
         }
     }
 
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyDrawableScaleExperiment()
+    }
+
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
 
@@ -325,6 +330,7 @@ extension SKView {
     /// 30fps 이하로만 그리므로 2장이면 기다리지 않습니다.
     func limitDrawables() {
         if let layer = layer as? CAMetalLayer, layer.maximumDrawableCount != 2 { layer.maximumDrawableCount = 2 }
+        applyDrawableScaleExperiment()
     }
 }
 

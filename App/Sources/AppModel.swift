@@ -179,7 +179,9 @@ final class AppModel {
         self.selection = selection
         stageStore.floor = OfficeFloor(selection: selection)
         officeScene = OfficeScene(store: stageStore)
-        let mini = MiniOfficeSettings(defaults: defaults)
+        var mini = MiniOfficeSettings(defaults: defaults)
+        // 측정 실행의 켤 때 화면 (저장하지 않음, 개선 10)
+        if let scene = PerfLaunch.scene { mini.enabled = scene == .mini }
         miniSettings = mini
         miniStore.privacy = saved
         miniStore.floor = OfficeFloor(
@@ -223,6 +225,10 @@ final class AppModel {
             self?.refreshLighting()
             self?.syncMiniPanel()
             self?.showWelcomeIfFirstRun()
+        }
+        if PerfLaunch.scene == .office {
+            // 메뉴바 아이콘이 창 열기 동작을 등록한 뒤에 엽니다
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.openOfficeWindow() }
         }
         // 시스템 설정에서 알림 권한을 바꾸고 돌아왔을 때 (메뉴바 앱이라 드물지만, 설정·사무실 창을 누르면 활성화됨)
         activationObserver = NotificationCenter.default.addObserver(
@@ -1055,7 +1061,7 @@ final class AppModel {
     /// 훅이 설치돼 있지 않은 첫 실행에 환영 창을 한 번만 엽니다. 이미 쓰고 있는 사용자(훅 설치됨)는 본 것으로 치고 열지 않습니다.
     private func showWelcomeIfFirstRun() {
         let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: Self.welcomeShownKey) else { return }
+        guard !PerfLaunch.isMeasuring, !defaults.bool(forKey: Self.welcomeShownKey) else { return }
         defaults.set(true, forKey: Self.welcomeShownKey)
         guard case .notInstalled = hookStatus, hookScript == .missing else { return }
         append(.system, "첫 실행: 환영 창을 열어요")

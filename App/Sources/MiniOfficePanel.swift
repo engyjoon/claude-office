@@ -468,7 +468,8 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
     }
 
     private func save() {
-        guard let panel, let id = Self.displayID(panel.screen) else { return }
+        // 측정 실행은 위치를 저장하지 않습니다 (설치된 앱과 설정을 같이 씀, `PerfLaunch`)
+        guard !PerfLaunch.isMeasuring, let panel, let id = Self.displayID(panel.screen) else { return }
         UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.frameKey(id))
     }
 
@@ -480,6 +481,11 @@ final class MiniOfficePanelController: NSObject, NSWindowDelegate {
 /// 비활성 패널에서도 첫 클릭이 바로 캐릭터·버튼에 가도록
 final class FirstMouseSKView: AccessibleSKView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyDrawableScaleExperiment()
+    }
 }
 
 /// 그리기만 하고 마우스는 받지 않는 SwiftUI 뷰 (아래 컨테이너가 받음)

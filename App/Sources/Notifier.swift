@@ -38,8 +38,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// 알림 센터에 남아 있는지 확인하는 중인 제목 바꿈 (식별자 → 가장 새 알림, M6(14))
     private var retitling: [String: OfficeNotice] = [:]
 
+    /// 측정 실행이면 알림 센터를 건드리지 않습니다 (설치된 앱과 같은 번들 ID라 그 앱의 알림을 지우지 않게, `PerfLaunch`)
+    private let inert = PerfLaunch.isMeasuring
+
     override init() {
         super.init()
+        guard !inert else { return }
         center.delegate = self
         removeAll()
         refreshAuthorization()
@@ -61,6 +65,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// 이 앱이 띄운 알림을 모두 지웁니다 (켤 때·끌 때)
     func removeAll() {
+        guard !inert else { return }
         queued.removeAll()
         live.removeAll()
         retitling.removeAll()
@@ -70,7 +75,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// 권한을 묻습니다 (아직 묻지 않았을 때만 시스템 창이 뜸). 끝나면 쌓아 둔 알림을 보냅니다.
     func requestAuthorization(then done: (() -> Void)? = nil) {
-        guard !requesting else { return }
+        guard !inert, !requesting else { return }
         requesting = true
         center.requestAuthorization(options: [.alert]) { _, _ in
             DispatchQueue.main.async {
@@ -112,6 +117,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     // MARK: - 알림 보내기·지우기
 
     func apply(_ actions: [NoticeAction]) {
+        guard !inert else { return }
         for action in actions {
             switch action {
             case .post(let notice) where notice.onlyIfDelivered:
