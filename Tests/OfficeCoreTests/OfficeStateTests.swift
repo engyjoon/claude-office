@@ -304,3 +304,304 @@ struct OutOfOrderTests {
         #expect(state.agents.values.filter { $0.role == .member }.isEmpty)
     }
 }
+
+/// 개선 4: 끝 이벤트(Stop·PostToolUse·SubagentStop·SessionEnd)가 오지 않아도 바쁜 상태가 남지 않게 하는 "암묵적 종료" 규칙
+@Suite("끝 이벤트 없는 턴·도구·세션")
+struct ImplicitEndTests {
+    let hook = Hook()
+    let session = SessionID("s1")
+    let worker = (id: "g1", type: "general-purpose")
+    let idle: JSONObject = ["notification_type": "idle_prompt", "message": "Claude is waiting for your input"]
+    let permission: JSONObject = ["notification_type": "permission_prompt", "message": "Claude needs your permission"]
+
+    func apply(_ state: inout OfficeState, _ payload: JSONValue, at seconds: Double) -> [Beat] {
+        guard let event = HookParser.parse(payload, receivedAt: Fixture.epoch.addingTimeInterval(seconds)) else { return [] }
+        return state.apply(event)
+    }
+
+    func at(_ seconds: Double) -> Date { Fixture.epoch.addingTimeInterval(seconds) }
+
+    func names(_ beats: [Beat]) -> [String] {
+        beats.map { String(describing: $0).prefix { $0 != "(" }.description }
+    }
+
+    // MARK: - Stop 없이 끝난 턴
+
+    @Test("Stop 없이 끝난 턴: 일하던 메인에 idle_prompt가 오면 앞 턴을 닫고 입력 대기로")
+    func idlePromptEndsTurn() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"]), at: 2)
+        let beats = apply(&state, hook.make("Notification", idle), at: 70)
+        #expect(names(beats) == ["turnAbandoned", "waitingForInput"])
+        let lead = state.lead(of: session)
+        #expect(lead?.activity == .waitingForInput)
+        #expect(lead?.runningTools.isEmpty == true)
+        // 사용자가 직접 멈춘 턴이라 "확인 안 함"·"답변 필요"는 붙지 않고, 응답 중도 아닙니다
+        #expect(lead?.cue == nil)
+        #expect(!state.isResponding(session))
+    }
+
+    @Test("Stop이 제대로 온 뒤의 idle_prompt는 지금처럼 입력 대기만")
+    func idlePromptAfterStop() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.make("Stop"), at: 5)
+        #expect(names(apply(&state, hook.make("Notification", idle), at: 65)) == ["waitingForInput"])
+        #expect(state.lead(of: session)?.cue == .unread)
+    }
+
+    @Test("방금 온 요청보다 늦게 도착한 지난 턴의 idle_prompt는 버린다")
+    func staleIdlePrompt() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 100)
+        #expect(apply(&state, hook.make("Notification", idle), at: 100.5).isEmpty)
+        #expect(state.lead(of: session)?.activity == .thinking)
+    }
+
+    @Test("암묵적 종료: 남은 포그라운드 서브는 퇴근하고 백그라운드 서브는 남는다 (idle_prompt·새 요청 모두)", arguments: [false, true])
+    func implicitEndDismissesForegroundMembers(byPrompt: Bool) {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 1)
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]), at: 1.1)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a2", input: ["subagent_type": "Explore", "run_in_background": true]), at: 1.2)
+        let beats = apply(&state, byPrompt ? hook.make("UserPromptSubmit") : hook.make("Notification", idle), at: 80)
+        #expect(names(beats).prefix(1) == ["left"])
+        #expect(names(beats).contains("turnAbandoned"))
+        #expect(!names(beats).contains("reported"))  // 끝내지 못한 일이라 보고 연출은 하지 않습니다
+        #expect(names(beats).last == (byPrompt ? "promptArrived" : "waitingForInput"))
+        #expect(state.agents.values.filter { $0.role == .member }.map(\.profile.agentType) == ["Explore"])
+        #expect(state.lead(of: session)?.activity == (byPrompt ? .thinking : .waitingForInput))
+    }
+
+    @Test("서브에이전트 안에서 난 UserPromptSubmit은 세션의 새 요청으로 치지 않는다")
+    func promptInsideSubagent() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 1)
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]), at: 1.1)
+        #expect(apply(&state, hook.make("UserPromptSubmit", agent: worker), at: 30).isEmpty)
+        #expect(state.lead(of: session)?.activity == .delegating)
+        #expect(state.agents.count == 2)
+    }
+
+    @Test("쉬는 메인에 온 새 요청은 지금처럼 요청 도착만")
+    func promptAfterStop() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.make("Stop"), at: 5)
+        #expect(names(apply(&state, hook.make("UserPromptSubmit"), at: 9)) == ["promptArrived", "cueChanged"])
+    }
+
+    @Test("승인 대기 중이던 턴도 idle_prompt가 오면 닫힌다 (질문을 Esc로 닫은 경우)")
+    func idlePromptEndsPermissionWait() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "AskUserQuestion", id: "q1", input: [:]), at: 2)
+        if case .waitingForPermission = state.lead(of: session)?.activity {} else { Issue.record("질문 답 대기가 아님") }
+        _ = apply(&state, hook.make("Notification", idle), at: 90)
+        #expect(state.lead(of: session)?.activity == .waitingForInput)
+    }
+
+    @Test("쉬던 중의 압축에 idle_prompt가 와도 턴을 닫지 않는다: 답변 필요 배지는 그대로")
+    func idlePromptDuringRestingCompaction() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.make("Stop", ["last_assistant_message": "어느 쪽으로 할까요?"]), at: 5)
+        _ = apply(&state, hook.make("PreCompact"), at: 20)
+        let beats = apply(&state, hook.make("Notification", idle), at: 65)
+        #expect(names(beats) == ["compactionEnded", "waitingForInput", "cueChanged"])
+        #expect(state.lead(of: session)?.activity == .waitingForInput)
+        #expect(state.lead(of: session)?.cue == .reply)
+    }
+
+    @Test("응답 중의 압축 도중 끊긴 턴은 압축을 풀고 턴을 닫는다")
+    func idlePromptDuringTurnCompaction() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]), at: 2)
+        _ = apply(&state, hook.make("PreCompact"), at: 3)
+        let beats = apply(&state, hook.make("Notification", idle), at: 90)
+        #expect(names(beats) == ["compactionEnded", "turnAbandoned", "waitingForInput"])
+        #expect(state.lead(of: session)?.runningTools.isEmpty == true)
+        #expect(!state.isResponding(session))
+    }
+
+    @Test("앱을 턴 도중에 켜서 첫 훅이 도구의 끝이면 출근 중이 아니라 생각 중")
+    func firstHookIsToolEnd() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PostToolUse", "Read", id: "r1", input: [:]), at: 0)
+        #expect(state.lead(of: session)?.activity == .thinking)
+    }
+
+    // MARK: - PostToolUse가 빠진 도구
+
+    @Test("PostToolUse가 빠진 도구: 새 묶음의 Pre가 오면 버려서, 뒤 도구가 끝나도 되살아나지 않는다")
+    func leftoverToolIsDropped() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Read", id: "r1", input: ["file_path": "/x/missing.txt"]), at: 1)
+        // r1은 실패했고 PostToolUseFailure 훅이 등록돼 있지 않아 끝 이벤트가 없음 → 다음 응답의 도구
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]), at: 6)
+        #expect(state.lead(of: session)?.runningTools.map(\.id) == ["b1"])
+        let ended = apply(&state, hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 7)
+        guard case .toolEnded(let lead, _, _) = ended.first else { Issue.record("\(ended)"); return }
+        #expect(lead.activity == .thinking)
+        #expect(lead.runningTools.isEmpty)
+    }
+
+    @Test("같은 묶음의 병렬 도구는 지금처럼: 하나가 끝나면 남은 도구로 돌아간다")
+    func parallelToolsAreKept() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Read", id: "r1", input: ["file_path": "/x/a.txt"]), at: 1)
+        _ = apply(&state, hook.tool("PreToolUse", "Grep", id: "g1", input: ["pattern": "x"]), at: 1.3)
+        _ = apply(&state, hook.tool("PreToolUse", "Glob", id: "g2", input: ["pattern": "*.md"]), at: 1.9)
+        #expect(state.lead(of: session)?.runningTools.count == 3)
+        _ = apply(&state, hook.tool("PostToolUse", "Glob", id: "g2", input: [:]), at: 4)
+        _ = apply(&state, hook.tool("PostToolUse", "Grep", id: "g1", input: [:]), at: 6)
+        if case .working(let call) = state.lead(of: session)?.activity { #expect(call.id == "r1") } else { Issue.record("남은 도구로 돌아가지 않음") }
+    }
+
+    @Test("백그라운드 위임은 묶음이 바뀌어도 남는다")
+    func backgroundMemberSurvivesNewBatch() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "Explore", "run_in_background": true]), at: 1)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]), at: 9)
+        #expect(state.agents.values.filter { $0.role == .member }.count == 1)
+    }
+
+    @Test("버린 도구와 닫힌 턴의 기록은 열린 채 남지 않는다")
+    func journalClosesDroppedTools() {
+        var h = EngineHarness()
+        h.send(hook.make("UserPromptSubmit"), at: 0)
+        h.send(hook.tool("PreToolUse", "Read", id: "r1", input: ["file_path": "/x/missing.txt"]), at: 1)
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]), at: 6)
+        let lead = AgentID("lead-1")
+        #expect(h.engine.journal.entries(of: lead).map(\.state) == [.closed, .running])
+        h.send(hook.make("Notification", idle), at: 80)
+        #expect(h.engine.journal.entries(of: lead).allSatisfy { !$0.state.isOpen })
+    }
+
+    // MARK: - 서브의 승인 요청
+
+    @Test("서브의 승인 요청 알림(agent_id 없음)은 도구를 돌리던 서브에게 붙고, 그 도구가 끝나면 풀린다")
+    func subagentPermissionNotification() throws {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 1)
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]), at: 1.1)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"], agent: worker), at: 2)
+        let asked = apply(&state, hook.make("Notification", permission), at: 8)
+        guard case .permissionAsked(let asker, let call) = try #require(asked.first) else { Issue.record("\(asked)"); return }
+        #expect(asker.role == .member)
+        #expect(call?.subject == "npm test")
+        #expect(state.lead(of: session)?.activity == .delegating)
+
+        _ = apply(&state, hook.tool("PostToolUse", "Bash", id: "b1", input: [:], agent: worker), at: 30)
+        #expect(state.member(subagentID: "g1", in: session)?.activity == .thinking)
+        #expect(state.lead(of: session)?.activity == .delegating)
+    }
+
+    @Test("서브의 PermissionRequest 뒤에 오는 알림은 메인을 승인 대기로 만들지 않는다")
+    func subagentPermissionRequestThenNotification() {
+        var state = OfficeState()
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 1)
+        _ = apply(&state, hook.make("SubagentStart", ["agent_id": "g1", "agent_type": "general-purpose"]), at: 1.1)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"], agent: worker), at: 2)
+        _ = apply(&state, hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "npm test"], agent: worker), at: 2.1)
+        #expect(apply(&state, hook.make("Notification", permission), at: 8.1).isEmpty)
+        #expect(state.lead(of: session)?.activity == .delegating)
+    }
+
+    @Test("도는 도구가 없을 때의 승인 알림은 지금처럼 메인에게 (무엇을 기다리는지 모름)")
+    func permissionNotificationWithoutTools() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.make("Notification", permission), at: 8)
+        #expect(state.lead(of: session)?.activity == .waitingForPermission(nil))
+    }
+
+    // MARK: - 끝난 세션
+
+    @Test("SessionEnd 뒤 늦게 온 훅은 새 메인을 만들지 않는다. 다시 시작하면(SessionStart·새 요청) 출근한다")
+    func lateHookAfterSessionEnd() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("SessionStart"), at: 0)
+        _ = apply(&state, hook.make("SessionEnd", ["reason": "exit"]), at: 10)
+        #expect(apply(&state, hook.make("Stop"), at: 10.4).isEmpty)
+        #expect(apply(&state, hook.make("SubagentStop", ["agent_id": "g1", "agent_type": "general-purpose"]), at: 11).isEmpty)
+        #expect(apply(&state, hook.make("Notification", idle), at: 12).isEmpty)
+        #expect(state.agents.isEmpty && state.teams.isEmpty)
+        // 같은 id로 다시 시작(resume)
+        #expect(names(apply(&state, hook.make("SessionStart", ["source": "resume"]), at: 13)) == ["teamOpened", "arrived"])
+        _ = apply(&state, hook.make("SessionEnd"), at: 20)
+        #expect(names(apply(&state, hook.make("UserPromptSubmit"), at: 21)).contains("arrived"))
+    }
+
+    @Test("끝난 세션은 잠깐만, 정해진 수만 기억한다")
+    func endedSessionsAreBounded() {
+        var state = OfficeState()
+        for index in 0..<(OfficeState.endedSessionCapacity + 40) {
+            _ = apply(&state, Hook(session: "old-\(index)").make("SessionEnd"), at: Double(index) * 0.01)
+        }
+        #expect(state.endedSessionCount == OfficeState.endedSessionCapacity)
+        // 기억하는 시간이 지나면 늦게 온 훅도 지금처럼 메인을 만든다 (앱을 세션 중간에 켠 것과 같음)
+        var later = OfficeState()
+        _ = apply(&later, hook.make("SessionEnd"), at: 0)
+        #expect(!apply(&later, hook.tool("PreToolUse", "Read", id: "r", input: [:]), at: OfficeState.endedSessionMemory + 1).isEmpty)
+    }
+
+    // MARK: - 시간 경과
+
+    @Test("출근 중은 잠깐 뒤 쉬는 중(세션)·생각 중(서브)으로 넘어간다")
+    func arrivingSettles() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("SessionStart"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 100)
+        state.settleArrivals(at: at(5))
+        #expect(state.lead(of: session)?.activity == .delegating)
+        var fresh = OfficeState()
+        _ = apply(&fresh, hook.make("SessionStart"), at: 0)
+        fresh.settleArrivals(at: at(OfficeState.arrivalGrace - 1))
+        #expect(fresh.lead(of: session)?.activity == .arriving)
+        fresh.settleArrivals(at: at(OfficeState.arrivalGrace))
+        #expect(fresh.lead(of: session)?.activity == .idle)
+        #expect(fresh.lead(of: session)?.activitySince == at(0))  // 쉰 시간은 출근한 때부터
+
+        let member = state.agents.values.first { $0.role == .member }
+        #expect(member?.activity == .arriving)
+        state.settleArrivals(at: at(100 + OfficeState.arrivalGrace))
+        #expect(state.agents.values.first { $0.role == .member }?.activity == .thinking)
+    }
+
+    @Test("아주 오래 조용한 서브는 퇴근한다 (SubagentStop을 못 받은 백그라운드 서브). 승인을 기다리는 세션은 그대로")
+    func silentMemberLeaves() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "Explore", "run_in_background": true]), at: 1)
+        _ = apply(&state, hook.tool("PreToolUse", "Grep", id: "g", input: ["pattern": "x"], agent: (id: "e1", type: "Explore")), at: 2)
+        _ = apply(&state, hook.make("Stop"), at: 3)
+        #expect(state.expireSilence(at: at(OfficeState.silenceLimit)).isEmpty)
+        let beats = state.expireSilence(at: at(2 + OfficeState.silenceLimit))
+        #expect(names(beats).first == "left")
+        #expect(state.agents.values.filter { $0.role == .member }.isEmpty)
+
+        var waiting = OfficeState()
+        _ = apply(&waiting, hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "Explore", "run_in_background": true]), at: 1)
+        _ = apply(&waiting, hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "rm x"], agent: (id: "e1", type: "Explore")), at: 2)
+        #expect(waiting.expireSilence(at: at(10 * OfficeState.silenceLimit)).isEmpty)
+    }
+
+    @Test("아주 오래 훅이 없는 바쁜 세션은 턴이 끝난 것으로 본다 (kill -9, idle_prompt도 못 받은 중단)")
+    func silentBusySessionEndsTurn() {
+        var state = OfficeState()
+        _ = apply(&state, hook.make("UserPromptSubmit"), at: 0)
+        _ = apply(&state, hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "sleep 99"]), at: 2)
+        #expect(state.expireSilence(at: at(OfficeState.silenceLimit)).isEmpty)
+        #expect(names(state.expireSilence(at: at(2 + OfficeState.silenceLimit))) == ["turnAbandoned"])
+        #expect(state.lead(of: session)?.activity == .idle)
+        #expect(state.agents.count == 1)  // 세션은 퇴근시키지 않습니다 (§5.2)
+        #expect(state.expireSilence(at: at(9 * OfficeState.silenceLimit)).isEmpty)
+    }
+}

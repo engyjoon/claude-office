@@ -217,6 +217,10 @@ public struct Agent: Identifiable, Hashable, Sendable {
     var beforeCompacting: CompactionOrigin? = nil
     /// 응답을 끝낸 세션 직원의 표시 (답변 필요·확인 안 함, M6(4)). 서브에이전트와 응답 중인 세션은 nil.
     public internal(set) var cue: SessionCue? = nil
+    /// 이 사람의 훅을 마지막으로 받은 때 (세션 직원은 그 세션의 모든 훅). 아주 오래 조용하면 끝 이벤트를 놓친 것으로 봅니다 (`OfficeState.expireSilence`).
+    var lastHeardAt: Date = .distantPast
+    /// 마지막으로 도구를 시작한 때 (PreToolUse). 같은 묶음의 병렬 도구인지, 승인 알림이 누구 것인지 가리는 데 씁니다.
+    var lastToolStartAt: Date? = nil
 
     /// 화면에 보이는 이름: 언제나 직함 ("메인1", "서브2"). 에이전트 종류는 `profile.agentType` (신원 카드에만)
     public var displayName: String { title.label }

@@ -76,13 +76,14 @@ public struct NotificationPlanner: Sendable {
 
     /// 알림을 띄운 승인 대기 (사람마다 하나)
     private(set) var waiting: [AgentID: Episode] = [:]
-    /// 띄운 응답 완료 알림 (세션마다 하나)
-    private(set) var completions: [SessionID: String] = [:]
+    /// 띄운 응답 완료 알림 (세션마다 하나). 세션 직원으로 찾습니다: 데스크톱 앱이 CLI 세션 id를 바꿔도(`OfficeState.rekey`)
+    /// 사람은 그대로라, 세션 id로 찾으면 id가 바뀐 뒤 알림을 지우지 못했습니다 (개선 4).
+    private(set) var completions: [AgentID: String] = [:]
     /// 띄운 답변 필요 알림 (세션마다 하나)
-    private(set) var replies: [SessionID: String] = [:]
-    /// 답변 필요 알림을 이미 판단한 응답 (세션 → 그 응답이 끝난 때). 같은 응답이면 판정이 바뀌었다 돌아와도
+    private(set) var replies: [AgentID: String] = [:]
+    /// 답변 필요 알림을 이미 판단한 응답 (세션 직원 → 그 응답이 끝난 때). 같은 응답이면 판정이 바뀌었다 돌아와도
     /// (마지막 문장 → 데스크톱 앱 요약) 다시 띄우지 않습니다.
-    private(set) var repliedTurns: [SessionID: Date] = [:]
+    private(set) var repliedTurns: [AgentID: Date] = [:]
     /// 띄워 두고 아직 지우지 않은 알림 (식별자 → 마지막으로 보낸 알림). 직함이 바뀌면 제목을 고쳐 다시 보냅니다 (M6(14))
     private(set) var shown: [String: OfficeNotice] = [:]
     private var serial = 0
@@ -110,16 +111,16 @@ public struct NotificationPlanner: Sendable {
                 // 답변 필요 알림을 띄울 응답이면 응답 완료 알림은 띄우지 않습니다 (둘이 겹치지 않게)
                 if settings.reply, state.agents[agent.id]?.cue == .reply { continue }
                 let id = "completion.\(agent.session.raw)"
-                completions[agent.session] = id
+                if let old = completions.updateValue(id, forKey: agent.id), old != id { actions.append(.remove([old])) }
                 actions.append(.post(Self.completionNotice(id: id, agent: agent, failed: failed, state: state, privacy: privacy)))
 
             case .promptArrived(let agent):
-                if let id = completions.removeValue(forKey: agent.session) { actions.append(.remove([id])) }
+                if let id = completions.removeValue(forKey: agent.id) { actions.append(.remove([id])) }
 
             case .left(let agent) where agent.role == .lead:
-                if let id = completions.removeValue(forKey: agent.session) { actions.append(.remove([id])) }
-                if let id = replies.removeValue(forKey: agent.session) { actions.append(.remove([id])) }
-                repliedTurns[agent.session] = nil
+                if let id = completions.removeValue(forKey: agent.id) { actions.append(.remove([id])) }
+                if let id = replies.removeValue(forKey: agent.id) { actions.append(.remove([id])) }
+                repliedTurns[agent.id] = nil
 
             case .cueChanged(let agent):
                 planReply(agent, state: state, privacy: privacy, into: &actions)
@@ -181,15 +182,15 @@ public struct NotificationPlanner: Sendable {
     private mutating func planReply(_ agent: Agent, state: OfficeState, privacy: PrivacyLevel, into actions: inout [NoticeAction]) {
         let session = agent.session
         guard agent.cue == .reply else {
-            if let id = replies.removeValue(forKey: session) { actions.append(.remove([id])) }
+            if let id = replies.removeValue(forKey: agent.id) { actions.append(.remove([id])) }
             return
         }
-        guard settings.reply, let turn = state.parts[session]?.completedAt, repliedTurns[session] != turn else { return }
-        repliedTurns[session] = turn
+        guard settings.reply, let turn = state.parts[session]?.completedAt, repliedTurns[agent.id] != turn else { return }
+        repliedTurns[agent.id] = turn
         guard waiting[agent.id] == nil, !state.isViewing(session) else { return }
-        if let id = completions.removeValue(forKey: session) { actions.append(.remove([id])) }
+        if let id = completions.removeValue(forKey: agent.id) { actions.append(.remove([id])) }
         let id = "reply.\(session.raw)"
-        replies[session] = id
+        if let old = replies.updateValue(id, forKey: agent.id), old != id { actions.append(.remove([old])) }
         actions.append(.post(Self.replyNotice(id: id, agent: agent, state: state, privacy: privacy)))
     }
 

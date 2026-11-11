@@ -1,6 +1,7 @@
 # M5(4) 미니 사무실 v2: 메인 3명 (claude-office 서브 5명, a-sdn-portal 서브 3명, my-site 서브 1명). 보여 줄 행 = 답변 필요 > 완료 > 가장 마지막에 요청.
 # 8초: 마지막에 요청한 my-site(메인3). 11초: 메인3 응답 끝 → 12초 완료한 메인3. 14초: a-sdn-portal 서브3 승인 대기 → 20초 메인2(답변 필요).
 # 40초: 승인한 명령이 끝나 대기가 풀림 → 45초 다시 완료한 메인3. 50초: 메인3에 다음 요청. 60초: 메인1에 다음 요청 → 65초 메인1(서브 5명 중 2명 + "+3").
+# 메인1의 서브 5명은 백그라운드 위임(run_in_background)입니다: 일하는 도중의 새 요청은 앞 턴을 닫아 포그라운드 서브를 퇴근시키므로(개선 4), 60초의 다음 요청 뒤에도 남게 했습니다.
 # 실행: swift run office-sim snapshot Scenarios/mini.jsonl --at 8,12,20,45,65 --mini 390   (사무실 전체는 --mini 없이)
 {"t": 0.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}, "term": "vscode"}
 {"t": 0.5, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "SessionStart", "source": "startup"}, "term": "vscode"}
@@ -8,21 +9,21 @@
 {"t": 1.0, "hook": {"session_id": "m3", "cwd": "/Users/demo/work/my-site", "hook_event_name": "SessionStart", "source": "startup"}, "term": "vscode"}
 {"t": 1.5, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
 {"t": 2.0, "hook": {"session_id": "m3", "cwd": "/Users/demo/work/my-site", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
-{"t": 3.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a1"}}
+{"t": 3.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "run_in_background": true, "subagent_type": "general-purpose"}, "tool_use_id": "m1-a1"}}
 {"t": 3.2, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g1", "agent_type": "general-purpose"}}
-{"t": 3.6, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a2"}}
+{"t": 3.6, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "run_in_background": true, "subagent_type": "general-purpose"}, "tool_use_id": "m1-a2"}}
 {"t": 3.8, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g2", "agent_type": "general-purpose"}}
-{"t": 4.2, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a3"}}
+{"t": 4.2, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "run_in_background": true, "subagent_type": "general-purpose"}, "tool_use_id": "m1-a3"}}
 {"t": 4.4, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g3", "agent_type": "general-purpose"}}
 {"t": 4.5, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "swift build"}, "tool_use_id": "m1-g1-b", "agent_id": "m1-g1", "agent_type": "general-purpose"}}
 {"t": 4.5, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m2-a1"}}
 {"t": 4.7, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "SubagentStart", "agent_id": "m2-g1", "agent_type": "general-purpose"}}
-{"t": 4.8, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a4"}}
+{"t": 4.8, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "run_in_background": true, "subagent_type": "general-purpose"}, "tool_use_id": "m1-a4"}}
 {"t": 5.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g4", "agent_type": "general-purpose"}}
 {"t": 5.1, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "/x/Sources/Stage.swift"}, "tool_use_id": "m1-g2-r", "agent_id": "m1-g2", "agent_type": "general-purpose"}}
 {"t": 5.1, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m2-a2"}}
 {"t": 5.3, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "SubagentStart", "agent_id": "m2-g2", "agent_type": "general-purpose"}}
-{"t": 5.4, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a5"}}
+{"t": 5.4, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "run_in_background": true, "subagent_type": "general-purpose"}, "tool_use_id": "m1-a5"}}
 {"t": 5.6, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g5", "agent_type": "general-purpose"}}
 {"t": 5.7, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/x/App/OfficeScene.swift"}, "tool_use_id": "m1-g3-e", "agent_id": "m1-g3", "agent_type": "general-purpose"}}
 {"t": 5.7, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/a-sdn-portal", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m2-a3"}}

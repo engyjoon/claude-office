@@ -312,7 +312,8 @@ struct RoomTests {
         _ = apply(&state, session: "c")
         delegate(&state, "c", "t1")
         #expect(rows(state) == [["메인1"], ["메인2", "서브"]])
-        let beats = apply(&state, session: "c", "UserPromptSubmit", hint: child(of: "m"), ["prompt": "x"])
+        // 힌트는 어느 훅에나 실려 옵니다. 새 요청(UserPromptSubmit)은 위임 중이던 앞 턴을 닫아 서브를 퇴근시키므로(개선 4) 다른 훅으로 확인합니다
+        let beats = apply(&state, session: "c", "PreCompact", hint: child(of: "m"))
         #expect(rows(state) == [["메인", "서브1", "서브2"]])
         let closed = beats.compactMap { if case .teamClosed(let team) = $0 { team } else { nil } }
         #expect(closed.count == 1)

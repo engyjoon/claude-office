@@ -72,9 +72,10 @@ public struct OfficeEngine: Sendable {
     }
 
     public mutating func tick(at now: Date) -> [Directive] {
-        // 끝 신호 없이 오래 "정리 중"인 세션을 풉니다 (M6(2))
+        // 끝 신호 없이 오래 "정리 중"인 세션을 풀고 (M6(2)), 출근 중을 넘기고, 아주 오래 조용한 턴·서브를 닫습니다 (개선 4)
         var out: [Directive] = []
-        let beats = state.expireCompaction(at: now)
+        state.settleArrivals(at: now)
+        let beats = state.expireCompaction(at: now) + state.expireSilence(at: now)
         if !beats.isEmpty {
             journal.record(beats, in: state, at: now)
             pendingNotices += notices.plan(beats, state: state, privacy: privacy)

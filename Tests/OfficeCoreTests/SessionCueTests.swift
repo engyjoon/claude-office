@@ -254,4 +254,20 @@ struct SessionCueTests {
         let line = StatusLine.make(state: h.engine.state, journal: h.engine.journal, privacy: .detailed, selected: nil, folder: nil)
         #expect(line.lines[0].segment.text == "답변 필요" && line.lines[0].segment.tone == .reply)
     }
+
+    @Test("Stop 없이 끝난 턴(중단)은 배지를 달지 않고, 쉼 단계를 밟는다. 다음 응답이 제대로 끝나면 평소처럼 확인 안 함")
+    func abandonedTurnHasNoBadge() {
+        var h = EngineHarness()
+        h.send(prompt, at: 0)
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"]), at: 2)
+        h.send(hook.make("Notification", ["notification_type": "idle_prompt", "message": "Claude is waiting for your input"]), at: 70)
+        #expect(cue(h) == nil)
+        #expect(lastBadge(h.actions(of: lead)) == nil)
+        #expect(h.engine.state.parts[SessionID("s1")]?.replyRequested == false)
+        h.advance(to: 135)
+        #expect(h.engine.choreographer.spot(of: lead) == .lounge)
+        h.send(prompt, at: 200)
+        h.send(stop("끝냈어요."), at: 210)
+        #expect(cue(h) == .unread)
+    }
 }

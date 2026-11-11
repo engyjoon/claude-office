@@ -224,14 +224,17 @@ public struct Choreographer: Sendable {
                 setEmote(agent.id, .sweat, into: &out)
                 out.append(Directive(agent.id, .sound(.error)))
                 say(agent.id, repeated ? "error.repeated" : "error.tool", into: &out)
-                modify(agent.id) {
-                    $0.shown = .thinking
-                    $0.shownAt = now
-                    $0.pending = agent.runningTools.last.map(Shown.working)
+                // 쉬는 사람에게 늦게 온 끝 신호(응답이 끝난 뒤 도착한 PostToolUse)는 모습을 일하는 중으로 바꾸지 않습니다 (개선 4)
+                if !agent.isResting {
+                    modify(agent.id) {
+                        $0.shown = .thinking
+                        $0.shownAt = now
+                        $0.pending = agent.runningTools.last.map(Shown.working)
+                    }
                 }
             } else if let next = agent.runningTools.last {
                 offer(agent.id, .working(next), at: now, into: &out)
-            } else {
+            } else if !agent.isResting {
                 offer(agent.id, .thinking, at: now, into: &out)
             }
 
@@ -341,6 +344,31 @@ public struct Choreographer: Sendable {
                 $0.rest = .none
                 $0.returnAt = nil
                 $0.compacting = false
+            }
+
+        case .turnAbandoned(let agent):
+            // 끝 신호 없이 닫힌 턴 (중단 등): 축하 없이 하던 일의 표시(칩·⏳·💡·외침 풍선·소품)를 거두고 자기 책상에 앉아 쉽니다.
+            // 쉼 단계는 지금부터 다시 셉니다. 뒤따르는 비트(입력 대기 "?", 새 요청)가 그다음 모습을 정합니다.
+            touch(agent)
+            guard presences[agent.id] != nil else { return }
+            resolveWaiting(agent.id, into: &out)
+            wake(agent.id, into: &out)
+            setPill(agent.id, nil, into: &out)
+            setEmote(agent.id, nil, into: &out)
+            out.append(Directive(agent.id, .prop(nil)))
+            move(agent.id, to: seatSpot(agent), into: &out)
+            out.append(Directive(agent.id, .pose(.sitting)))
+            out.append(Directive(agent.id, .express(.neutral)))
+            modify(agent.id) {
+                $0.shown = .idle
+                $0.shownAt = now
+                $0.pending = nil
+                $0.idleSince = now
+                $0.rest = .none
+                $0.returnAt = nil
+                $0.compacting = false
+                $0.watching = nil
+                $0.shellWatch = nil
             }
 
         case .compacting(let agent):

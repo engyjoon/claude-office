@@ -265,3 +265,114 @@ struct ChoreographerDetailTests {
         #expect(left.contains(Directive(lead, .prop(nil))))
     }
 }
+
+/// 개선 4: 끝 이벤트 없이 끝난 턴의 연출 (`Beat.turnAbandoned`)
+@Suite("끝 이벤트 없는 턴의 연출")
+struct ImplicitEndChoreographyTests {
+    let hook = Hook()
+    let lead = AgentID("lead-1")
+    let desk = Spot.seat(TeamID("/Users/demo/work/a-sdn-portal#1"), .main)
+    let idle: JSONObject = ["notification_type": "idle_prompt", "message": "Claude is waiting for your input"]
+
+    @Test("Stop 없이 끝난 턴: idle_prompt가 오면 칩·⏳를 내리고 앉아 쉬는 모습으로, 그 뒤 쉼 단계를 밟는다")
+    func idlePromptRests() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.make("UserPromptSubmit"), at: 1)
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm run build"]), at: 2)
+        h.advance(to: 10)
+        #expect(h.actions(of: lead).contains(.emote(.hourglass)))
+        let ended = h.send(hook.make("Notification", idle), at: 70)
+        #expect(ended.contains(Directive(lead, .status(nil))))
+        #expect(ended.contains(Directive(lead, .pose(.sitting))))
+        #expect(!ended.contains(Directive(lead, .emote(.sparkle))))  // 끝낸 것이 아니라 축하하지 않습니다
+        #expect(!ended.sounds.contains(.turnComplete))
+        #expect(ended.contains(Directive(lead, .emote(.question))))  // 입력 대기 "?"
+        h.advance(to: 135)
+        #expect(h.engine.choreographer.spot(of: lead) == .lounge)
+    }
+
+    @Test("화이트보드에서 일하다 끊긴 턴은 자기 책상으로 돌아와 쉰다")
+    func returnsToDesk() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.tool("PreToolUse", "TodoWrite", id: "p", input: [:]), at: 1)
+        h.advance(to: 7)
+        #expect(h.engine.choreographer.spot(of: lead) == .whiteboard)
+        h.send(hook.make("Notification", idle), at: 70)
+        #expect(h.engine.choreographer.spot(of: lead) == desk)
+    }
+
+    @Test("승인 대기 중 끊긴 턴: 외침 풍선과 노크를 거두고 손을 내린다")
+    func dismissesShout() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.tool("PreToolUse", "Bash", id: "b", input: ["command": "npm test"]), at: 1)
+        h.send(hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "npm test"]), at: 1.2)
+        let ended = h.send(hook.make("Notification", idle), at: 20)
+        #expect(ended.contains(Directive(lead, .dismissBubble)))
+        #expect(ended.contains(Directive(lead, .pose(.sitting))))
+        let before = h.all.sounds.filter { $0 == .knock }.count
+        h.advance(to: 120)
+        #expect(h.all.sounds.filter { $0 == .knock }.count == before)
+    }
+
+    @Test("새 요청으로 앞 턴이 닫히면 남은 서브는 보고 연출 없이 퇴근하고, 메인은 새 일을 시작한다")
+    func promptDismissesMembers() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.make("UserPromptSubmit"), at: 1)
+        h.send(hook.tool("PreToolUse", "Agent", id: "a1", input: ["subagent_type": "general-purpose"]), at: 2)
+        let member = AgentID("member-2")
+        let directives = h.send(hook.make("UserPromptSubmit"), at: 30)
+        #expect(!h.engine.choreographer.isPresent(member))
+        #expect(directives.contains(Directive(member, .despawn)))
+        #expect(!directives.contains(Directive(member, .gesture(.highFive))))
+        #expect(directives.contains(Directive(nil, .effect(.paperPlane(to: lead)))))
+        #expect(directives.contains(Directive(lead, .pose(.thinking))))
+    }
+
+    @Test("응답이 끝난 뒤 늦게 온 PostToolUse는 쉬는 사람을 일하는 모습으로 바꾸지 않는다")
+    func latePostAfterStop() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "ls"]), at: 1)
+        h.send(hook.make("Stop"), at: 5)
+        let late = h.send(hook.tool("PostToolUse", "Bash", id: "b1", input: [:]), at: 5.2)
+        #expect(!late.contains(Directive(lead, .pose(.thinking))))
+        h.advance(to: 70)
+        #expect(h.engine.choreographer.spot(of: lead) == .lounge)
+    }
+
+    @Test("응답 중의 압축 도중 끊긴 턴: 서류를 내려놓고 쉬는 모습으로")
+    func abandonedDuringCompaction() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.make("UserPromptSubmit"), at: 1)
+        h.send(hook.make("PreCompact"), at: 3)
+        let ended = h.send(hook.make("Notification", idle), at: 90)
+        #expect(ended.contains(Directive(lead, .prop(nil))))
+        #expect(ended.last { if case .pose = $0.action { true } else { false } } == Directive(lead, .pose(.sitting)))
+        h.advance(to: 155)
+        #expect(h.engine.choreographer.spot(of: lead) == .lounge)
+    }
+
+    @Test("오래 훅이 없는 바쁜 세션은 tick에서 쉬는 모습으로 풀린다")
+    func silenceUnsticks() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.send(hook.tool("PreToolUse", "Edit", id: "e1", input: ["file_path": "/x/A.swift"]), at: 1)
+        h.advance(to: OfficeState.silenceLimit + 2)
+        #expect(h.engine.state.lead(of: SessionID("s1"))?.activity == .idle)
+        #expect(h.all.last { if case .status = $0.action { true } else { false } } == Directive(lead, .status(nil)))
+    }
+
+    @Test("출근 중은 tick에서 쉬는 중으로 넘어간다")
+    func arrivalSettles() {
+        var h = EngineHarness()
+        h.send(hook.make("SessionStart"))
+        h.advance(to: OfficeState.arrivalGrace + 1)
+        #expect(h.engine.state.lead(of: SessionID("s1"))?.activity == .idle)
+        #expect(Roster.make(from: h.engine.state, privacy: .detailed).teams.first?.rows.first?.status == .idle)
+    }
+}

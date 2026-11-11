@@ -387,3 +387,80 @@ struct NotificationPlannerTests {
         #expect(posts(both.send(hook.make("Stop"))).map(\.kind) == [.completion])
     }
 }
+
+/// 개선 4: 끝 이벤트 없는 턴·서브의 승인 요청·세션 id가 바뀐 뒤의 알림
+@Suite("알림 판단: 암묵적 종료와 세션 id 바뀜")
+struct ImplicitEndNoticeTests {
+    typealias Office = NotificationPlannerTests.Office
+    let hook = Hook()
+    let worker = (id: "g1", type: "general-purpose")
+    let idle: JSONObject = ["notification_type": "idle_prompt", "message": "Claude is waiting for your input"]
+    let permission: JSONObject = ["notification_type": "permission_prompt", "message": "Claude needs your permission"]
+
+    func posts(_ actions: [NoticeAction]) -> [OfficeNotice] {
+        actions.compactMap { if case .post(let notice) = $0 { notice } else { nil } }
+    }
+
+    func removed(_ actions: [NoticeAction]) -> [String] {
+        actions.flatMap { action -> [String] in
+            if case .remove(let ids) = action { return ids }
+            return []
+        }
+    }
+
+    @Test("Stop 없이 끝난 턴: idle_prompt가 오면 승인 대기 알림을 지우고, 응답 완료 알림은 띄우지 않음")
+    func idlePromptClearsPermission() throws {
+        var office = Office(settings: NotificationSettings(permission: true, completion: true))
+        office.send(hook.make("UserPromptSubmit", ["prompt": "x"]))
+        office.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"]))
+        let id = try #require(posts(office.send(hook.tool("PermissionRequest", "Bash", id: nil, input: ["command": "npm test"]))).first?.id)
+        office.clock += 60
+        let ended = office.send(hook.make("Notification", idle))
+        #expect(removed(ended) == [id])
+        #expect(posts(ended).isEmpty)
+        #expect(office.engine.notices.openPermissionCount == 0)
+    }
+
+    @Test("서브의 승인 요청 알림(agent_id 없음)은 서브의 직함·도구로 띄우고, 그 도구가 끝나면 지움")
+    func subagentNotification() throws {
+        var office = Office()
+        office.send(hook.tool("PreToolUse", "Agent", id: "t1", input: ["subagent_type": "general-purpose", "description": "조사"]))
+        office.send(hook.make("SubagentStart", agent: worker))
+        office.send(hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "npm test"], agent: worker))
+        let asked = posts(office.send(hook.make("Notification", permission)))
+        let notice = try #require(asked.first)
+        #expect(asked.count == 1)
+        #expect(notice.title == "서브 승인 대기")
+        #expect(notice.body == "Bash npm test · 승인이 필요해요")
+        let done = office.send(hook.tool("PostToolUse", "Bash", id: "b1", input: ["command": "npm test"], agent: worker, extra: [("tool_response", [:])]))
+        #expect(removed(done) == [notice.id])
+        #expect(office.engine.notices.openPermissionCount == 0)
+    }
+
+    @Test("데스크톱 앱이 CLI 세션 id를 바꿔도 응답 완료·답변 필요 알림을 새 요청 때 지움")
+    func rekeyedSessionNotices() throws {
+        var office = Office(settings: NotificationSettings(permission: true, completion: true, reply: true))
+        let old = Hook(session: "A"), renewed = Hook(session: "A2")
+        let before = SessionHint(hostSession: "local_a", hostCliSession: SessionID("A"))
+        let after = SessionHint(hostSession: "local_a", hostCliSession: SessionID("A2"))
+
+        office.send(old.make("UserPromptSubmit", ["prompt": "x"]), hint: before)
+        let done = try #require(posts(office.send(old.make("Stop"), hint: before)).first)
+        #expect(done.kind == .completion)
+        let lead = try #require(office.engine.state.lead(of: SessionID("A")))
+        // 같은 데스크톱 세션이 새 CLI id로 요청을 받음 → 같은 사람, 앞 응답의 완료 알림을 지움
+        let next = office.send(renewed.make("UserPromptSubmit", ["prompt": "y"]), hint: after)
+        #expect(office.engine.state.lead(of: SessionID("A2"))?.id == lead.id)
+        #expect(removed(next) == [done.id])
+
+        // 답변 필요도 같음: 질문으로 끝난 뒤 id가 바뀌고 답하면 지움, 같은 사람의 다음 질문은 같은 알림 자리
+        let asked = try #require(posts(office.send(renewed.make("Stop", ["last_assistant_message": "어느 쪽으로 할까요?"]), hint: after)).first)
+        #expect(asked.kind == .reply)
+        let third = SessionHint(hostSession: "local_a", hostCliSession: SessionID("A3"))
+        let answered = office.send(Hook(session: "A3").make("UserPromptSubmit", ["prompt": "z"]), hint: third)
+        #expect(removed(answered) == [asked.id])
+        let again = posts(office.send(Hook(session: "A3").make("Stop", ["last_assistant_message": "이대로 진행할까요?"]), hint: third))
+        #expect(again.map(\.kind) == [.reply])
+        #expect(again.first?.agent == lead.id)
+    }
+}

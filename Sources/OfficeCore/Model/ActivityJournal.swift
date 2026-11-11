@@ -62,6 +62,7 @@ public struct ActivityJournal: Hashable, Sendable {
         for beat in beats {
             switch beat {
             case .working(let agent, let call):
+                closeStale(agent)
                 append(agent, .tool(call), state: .running, in: state, at: now)
 
             case .toolEnded(let agent, let call, let outcome):
@@ -78,6 +79,7 @@ public struct ActivityJournal: Hashable, Sendable {
                 }
 
             case .permissionAsked(let agent, let call):
+                if call?.asksUser == true { closeStale(agent) }
                 if let index = openToolIndex(of: agent.id, matching: call, allowAny: call == nil) {
                     entries[index].state = .awaitingPermission
                     entries[index].since = now
@@ -95,6 +97,7 @@ public struct ActivityJournal: Hashable, Sendable {
                 }
 
             case .delegated(let by, let member):
+                closeStale(by)
                 // 서브가 보고할 때까지 진행 중 (위임한 사람의 줄에 경과 시간)
                 append(by, .delegated(member: member.id, title: member.displayName), state: .running, in: state, at: now)
 
@@ -107,8 +110,8 @@ public struct ActivityJournal: Hashable, Sendable {
                     entries[index].state = .succeeded
                 }
 
-            case .promptArrived(let agent), .turnEnded(let agent, _):
-                // 새 요청·응답 끝: 결과가 안 온 툴은 닫습니다 (리듀서도 이때 진행 중인 툴을 비움)
+            case .promptArrived(let agent), .turnEnded(let agent, _), .turnAbandoned(let agent):
+                // 새 요청·응답 끝(끝 신호 없이 닫힌 턴 포함): 결과가 안 온 툴은 닫습니다 (리듀서도 이때 진행 중인 툴을 비움)
                 close(agent.id)
 
             case .left(let agent):
@@ -146,6 +149,25 @@ public struct ActivityJournal: Hashable, Sendable {
         if let id = call?.id, let index = open.last(where: { target($0)?.id == id }) { return index }
         if let name = call?.name, let index = open.last(where: { target($0)?.name == name }) { return index }
         return allowAny ? open.last(where: { entries[$0].state == .running }) : nil
+    }
+
+    /// 새 도구를 시작한 사람의 열린 도구·승인 기록 중 리듀서가 이미 버린 것(끝 신호 없이 남았다가 새 묶음이 시작됨)을 닫습니다.
+    /// `agent`는 비트에 실린 그때의 모습이라 `runningTools`가 지금 도는 도구입니다. 위임 기록은 서브가 끝날 때 닫습니다.
+    private mutating func closeStale(_ agent: Agent) {
+        for index in entries.indices where entries[index].agent == agent.id && entries[index].state.isOpen {
+            let call: ToolCall?
+            switch entries[index].kind {
+            case .tool(let tool): call = tool
+            case .permission(let tool): call = tool
+            case .delegated, .reported: continue
+            }
+            let running = agent.runningTools.contains { tool in
+                guard let call else { return false }
+                if let a = call.id, let b = tool.id { return a == b }
+                return call.name == tool.name
+            }
+            if !running { entries[index].state = .closed }
+        }
     }
 
     private mutating func close(_ agent: AgentID, delegations: Bool = false) {

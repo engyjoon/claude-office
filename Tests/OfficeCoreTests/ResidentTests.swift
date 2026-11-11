@@ -260,4 +260,22 @@ struct ResidentTests {
         #expect(engine.state.lead(of: SessionID("C"))?.teamID == a.teamID)
         #expect(directives.sounds.isEmpty)
     }
+
+    @Test("SessionEnd를 보낸 데스크톱 세션도 목록에 열려 있으면 다시 조용히 앉고, 그 뒤 훅은 평소처럼 받는다")
+    func endedResidentSettlesAgain() throws {
+        var engine = OfficeEngine(seed: 1)
+        _ = engine.syncResidents(roll(standard), at: at(0))
+        _ = engine.handle(try hook("B", "SessionEnd", hint: nil, at: 5, cwd: Self.blog))
+        #expect(engine.state.lead(of: SessionID("B")) == nil)
+        // 끝난 직후 늦게 온 훅은 버립니다
+        #expect(engine.handle(try hook("B", "Stop", hint: nil, at: 5.5, cwd: Self.blog)).isEmpty)
+        #expect(engine.state.lead(of: SessionID("B")) == nil)
+        // 데스크톱 앱 목록에는 열려 있음 → 다시 앉고, 이어 오는 훅은 그 사람이 받음
+        _ = engine.syncResidents(roll(standard, readAt: 6), at: at(6))
+        let b = try #require(engine.state.lead(of: SessionID("B")))
+        #expect(b.activity == .idle)
+        _ = engine.handle(try hook("B", "PreCompact", hint: nil, at: 7, cwd: Self.blog))
+        #expect(engine.state.lead(of: SessionID("B"))?.activity == .compacting)
+        #expect(engine.state.lead(of: SessionID("B"))?.id == b.id)
+    }
 }
