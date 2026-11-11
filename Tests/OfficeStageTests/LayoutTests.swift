@@ -26,6 +26,28 @@ struct VectorPathTests {
     func numbers() {
         #expect(VectorPath.parse("M1e1-2L.5.5") == [.move(MapPoint(10, -2)), .line(MapPoint(0.5, 0.5))])
     }
+
+    @Test("Z 뒤에 숫자가 와도 끝없이 돌지 않고 거기까지만 읽는다", .timeLimit(.minutes(1)))
+    func numberAfterClose() {
+        #expect(VectorPath.parse("M0,0 L10,0 Z 5,5") == [.move(.zero), .line(MapPoint(10, 0)), .close])
+        #expect(VectorPath.parse("M0,0 L10,0 z 5 L1,1") == [.move(.zero), .line(MapPoint(10, 0)), .close])
+        // Z 뒤에 명령이 오면 계속 읽습니다
+        #expect(VectorPath.parse("M0,0 L10,0 Z M5,5 L6,6").count == 5)
+        // 알 수 없는 글자·끊긴 좌표도 거기서 끝납니다
+        #expect(VectorPath.parse("M0,0 L10") == [.move(.zero)])
+        #expect(VectorPath.parse("M0,0 # L1,1") == [.move(.zero)])
+    }
+
+    @Test("리그용 해시는 Int.min에서도 죽지 않고 음수가 아니다")
+    func hashNeverNegative() {
+        #expect(StableHashLite.nonNegative(.min) == 0)
+        #expect(StableHashLite.nonNegative(-5) == 5)
+        #expect(StableHashLite.nonNegative(.max) == .max)
+        #expect(StableHashLite.nonNegative(.min + 1) == .max)
+        for text in ["", "메인1", "star-x3", String(repeating: "가", count: 200)] {
+            #expect(StableHashLite.value(text) >= 0)
+        }
+    }
 }
 
 @Suite("사무실 배치")

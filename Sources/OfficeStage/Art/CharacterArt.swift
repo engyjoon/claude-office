@@ -513,6 +513,11 @@ enum StableHashLite {
     static func value(_ text: String) -> Int {
         var hash = 5381
         for byte in text.utf8 { hash = (hash &* 33) ^ Int(byte) }
-        return abs(hash)
+        return nonNegative(hash)
+    }
+
+    /// 절댓값. `abs(Int.min)`은 넘쳐서 죽으므로 그 값만 0으로 둡니다 (나머지는 `abs`와 같은 값)
+    static func nonNegative(_ hash: Int) -> Int {
+        hash == .min ? 0 : abs(hash)
     }
 }

@@ -82,6 +82,8 @@ public enum VectorPath {
                 current = p
                 lastControl = c
             case "Z":
+                // Z는 좌표를 받지 않습니다. 뒤에 숫자가 오면 (잘못된 경로) 그 숫자를 먹지 못해 같은 자리를 끝없이 돌므로 거기서 멈춥니다
+                if case .number = token { return commands }
                 commands.append(.close)
                 current = start
                 lastControl = nil
