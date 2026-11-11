@@ -181,12 +181,10 @@ struct AgentCard: View {
                     label("어디서")
                     HStack(spacing: 6) {
                         Text(place).font(.system(size: 12)).lineLimit(1)
-                        if let focus = row.focusLabel {
-                            Button(focus, action: onFocus)
+                        if let destination = row.destination {
+                            Button(destination.label, action: onFocus)
                                 .controlSize(.mini)
-                                .help(row.hostSession != nil
-                                    ? "Claude 데스크톱 앱에서 이 세션을 열어요. 캐릭터를 더블클릭해도 돼요."
-                                    : "이 세션이 열린 \(place) 창을 앞으로 가져와요. 캐릭터를 더블클릭해도 돼요.")
+                                .help("\(destination.buttonHelp). 캐릭터를 더블클릭해도 돼요.")
                         }
                     }
                 }
@@ -263,7 +261,7 @@ struct AgentCard: View {
 
     /// "Claude 데스크톱 앱", "iTerm2", 모르면 nil
     private var place: String? {
-        row.hostSession != nil ? "Claude 데스크톱 앱" : TerminalFocuser.displayName(for: row.term)
+        row.hostSession != nil ? "Claude 데스크톱 앱" : SessionDestination.displayName(term: row.term)
     }
 
     private var kindLabel: String {

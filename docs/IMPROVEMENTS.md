@@ -15,7 +15,7 @@
 | 3 | 비밀값 가림 순서·규칙 | Sonnet 5.5 (medium) | 완료(커밋) | 300자로 먼저 자르고 → 가리고 → 경로 줄이고 → 40자. 빈칸 구분은 `--플래그 값`만, `curl -u`·`sshpass -p`·`mysql -p값`·`Authorization: Basic` 추가 |
 | 4 | 끝 이벤트 없는 턴·도구·세션 복구 | Fable 5.2 (high) | 완료(커밋) | 암묵적 종료 규칙(설계서 §5.3): idle_prompt·새 요청·1시간 침묵으로 턴 닫기, 2초 넘게 떨어진 Pre는 새 묶음, 서브의 승인 알림은 서브에게, 끝난 세션 30초 기억, 출근 중 10초. 터미널 세션의 시간 기반 퇴근은 넣지 않음(선택지는 결과에). 화면 확인 필요 |
 | 5 | 행 머무름·화면 밖 서브 신호 | Opus 5.5 (high) | 완료(커밋) | 보이던 행은 쉬거나 45초 조용할 때만 밀려남(승인 대기 숨은 행은 바로), 숨은 서브의 신호를 거둬 메인이 하이파이브 없이 바로 진행, 미니 초점 전환 때 다른 행의 퇴근자 치움, 남은 신호 지움, 길찾기 격자는 묶음당 한 번·장애물이 같으면 그대로. 화면 확인 필요 |
-| 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 대기 | |
+| 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 완료(커밋) | 알림 권한을 보내기 직전에 다시 읽고 켤 때·끌 때 알림 지움, 이동 판정을 `SessionDestination` 하나로(모르는 터미널은 버튼 없음, `openApplication`), `HookAlert`로 메뉴 배너·사무실 창 띠·메뉴바 아이콘에 고장 표시와 설치 결과, 첫 실행 환영 창. Cursor 구별 불가·미니에는 안 넣음. 화면 확인 필요 |
 | 7 | 훅 서버·설정 파일 안전 (+ 죽은 터미널 세션 퇴근) | Sonnet 5.5 (medium) | 대기 | |
 | 8 | 화면 디자인 다듬기 | Opus 5.5 (high) | 대기 | |
 | 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 대기 | |
@@ -184,7 +184,23 @@
 
 **완료 기준**: `make app` 통과. 권한·이동·알림 동작은 "화면 확인 필요"로 적습니다.
 
-**결과**:
+**결과** (2026-11-11, `make test` 473개 통과, `make app` 성공):
+
+- **확인**: 적힌 문제는 모두 코드에 있었습니다. 메뉴 승인 대기 줄은 `term != nil`이면 버튼을 보여 주고, 버튼이 없는 줄의 더블클릭은 `TerminalFocuser`로 바로 가서 `acknowledge`·로그를 건너뛰었습니다. 알림 클릭도 `acknowledge`를 하지 않았습니다.
+- **알림 권한**: 허용되지 않은 상태로 기억하고 있으면 보내기 직전에 권한을 다시 읽고(그동안 쌓아 둠), 허용이면 보내고 아직 묻지 않았으면 묻고 거부면 버립니다. 앱이 활성화될 때도 다시 읽습니다. `.badge` 요청을 뺐고, `.passive`(조용히 바꾸는) 알림은 `willPresent`에서 배너 없이 목록만.
+- **이동 한 곳으로**: OfficeCore `SessionDestination`(갈 곳·버튼 문구·도움말·번들 id 후보)과 `RosterRow.destination`·`canFocus`·`focusLabel`, 앱의 `SessionFocuser`(옛 `TerminalFocuser`·`DesktopAppFocuser`를 합침). 모르는 터미널이면 버튼·도움말·VoiceOver 동작이 없고, 메뉴 줄·알림 클릭도 `focusAgent`처럼 `acknowledge`와 로그를 거치며, 앱을 찾지 못하거나 열지 못하면 로그에 까닭을 남깁니다. 활성화는 `NSWorkspace.openApplication(at:configuration:)`(activates).
+- **Cursor**: 훅 스크립트는 `X-Office-Term: $TERM_PROGRAM`과 `X-Office-Host-Session`만 보내고, Cursor도 `TERM_PROGRAM=vscode`라 구별할 수 없습니다. 지금 방식(실행 중인 VS Code → Insiders → Cursor 중 첫 앱)을 유지합니다. VS Code와 Cursor를 함께 띄워 두면 Cursor 세션이 VS Code를 올립니다. 구별하려면 훅 스크립트가 `__CFBundleIdentifier`(macOS가 앱에서 띄운 프로세스에 넣는 값)를 더 보내야 하는데, 스크립트를 바꾸면 모든 사용자가 다시 설치해야 해서 7번(훅 서버·설정 파일)과 함께 판단할 일로 남깁니다.
+- **고장이 보이게**: OfficeServer `HookAlert.evaluate`(서버 멈춤 > settings.json 못 읽음 > 막힘 > 설치 안 됨 > 스크립트 낡음 > 이벤트 빠짐, 하나만)를 메뉴 배너·사무실 창 위쪽 30pt 띠(버튼 [훅 설치]/[다시 설치]/[연동 설정…] + "자세히…")·메뉴바 아이콘(오른쪽 위 빨강/주황 느낌표 원, VoiceOver "연동 문제: …")이 같이 씁니다. 설정 창 탭을 `settings.tab`에 기억해 띠에서 연동 탭으로 열 수 있습니다. 메뉴·띠·환영 창의 설치는 결과(성공 + "이미 실행 중인 Claude Code 세션은 다시 시작해야 적용돼요", 실패 + 까닭)를 닫을 때까지 보여 줍니다.
+- **미니에는 넣지 않음**: 머리줄(20pt)이 상태와 다른 메인 칩으로 차 있고, 미니가 보일 때도 메뉴바 아이콘의 느낌표가 늘 보여서입니다.
+- **남는 알림**: `Notifier`가 켤 때(init)와 끌 때(`shutdown`) 이 앱의 알림을 모두 지웁니다. 끌 때 지우기는 프로세스가 끝나기 전에 끝나지 않을 수 있어 켤 때 한 번 더 지웁니다.
+- **첫 실행**: `MenuBarExtra` 드롭다운은 코드로 열 API가 없어 작은 환영 창(AppKit `NSWindow` + SwiftUI, 두 줄 소개, [훅 설치]·[사무실 보기]·[닫기])으로 했습니다. 훅이 설치돼 있지 않고 스크립트도 없을 때만 열고, 처음 켤 때 `onboarding.welcomeShown`을 기록하므로 이미 훅을 설치한 사용자에게는 뜨지 않습니다.
+- **테스트**: `SessionDestinationTests`(데스크톱 우선, 아는 터미널, VS Code 후보 순서, tmux·zed·빈 값, 명단 줄), `HookAlertTests`(우선순위·버튼·색), `AccessibilityTextTests.menuBarProblem`.
+- **화면 확인 필요**:
+  1. 알림 권한: 시스템 설정에서 Claude Office 알림을 끈 채 앱을 켜고 승인 대기를 만든 뒤, 알림을 허용하고 다시 승인 대기를 만들면 알림이 떠야 합니다. 사무실 창을 앞에 둔 채 직함이 바뀌면(서브 번호 바뀜) 배너가 다시 뜨지 않아야 합니다.
+  2. 남는 알림: 승인 대기 알림을 띄운 채 앱을 끄면(또는 다시 켜면) 알림 센터에서 사라져야 합니다.
+  3. 이동: 메뉴 승인 대기 줄의 [터미널로]/[앱으로]가 미니만 보이는 상태(다른 앱이 앞)에서도 그 앱을 앞으로 가져오는지, 이벤트 로그에 "세션으로 이동 · …"이 남는지. tmux 안에서 연 세션은 버튼·도움말이 없어야 합니다.
+  4. 띠·아이콘: 개발용으로 띄운 앱에서 `~/.claude` 를 건드리지 않고 확인하려면 `CLAUDE_OFFICE_ENDPOINT`를 다른 파일로 두고 서버 포트를 막거나(서버 실패) 설치 안 된 계정에서 봅니다. 띠의 버튼이 설치·설정 → 연동 탭으로 가는지, 메뉴바 아이콘 느낌표가 밝은·어두운 메뉴바에서 보이는지, VoiceOver가 "연동 문제"를 먼저 읽는지.
+  5. 환영 창: 새 사용자 계정(또는 `defaults delete com.engyjoon.claudeoffice onboarding.welcomeShown` + 훅 없는 상태)에서 처음 켜면 한 번 뜨고, 다시 켜면 뜨지 않아야 합니다. 창이 다른 앱 뒤에 깔리지 않는지도 봅니다.
 
 ## 7. 훅 서버·설정 파일 안전
 
@@ -302,3 +318,8 @@
 - **tick에서만 바뀐 상태가 앱에 늦게 보임**: `AppModel.frame()`은 `engine.tick`의 지시만 무대에 넘기고 명단·현황 줄·알림은 고치지 않아, 압축 시간 초과·출근 중 → 쉬는 중·1시간 규칙이 다음 훅이나 5초마다 도는 `syncResidents` 때 반영됩니다. 11번의 `commit(_:at:)` 통합에서 tick 경로도 같이 태우면 됩니다. (`App/Sources/AppModel.swift:316`, `:502`)
 - **시나리오가 실제와 다른 곳**: `Scenarios/mini.jsonl` 14.2초의 `Notification`에 `agent_id`가 실려 있지만 실제 알림에는 없습니다(4번 전제 확인). 지금 동작에는 영향이 없습니다.
 - **죽은 터미널 세션이 자리에 남음**: PID 확인 방식으로 7번 항목에 넣었습니다 (사용자 결정).
+
+6번 항목을 하다가 (2026-11-11):
+
+- **사무실 창 Return 키의 `where`**: `OfficeSKView.keyDown`의 `case 36, 76 where modifiers.isEmpty`는 `where`가 76(Enter)에만 걸려, 수식키를 누른 Return도 이동을 합니다(빌드 경고). 9번(잔손질)에서 `case 36 where …, 76 where …`로 나누면 됩니다. (`App/Sources/ClaudeOfficeApp.swift`의 `keyDown`)
+- **Cursor 세션 구별**: 훅 스크립트가 `__CFBundleIdentifier`를 함께 보내면 VS Code·Cursor·Insiders를 구별할 수 있습니다. 스크립트 변경은 다시 설치가 필요하므로 7번에서 판단합니다.

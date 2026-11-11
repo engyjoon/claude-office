@@ -81,11 +81,13 @@ public enum AccessibilityText {
     }
 
     /// 메뉴바 아이콘: "Claude Office, 승인 대기 1명, 일하는 중 2명, 쉬는 중 3명" (상태 점의 색을 말로)
-    public static func menuBar(_ roster: Roster) -> String {
+    /// - Parameter problem: 훅 연동 경고 한 줄 (개선 6). 있으면 사람 수보다 먼저 읽습니다.
+    public static func menuBar(_ roster: Roster, problem: String? = nil) -> String {
+        let head = ["Claude Office"] + (problem.map { ["연동 문제: \($0)"] } ?? [])
         let rows = roster.teams.flatMap(\.rows)
-        guard !rows.isEmpty else { return "Claude Office, 출근한 직원 없음" }
+        guard !rows.isEmpty else { return (head + ["출근한 직원 없음"]).joined(separator: ", ") }
         let counts = statusCounts(rows)
-        return (["Claude Office"] + counts.map { "\($0.label) \($0.count)명" }).joined(separator: ", ")
+        return (head + counts.map { "\($0.label) \($0.count)명" }).joined(separator: ", ")
     }
 
     /// 상태 묶음별 사람 수 (현황 줄의 행 순서와 같음: 승인 대기 > 답변 필요 > 일하는 중 > 새 응답 > 쉬는 중). 0명인 묶음은 뺍니다.

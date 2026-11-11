@@ -73,6 +73,14 @@ struct AccessibilityTextTests {
         #expect(AccessibilityText.menuBar(roster) == "Claude Office, 승인 대기 1명, 답변 필요 1명, 일하는 중 2명, 새 응답 1명, 쉬는 중 1명")
     }
 
+    @Test("연동 경고가 있으면 메뉴바 아이콘은 사람 수보다 먼저 읽는다 (개선 6)")
+    func menuBarProblem() {
+        #expect(AccessibilityText.menuBar(.empty, problem: "훅 서버가 멈춰 있어요") == "Claude Office, 연동 문제: 훅 서버가 멈춰 있어요, 출근한 직원 없음")
+        let roster = Self.roster([Self.row("a", status: .idle)])
+        #expect(AccessibilityText.menuBar(roster, problem: "훅 스크립트를 업데이트해야 해요")
+            == "Claude Office, 연동 문제: 훅 스크립트를 업데이트해야 해요, 쉬는 중 1명")
+    }
+
     @Test("현황 줄은 화면 밖 표시를 말로 바꾸고 줄을 마침표로 잇는다")
     func statusLine() {
         let now = Fixture.epoch.addingTimeInterval(12)

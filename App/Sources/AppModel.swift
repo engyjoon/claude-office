@@ -20,6 +20,12 @@ final class AppModel {
         case failed(String)
     }
 
+    /// 훅 설치 결과 (개선 6)
+    struct InstallOutcome: Equatable {
+        var succeeded: Bool
+        var text: String
+    }
+
     struct LogEntry: Identifiable, Equatable {
         enum Kind: Equatable {
             case hook, directive, system
@@ -37,6 +43,8 @@ final class AppModel {
     private(set) var privacy: PrivacyLevel = .detailed
     private(set) var log: [LogEntry] = []
     private(set) var installMessage: String?
+    /// 마지막 훅 설치 결과 (메뉴 배너·사무실 창 띠·환영 창에 보여 줌, 개선 6). 닫거나 제거하면 nil.
+    private(set) var installOutcome: InstallOutcome?
     private(set) var isInstalling = false
     private(set) var receivedHooks = 0
     /// 마지막으로 훅을 받은 때 (설정 → 연동 "마지막 이벤트", M5(8))
@@ -92,6 +100,7 @@ final class AppModel {
     @ObservationIgnored private var directoryTimer: Timer?
     @ObservationIgnored private var loadingDirectories = false
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+    @ObservationIgnored private var activationObserver: NSObjectProtocol?
     @ObservationIgnored private var motionObserver: NSObjectProtocol?
     /// 승인 대기·답변 필요를 VoiceOver로 한 번씩 알림 (M6(7))
     @ObservationIgnored private var announcer = AccessibilityAnnouncer()
@@ -204,6 +213,13 @@ final class AppModel {
         DispatchQueue.main.async { [weak self] in
             self?.refreshLighting()
             self?.syncMiniPanel()
+            self?.showWelcomeIfFirstRun()
+        }
+        // 시스템 설정에서 알림 권한을 바꾸고 돌아왔을 때 (메뉴바 앱이라 드물지만, 설정·사무실 창을 누르면 활성화됨)
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.notifier.refreshAuthorization() }
         }
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -239,6 +255,7 @@ final class AppModel {
     }
 
     func shutdown() {
+        notifier.removeAll()  // 끈 뒤에 "승인 대기" 알림이 알림 센터에 남지 않게 (켤 때도 한 번 더 지움)
         timer?.invalidate()
         directoryTimer?.invalidate()
         server?.stop()
@@ -479,7 +496,7 @@ final class AppModel {
         guard !loadingDirectories else { return }
         loadingDirectories = true
         let directory = desktopSessions
-        let desktopActive = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == DesktopAppFocuser.bundleID
+        let desktopActive = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == SessionDestination.desktopBundleID
         Task.detached(priority: .utility) {
             let readAt = Date()
             let records = directory.allRecords()
@@ -597,50 +614,47 @@ final class AppModel {
     }
 
     /// 알림을 눌렀을 때: 데스크톱 앱 세션이면 Claude 데스크톱 앱을, CLI 세션이면 그 터미널을 앞으로 가져오고,
-    /// 사무실 창이 열려 있으면 그 캐릭터를 고릅니다.
+    /// 사무실 창이 열려 있으면 그 캐릭터를 고릅니다. 메뉴·사무실 창 경로와 같이 응답을 본 것으로 치고 로그를 남깁니다.
     private func open(_ target: Notifier.Target) {
         let part = target.session.flatMap { engine.state.parts[$0] }
         let agent = target.agent.flatMap { engine.state.agents[$0] }
-        focus(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term)
+        if let id = target.agent { acknowledge(id) }
+        let name = agent?.displayName ?? "알림"
+        let destination = SessionDestination.resolve(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term)
+        focus(destination, name: name, via: "알림 열기")
         if let id = target.agent, roster.row(for: id) != nil, isOfficeWindowOpen {
             if visibleRoster.row(for: id) == nil { selectAllFolders() }  // 다른 디렉토리를 보고 있었으면 모두로
             select(id)
         }
-        append(.system, "알림 열기: \(target.hostSession != nil ? "Claude 데스크톱 앱" : TerminalFocuser.displayName(for: target.term) ?? "알 수 없는 터미널")")
     }
 
-    /// 메뉴의 승인 대기 줄 "열기" 버튼 (알림을 누른 것과 같은 곳으로)
-    func focusSession(of row: RosterRow) {
-        focus(hostSession: row.hostSession, term: row.term)
-    }
-
-    /// 캐릭터·세션 줄 더블클릭, 인스펙터 [앱으로]/[터미널로] (M5(7)): 그 사람이 속한 세션의 Claude 앱이나 터미널을 앞으로.
-    /// 서브에이전트도 자기가 속한 세션 기준이고(`RosterRow.hostSession`·`term`은 세션의 것), 미리 출근해 쉬는 데스크톱 세션도 앱으로 갑니다.
+    /// 캐릭터·세션 줄 더블클릭, 인스펙터 [앱으로]/[터미널로], 메뉴의 승인 대기 줄 버튼 (M5(7), 설계서 §10.3):
+    /// 그 사람이 속한 세션의 Claude 앱이나 터미널을 앞으로. 서브에이전트도 자기가 속한 세션 기준이고
+    /// (`RosterRow.hostSession`·`term`은 세션의 것), 미리 출근해 쉬는 데스크톱 세션도 앱으로 갑니다.
     func focusAgent(_ id: AgentID) {
         guard let row = roster.row(for: id) else { return }
         acknowledge(id)
-        guard row.focusLabel != nil else {
-            append(.system, "\(row.name): 앞으로 가져올 앱을 몰라요")
-            return
-        }
-        focusSession(of: row)
-        append(.system, "\(row.name) 세션으로 이동: \(row.hostSession != nil ? "Claude 데스크톱 앱" : TerminalFocuser.displayName(for: row.term) ?? "터미널")")
+        focus(row.destination, name: row.name, via: "세션으로 이동")
     }
 
     /// 마우스를 올린 캐릭터의 도움말 (M5(7)). 미니는 한 번 누르면 사무실 창이 열린다는 것도 알려 줍니다.
     func hoverHelp(for id: AgentID, mini: Bool) -> String? {
         guard let row = roster.row(for: id) else { return nil }
-        let jump = row.focusLabel.map { "더블클릭하면 \($0) 이동" }
+        let jump = row.destination?.doubleClickHelp
         if mini { return [row.name, "누르면 사무실 창", jump].compactMap { $0 }.joined(separator: " · ") }
         return [row.name, jump].compactMap { $0 }.joined(separator: " · ")
     }
 
-    private func focus(hostSession: String?, term: String?) {
-        if let hostSession {
-            // 데스크톱 앱의 세션 이어 하기 딥링크로 그 세션 화면까지 엽니다 (M5(7b))
-            DesktopAppFocuser.focus(session: hostSession)
-        } else {
-            TerminalFocuser.focus(term: term)
+    /// 갈 곳의 앱을 앞으로 가져오고 로그에 남깁니다. 갈 곳을 모르거나 열지 못하면 그것도 로그에 (조용히 실패하지 않게).
+    private func focus(_ destination: SessionDestination?, name: String, via: String) {
+        guard let destination else {
+            append(.system, "\(via) · \(name): 앞으로 가져올 앱을 몰라요")
+            return
+        }
+        append(.system, "\(via) · \(name): \(destination.displayName)")
+        SessionFocuser.focus(destination) { [weak self] error in
+            guard let error else { return }
+            self?.append(.system, "\(via) · \(name): \(destination.displayName)을(를) 열지 못했어요 (\(error))")
         }
     }
 
@@ -741,7 +755,9 @@ final class AppModel {
         openSettingsAction = { action() }
     }
 
-    func openSettingsWindow() {
+    /// 설정 창을 엽니다. `tab`을 주면 그 탭으로 (경고 띠의 "연동 설정…", 개선 6).
+    func openSettingsWindow(tab: SettingsTab? = nil) {
+        if let tab { UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.storageKey) }
         WindowFront.bring(open: openSettingsAction) { SettingsWindow.window }
     }
 
@@ -855,16 +871,18 @@ final class AppModel {
 
     /// 설정 → 연동의 훅 상태 (M5(8)). `now`가 바뀌면 "12초 전"도 바뀝니다.
     func hookHealth(now: Date = Date()) -> HookHealth {
+        HookHealth.evaluate(hookHealthInput, now: now)
+    }
+
+    private var hookHealthInput: HookHealth.Input {
         let port: UInt16?, error: String?
         switch serverState {
         case .running(let p): (port, error) = (p, nil)
         case .stopped: (port, error) = (nil, nil)
         case .failed(let message): (port, error) = (nil, message)
         }
-        return HookHealth.evaluate(
-            .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
-                  eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker),
-            now: now)
+        return .init(status: hookStatus, script: hookScript, port: port, serverError: error, lastEventAt: lastHookAt,
+                     eventCount: receivedHooks, version: claudeVersion, blocker: hookBlocker)
     }
 
     func installHooks() {
@@ -892,17 +910,51 @@ final class AppModel {
             if let backup = report.backup { message += "\n기존 설정 백업: \(backup.lastPathComponent)" }
             message += "\n이미 실행 중인 Claude Code 세션은 다시 시작해야 적용돼요."
             installMessage = message
+            installOutcome = InstallOutcome(
+                succeeded: true, text: "훅을 설치했어요 (이벤트 \(report.events.count)개). 이미 실행 중인 Claude Code 세션은 다시 시작해야 적용돼요.")
             append(.system, "훅 설치: \(report.events.joined(separator: ", "))")
         case .failure(let error):
             installMessage = "설치하지 못했어요: \(error)"
+            installOutcome = InstallOutcome(succeeded: false, text: "훅을 설치하지 못했어요: \(error)")
             append(.system, "훅 설치 실패: \(error)")
         }
         refreshHookStatus()
     }
 
+    /// 설치 결과 배너·띠를 닫습니다
+    func dismissInstallOutcome() {
+        installOutcome = nil
+    }
+
+    /// 훅 연동 경고 (사무실 창 띠·메뉴바 아이콘·메뉴 배너, 개선 6). 정상이면 nil.
+    var hookAlert: HookAlert? { HookAlert.evaluate(hookHealthInput) }
+
+    /// 경고 띠의 버튼
+    func perform(_ action: HookAlert.Action) {
+        switch action {
+        case .install, .reinstall: installHooks()
+        case .openSettings: openSettingsWindow(tab: .connection)
+        }
+    }
+
+    // MARK: - 첫 실행 안내 (개선 6)
+
+    static let welcomeShownKey = "onboarding.welcomeShown"
+
+    /// 훅이 설치돼 있지 않은 첫 실행에 환영 창을 한 번만 엽니다. 이미 쓰고 있는 사용자(훅 설치됨)는 본 것으로 치고 열지 않습니다.
+    private func showWelcomeIfFirstRun() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.welcomeShownKey) else { return }
+        defaults.set(true, forKey: Self.welcomeShownKey)
+        guard case .notInstalled = hookStatus, hookScript == .missing else { return }
+        append(.system, "첫 실행: 환영 창을 열어요")
+        WelcomeWindow.show(model: self)
+    }
+
     func uninstallHooks() {
         do {
             let removed = try installer.uninstall()
+            installOutcome = nil
             installMessage = "훅 \(removed)개를 제거했어요. 다른 훅과 설정은 그대로예요."
             append(.system, "훅 제거: \(removed)개")
         } catch {

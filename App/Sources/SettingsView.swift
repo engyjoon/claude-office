@@ -8,27 +8,41 @@ import UserNotifications
 /// 직원 꾸미기는 M6 이후에 붙입니다.
 struct SettingsView: View {
     let model: AppModel
+    /// 마지막에 본 탭 (기억함). 사무실 창의 경고 띠가 "연동"으로 바꿔 열 수 있습니다 (개선 6).
+    @AppStorage(SettingsTab.storageKey) private var tab: SettingsTab = .general
 
     var body: some View {
-        // 마지막에 본 탭은 SwiftUI가 기억합니다
-        TabView {
+        TabView(selection: $tab) {
             GeneralSettings(model: model)
                 .tabItem { Label("일반", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             ConnectionSettings(model: model)
                 .tabItem { Label("연동", systemImage: "link") }
+                .tag(SettingsTab.connection)
             DisplaySettings(model: model)
                 .tabItem { Label("표시", systemImage: "eye") }
+                .tag(SettingsTab.display)
             MiniOfficeSettingsView(model: model)
                 .tabItem { Label("미니 사무실", systemImage: "pip") }
+                .tag(SettingsTab.mini)
             NotificationSettingsView(model: model)
                 .tabItem { Label("알림", systemImage: "bell") }
+                .tag(SettingsTab.notifications)
             SoundSettingsView(model: model)
                 .tabItem { Label("효과음", systemImage: "speaker.wave.2") }
+                .tag(SettingsTab.sound)
         }
         .frame(width: 580, height: 560)
         // 설정 창이 다른 앱 뒤에 열리지 않게 (메뉴바 앱은 활성화가 늦게 끝남)
         .onAppear { SettingsWindow.bringToFront() }
     }
+}
+
+/// 설정 창의 탭 (UserDefaults에 기억)
+enum SettingsTab: String {
+    case general, connection, display, mini, notifications, sound
+
+    static let storageKey = "settings.tab"
 }
 
 // MARK: - 공용 조각

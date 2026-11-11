@@ -301,7 +301,7 @@ private struct StaffRow: View {
         if let elapsed = AgentCard.elapsed(since: row.since, now: now) { parts.append(elapsed) }
         if parts.isEmpty {
             switch row.kind {
-            case .lead: parts.append(TerminalFocuser.displayName(for: row.term) ?? "Claude Code 세션")
+            case .lead: parts.append(SessionDestination.displayName(term: row.term) ?? "Claude Code 세션")
             case .fixed, .temporary: parts.append("서브에이전트")
             }
         }

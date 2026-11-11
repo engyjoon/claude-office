@@ -56,55 +56,49 @@ extension Color {
     }
 }
 
-/// TERM_PROGRAM 값으로 해당 터미널(또는 에디터)을 앞으로 가져옵니다 (설계서 §10).
-/// 특정 탭까지 찾아가는 기능은 이후 단계에서 iTerm2부터 지원합니다.
-enum TerminalFocuser {
-    static let bundleIDs: [String: [String]] = [
-        "iTerm.app": ["com.googlecode.iterm2"],
-        "Apple_Terminal": ["com.apple.Terminal"],
-        // VS Code 계열은 모두 TERM_PROGRAM이 vscode입니다
-        "vscode": ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92"],
-        "ghostty": ["com.mitchellh.ghostty"],
-        "WarpTerminal": ["dev.warp.Warp-Stable"],
-        "WezTerm": ["com.github.wez.wezterm"],
-        "Hyper": ["co.zeit.hyper"],
-    ]
+/// `SessionDestination`(코어가 정한 갈 곳)의 앱을 실제로 앞으로 가져옵니다 (설계서 §10.3).
+///
+/// - 데스크톱 앱 세션: `claude://code/continue?session=local_…` 딥링크로 그 세션 화면까지 엽니다 (M5(7b)).
+///   공개 문서에 있는 경로는 아니라(앱 4.23118에서 확인) 앱이 바뀌면 다시 앱 활성화만 될 수 있습니다.
+///   데스크톱 설정에서 딥링크를 꺼 두었으면 앱은 링크를 무시하지만, 링크를 열 때 앱은 앞으로 옵니다(`activates`).
+/// - 터미널: 후보 중 실행 중인 앱, 없으면 설치된 첫 앱. 특정 탭까지 찾아가지는 않습니다.
+/// - 앞으로 가져오기는 `NSRunningApplication.activate()` 대신 `NSWorkspace.openApplication`(activates)으로 합니다.
+///   macOS 14의 협력 활성화에서 앞에 있지 않은 메뉴바 앱(미니 사무실은 앱을 활성화하지 않는 패널)의 `activate()`는 거절될 수 있습니다.
+@MainActor
+enum SessionFocuser {
+    /// 앱이 받아들이는 세션 id 모양 (앱의 검사와 같음)
+    static func sessionURL(_ session: String) -> URL? {
+        guard session.range(of: #"^local_[A-Za-z0-9-]{1,64}$"#, options: .regularExpression) != nil else { return nil }
+        return URL(string: "claude://code/continue?session=\(session)")
+    }
 
-    static func displayName(for term: String?) -> String? {
-        switch term {
-        case "iTerm.app": "iTerm2"
-        case "Apple_Terminal": "터미널"
-        case "vscode": "VS Code"
-        case "ghostty": "Ghostty"
-        case "WarpTerminal": "Warp"
-        case .some(let other): other
-        case .none: nil
+    /// 갈 곳의 앱을 엽니다. 열 앱을 찾지 못하면 바로, 열다가 실패하면 나중에 `done`에 까닭을 넘깁니다(성공하면 nil).
+    static func focus(_ destination: SessionDestination, done: @escaping @MainActor (String?) -> Void) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        let finish: @Sendable (Error?) -> Void = { error in
+            let message = error.map { "\($0.localizedDescription)" }
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(message) } }
+        }
+        guard let app = applicationURL(for: destination.bundleIDs) else {
+            done("\(destination.displayName)을(를) 찾지 못했어요")
+            return
+        }
+        if case .desktopApp(let session) = destination.kind, let url = sessionURL(session) {
+            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration) { _, error in finish(error) }
+        } else {
+            NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, error in finish(error) }
         }
     }
 
-    @discardableResult
-    static func focus(term: String?) -> Bool {
-        guard let term, let candidates = bundleIDs[term] else { return false }
-        for identifier in candidates {
-            if let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first {
-                return running.activate()
-            }
+    /// 후보 중 실행 중인 앱, 없으면 설치된 첫 앱
+    private static func applicationURL(for bundleIDs: [String]) -> URL? {
+        for identifier in bundleIDs {
+            if let url = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first?.bundleURL { return url }
         }
-        for identifier in candidates {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) {
-                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-                return true
-            }
+        for identifier in bundleIDs {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) { return url }
         }
-        return false
-    }
-}
-
-extension RosterRow {
-    /// 이동 버튼·더블클릭 도움말 문구 (M5(7)): 데스크톱 앱 세션이면 "앱으로", 아는 터미널(에디터)이면 "터미널로", 갈 곳을 모르면 nil
-    var focusLabel: String? {
-        if hostSession != nil { return "앱으로" }
-        if let term, TerminalFocuser.bundleIDs[term] != nil { return "터미널로" }
         return nil
     }
 }

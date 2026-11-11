@@ -7,6 +7,8 @@ import UserNotifications
 /// 코어의 `NotificationPlanner`가 정한 알림 동작을 macOS 알림 센터에 그대로 옮깁니다 (설계서 §10 알림, M5(3)).
 ///
 /// - 권한은 처음 알림이 필요할 때(또는 설정 화면에서) 묻습니다. 앱을 켤 때 무조건 묻지 않습니다.
+/// - 허용되지 않은 상태로 기억하고 있으면 보내기 직전에 권한을 다시 읽습니다 (시스템 설정에서 나중에 허용했을 수 있음).
+/// - 켤 때와 끌 때 이 앱이 띄운 알림을 알림 센터에서 지웁니다 (지난 실행의 "승인 대기"가 남지 않게).
 /// - 알림 소리는 넣지 않습니다. 소리는 앱의 효과음(승인 요청 노크 등)이 맡고, 집중 모드면 그쪽에서 줄입니다.
 /// - 알림이 화면에 뜰지 말지는 macOS 집중 모드 규칙에 맡깁니다.
 @MainActor
@@ -29,6 +31,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// 권한을 묻는 동안 쌓아 둔 알림
     private var queued: [OfficeNotice] = []
     private var requesting = false
+    /// 보내기 전에 권한을 다시 읽는 중
+    private var checking = false
     /// 보냈고 아직 코어가 지우지 않은 알림 식별자
     private var live: Set<String> = []
     /// 알림 센터에 남아 있는지 확인하는 중인 제목 바꿈 (식별자 → 가장 새 알림, M6(14))
@@ -37,25 +41,38 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     override init() {
         super.init()
         center.delegate = self
+        removeAll()
         refreshAuthorization()
     }
 
     // MARK: - 권한
 
-    func refreshAuthorization() {
+    func refreshAuthorization(then done: (() -> Void)? = nil) {
         center.getNotificationSettings { settings in
             let status = settings.authorizationStatus
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self.setAuthorization(status) }
+                MainActor.assumeIsolated {
+                    self.setAuthorization(status)
+                    done?()
+                }
             }
         }
+    }
+
+    /// 이 앱이 띄운 알림을 모두 지웁니다 (켤 때·끌 때)
+    func removeAll() {
+        queued.removeAll()
+        live.removeAll()
+        retitling.removeAll()
+        center.removeAllDeliveredNotifications()
+        center.removeAllPendingNotificationRequests()
     }
 
     /// 권한을 묻습니다 (아직 묻지 않았을 때만 시스템 창이 뜸). 끝나면 쌓아 둔 알림을 보냅니다.
     func requestAuthorization(then done: (() -> Void)? = nil) {
         guard !requesting else { return }
         requesting = true
-        center.requestAuthorization(options: [.alert, .badge]) { _, _ in
+        center.requestAuthorization(options: [.alert]) { _, _ in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self.requesting = false
@@ -112,16 +129,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func post(_ notice: OfficeNotice) {
-        switch authorization {
-        case .authorized, .provisional:
+        if authorization == .authorized || authorization == .provisional {
             deliver(notice)
-        case .notDetermined:
-            // 처음 알림이 필요할 때 권한을 묻고, 허용되면 그때 보냅니다
-            queued.removeAll { $0.id == notice.id }
-            queued.append(notice)
-            requestAuthorization()
-        default:
-            break  // 거부됨: 메뉴바 배지와 사무실 연출만
+            return
+        }
+        // 아직 묻지 않았거나 거부로 기억하고 있으면 쌓아 두고, 지금 권한을 다시 읽은 뒤 정합니다.
+        // (처음에 거부했다가 시스템 설정에서 허용했으면 이때 알게 됩니다)
+        queued.removeAll { $0.id == notice.id }
+        queued.append(notice)
+        guard !checking else { return }
+        checking = true
+        refreshAuthorization { [weak self] in
+            guard let self else { return }
+            self.checking = false
+            switch self.authorization {
+            case .authorized, .provisional: self.flushQueue()
+            case .notDetermined: self.requestAuthorization()  // 처음 알림이 필요할 때 권한을 묻고, 허용되면 그때 보냅니다
+            default: self.queued.removeAll()  // 거부됨: 메뉴바 배지와 사무실 연출만
+            }
         }
     }
 
@@ -177,12 +202,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// 앱 창(사무실·설정)이 앞에 있어도 배너를 보여 줍니다
+    /// 앱 창(사무실·설정)이 앞에 있어도 배너를 보여 줍니다. 내용만 조용히 바꾸는 알림(`isUpdate`, 수동 수준)은 배너 없이 목록만.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list])
+        let quiet = notification.request.content.interruptionLevel == .passive
+        completionHandler(quiet ? [.list] : [.banner, .list])
     }
 
     nonisolated func userNotificationCenter(
@@ -202,46 +228,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 completionHandler()
             }
         }
-    }
-}
-
-/// Claude 데스크톱 앱을 앞으로 가져오고, 세션 id를 알면 그 Code 세션을 엽니다.
-///
-/// M5(7b): 데스크톱 앱의 `claude://code/continue?session=local_…` 딥링크(Dock·Spotlight의 "세션 이어 하기"가 쓰는 것)로
-/// 그 세션 화면까지 엽니다. 앱은 보관하지 않은 세션 중 id가 같은 세션으로 가고, 못 찾으면 Code 첫 화면으로 갑니다.
-/// 공개 문서에 있는 경로는 아니라(앱 4.23118에서 확인) 앱이 바뀌면 다시 앱 활성화만 될 수 있습니다.
-/// 데스크톱 설정에서 딥링크를 꺼 두었으면 앱은 링크를 무시하지만, 링크를 열 때 앱은 앞으로 옵니다(`activates`).
-enum DesktopAppFocuser {
-    static let bundleID = "com.anthropic.claudefordesktop"
-
-    /// 앱이 받아들이는 세션 id 모양 (앱의 검사와 같음)
-    static func sessionURL(_ session: String) -> URL? {
-        guard session.range(of: #"^local_[A-Za-z0-9-]{1,64}$"#, options: .regularExpression) != nil else { return nil }
-        return URL(string: "claude://code/continue?session=\(session)")
-    }
-
-    /// 세션 id가 있으면 그 세션을 열고, 없거나 열 수 없으면 앱만 앞으로
-    @discardableResult
-    static func focus(session: String?) -> Bool {
-        if let session, let url = sessionURL(session),
-            let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-        {
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
-            return true
-        }
-        return focus()
-    }
-
-    @discardableResult
-    static func focus() -> Bool {
-        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
-            return running.activate()
-        }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-        return true
     }
 }
 

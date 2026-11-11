@@ -62,30 +62,24 @@ struct MenuContentView: View {
         .padding(.vertical, 10)
     }
 
+    /// 연동 경고 (`HookAlert`, 사무실 창 띠·메뉴바 아이콘과 같은 판정)와 마지막 설치 결과 (개선 6)
     @ViewBuilder
     private var banners: some View {
-        if case .failed(let message) = model.serverState {
-            Banner(systemImage: "exclamationmark.triangle.fill", tint: .red, text: "훅 서버를 시작하지 못했어요. \(message)")
-        }
-        switch model.hookStatus {
-        case .notInstalled:
-            Banner(systemImage: "link.badge.plus", tint: .orange, text: "Claude Code 훅이 설치되어 있지 않아요.") {
-                Button("설치") { model.installHooks() }.disabled(model.isInstalling)
-            }
-        case .scriptMissingOrOutdated:
-            Banner(systemImage: "arrow.triangle.2.circlepath", tint: .orange, text: "훅 스크립트를 업데이트해야 해요.") {
-                Button("다시 설치") { model.installHooks() }.disabled(model.isInstalling)
-            }
-        case .settingsUnreadable(let reason):
-            Banner(systemImage: "doc.badge.ellipsis", tint: .red, text: "~/.claude/settings.json을 읽을 수 없어요. \(reason)")
-        case .installed:
-            if let blocker = model.hookBlocker {
-                Banner(systemImage: "hand.raised.fill", tint: .red, text: blocker.message)
-            } else if !model.missingHookEvents.isEmpty, let version = model.claudeVersion {
-                Banner(systemImage: "arrow.triangle.2.circlepath", tint: .orange,
-                       text: "Claude Code \(version)에서 받을 수 있는 이벤트 \(model.missingHookEvents.count)개가 빠져 있어요.") {
-                    Button("다시 설치") { model.installHooks() }.disabled(model.isInstalling)
+        if let outcome = model.installOutcome {
+            Banner(systemImage: outcome.succeeded ? "checkmark.circle.fill" : "xmark.octagon.fill",
+                   tint: outcome.succeeded ? .green : .red, text: outcome.text) {
+                Button {
+                    model.dismissInstallOutcome()
+                } label: {
+                    Image(systemName: "xmark")
                 }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("설치 결과 닫기")
+            }
+        }
+        if let alert = model.hookAlert {
+            Banner(systemImage: HookAlertStyle.symbol(alert), tint: HookAlertStyle.tint(alert), text: alert.detail) {
+                HookAlertButton(model: model, alert: alert)
             }
         }
     }
@@ -103,7 +97,7 @@ struct MenuContentView: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
-                RosterRowView(row: row, highlight: highlight) { model.focusSession(of: row) }
+                RosterRowView(row: row, highlight: highlight) { model.focusAgent(row.id) }
             }
         }
     }
@@ -175,8 +169,8 @@ private struct ContentHeightKey: PreferenceKey {
 struct RosterRowView: View {
     let row: RosterRow
     let highlight: Bool
-    /// 그 세션으로 이동 (데스크톱 앱 세션이면 Claude 앱, CLI면 터미널)
-    var focus: (() -> Void)?
+    /// 그 세션으로 이동 (데스크톱 앱 세션이면 Claude 앱, CLI면 터미널). 모델의 `focusAgent`를 거칩니다 (응답 확인·로그).
+    let focus: () -> Void
 
     var body: some View {
         HStack(spacing: 9) {
@@ -192,11 +186,11 @@ struct RosterRowView: View {
                 }
             }
             Spacer(minLength: 4)
-            if highlight, row.canFocus {
+            if highlight, let destination = row.destination {
                 // 승인 대기 줄: 알림을 누른 것과 같은 곳으로
-                Button(row.hostSession != nil ? "앱으로" : "터미널로") { focusSession() }
+                Button(destination.label, action: focus)
                     .controlSize(.small)
-                    .help(row.hostSession != nil ? "Claude 데스크톱 앱을 앞으로 가져와요 (세션은 사이드바에서 골라 주세요)" : "")
+                    .help(destination.buttonHelp)
             } else {
                 StatusChip(status: row.status)
             }
@@ -205,19 +199,14 @@ struct RosterRowView: View {
         .padding(.vertical, 4)
         .background(highlight ? Palette.attention.opacity(0.35) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { focusSession() }
-        .help(row.hostSession != nil ? "더블클릭하면 Claude 데스크톱 앱을 앞으로 가져와요"
-            : row.term.map { "더블클릭하면 \($0)을(를) 앞으로 가져와요" } ?? "")
+        .onTapGesture(count: 2) { if row.canFocus { focus() } }
+        .help(row.destination?.doubleClickHelp ?? "")
         // VoiceOver (M6(7)): 한 문장으로 읽고, 누르기 = 그 세션으로 이동 (승인 대기 줄의 [앱으로] 버튼과 같음)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((highlight ? "승인 대기, " : "") + AccessibilityText.row(row))
         .accessibilityHint(row.focusLabel.map { "누르면 \($0) 이동해요." } ?? "")
         .accessibilityAddTraits(row.canFocus ? .isButton : [])
-        .accessibilityAction { focusSession() }
-    }
-
-    private func focusSession() {
-        if let focus { focus() } else { TerminalFocuser.focus(term: row.term) }
+        .accessibilityAction { if row.canFocus { focus() } }
     }
 
     private func subtitle(now: Date) -> String {
@@ -231,7 +220,7 @@ struct RosterRowView: View {
         if minutes >= 1, quiet.contains(row.status) {
             parts.append("\(row.status.label) \(minutes)분")
         }
-        if parts.isEmpty, let term = TerminalFocuser.displayName(for: row.term) {
+        if parts.isEmpty, let term = SessionDestination.displayName(term: row.term) {
             // 상태는 오른쪽 칩에 있으므로, 세부 정보가 없으면 어느 터미널의 세션인지 보여줍니다
             parts.append(term)
         }

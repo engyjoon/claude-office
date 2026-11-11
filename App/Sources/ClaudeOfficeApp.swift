@@ -1,4 +1,5 @@
 import OfficeCore
+import OfficeServer
 import OfficeStage
 import SpriteKit
 import SwiftUI
@@ -12,7 +13,7 @@ struct ClaudeOfficeApp: App {
             MenuContentView(model: model)
         } label: {
             MenuBarLabel(
-                roster: model.roster, registerOpenWindow: { model.registerOpenWindow($0) },
+                roster: model.roster, alert: model.hookAlert, registerOpenWindow: { model.registerOpenWindow($0) },
                 registerOpenSettings: { model.registerOpenSettings($0) })
         }
         .menuBarExtraStyle(.window)
@@ -52,9 +53,15 @@ struct OfficeWindowView: View {
     @State private var screen = OfficeWindowSize.Screen.unknown
 
     var body: some View {
-        let office = OfficeWindowSize.office(screen: screen, panel: showStaffPanel)
+        // 연동이 고장 나면 사무실 위에 얇은 띠 (개선 6). 띠만큼 창이 높아집니다 (작은 화면이면 사무실을 그만큼 줄임).
+        let strip = HookAlertStrip.isShown(model) ? HookAlertStrip.height : 0
+        let office = OfficeWindowSize.office(screen: screen, panel: showStaffPanel, extra: strip)
         HStack(spacing: 0) {
             VStack(spacing: 0) {
+                if strip > 0 {
+                    HookAlertStrip(model: model)
+                        .frame(width: office.width)
+                }
                 OfficeSpriteView(scene: model.officeScene)
                     .frame(width: office.width, height: office.height)
                     .background(Color(red: 0.945, green: 0.902, blue: 0.839))
@@ -84,7 +91,7 @@ struct OfficeWindowView: View {
         // 창이 안 보이면 현황 줄·인스펙터의 시계 글자를 멈춥니다 (M6(1))
         .environment(\.liveClock, model.officeVisible)
         // 내용 크기를 못 박아 창 크기를 고정합니다 (`.windowResizability(.contentSize)`)
-        .frame(width: office.width + (showStaffPanel ? OfficeWindowSize.panel : 0), height: office.height + StatusLineView.height)
+        .frame(width: office.width + (showStaffPanel ? OfficeWindowSize.panel : 0), height: office.height + StatusLineView.height + strip)
         .background(WindowAccessor { window in
             OfficeWindowSize.lock(window)
             let next = OfficeWindowSize.Screen(window: window)
@@ -165,10 +172,11 @@ enum OfficeWindowSize {
     }
 
     /// 사무실 영역 크기: 기본 크기, 화면이 작으면 화면 안에 들어가게 줄인 크기
-    static func office(screen: Screen, panel showsPanel: Bool) -> CGSize {
+    /// - Parameter extra: 사무실 위아래에 더 붙는 높이 (연동 경고 띠)
+    static func office(screen: Screen, panel showsPanel: Bool, extra: CGFloat = 0) -> CGSize {
         guard let visible = screen.visible else { return office }
         let width = min(office.width, visible.width - (showsPanel ? panel : 0))
-        let height = min(office.height, visible.height - screen.chrome - StatusLineView.height)
+        let height = min(office.height, visible.height - screen.chrome - StatusLineView.height - extra)
         return CGSize(width: max(minimumOffice.width, width.rounded(.down)), height: max(minimumOffice.height, height.rounded(.down)))
     }
 
@@ -321,8 +329,10 @@ extension SKView {
 
 /// 메뉴바 아이콘 (설계서 §10, M5(3)): 작은 건물 + 상태 점(초록: 작업 중, 노랑: 승인 대기, 회색: 쉬는 중).
 /// 아무도 없으면 점 없이 빈 건물. 승인 대기가 있으면 옆에 그 수를 숫자로.
+/// 연동이 고장 나면(개선 6) 오른쪽 위에 느낌표 표시(빨강: 서버·설정 고장, 주황: 설치·업데이트 필요)를 달고 VoiceOver도 먼저 읽습니다.
 struct MenuBarLabel: View {
     let roster: Roster
+    var alert: HookAlert?
     /// 사무실 창 열기 동작을 모델에 넘김 (미니 사무실에서 캐릭터를 눌렀을 때 씀)
     var registerOpenWindow: (OpenWindowAction) -> Void = { _ in }
     /// 설정 창 열기 동작을 모델에 넘김 (미니 오른쪽 클릭 메뉴 "설정…", M6(11))
@@ -335,8 +345,8 @@ struct MenuBarLabel: View {
     var body: some View {
         let mood = roster.mood
         // VoiceOver (M6(7)): 상태 점의 색 대신 "Claude Office, 승인 대기 1명, 일하는 중 2명, 쉬는 중 3명"
-        let spoken = AccessibilityText.menuBar(roster)
-        Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark, description: spoken))
+        let spoken = AccessibilityText.menuBar(roster, problem: alert?.summary)
+        Image(nsImage: MenuBarIcon.image(mood: mood, dark: colorScheme == .dark, warning: alert.map(\.isError), description: spoken))
             .accessibilityLabel(spoken)
             .onAppear {
                 registerOpenWindow(openWindow)
@@ -355,8 +365,9 @@ enum MenuBarIcon {
     private static var cache: [String: NSImage] = [:]
 
     /// - Parameter description: VoiceOver가 읽을 설명 (상태별 사람 수, M6(7)). 그림은 상태·모양별로 캐시하고 설명만 바꿉니다.
-    static func image(mood: Roster.Mood, dark: Bool, description: String? = nil) -> NSImage {
-        let key = "\(mood.rawValue).\(dark)"
+    /// - Parameter warning: 연동 경고 (nil: 없음, true: 고장(빨강), false: 손볼 것(주황), 개선 6)
+    static func image(mood: Roster.Mood, dark: Bool, warning: Bool? = nil, description: String? = nil) -> NSImage {
+        let key = "\(mood.rawValue).\(dark).\(warning.map { $0 ? "error" : "warning" } ?? "ok")"
         if let cached = cache[key] {
             if let description, cached.accessibilityDescription != description { cached.accessibilityDescription = description }
             return cached
@@ -374,6 +385,18 @@ enum MenuBarIcon {
                 let symbolSize = symbol.size
                 symbol.draw(in: NSRect(x: 0, y: (rect.height - symbolSize.height) / 2, width: symbolSize.width, height: symbolSize.height))
             }
+            if let warning {
+                // 오른쪽 위 느낌표 원 (상태 점은 오른쪽 아래). 메뉴바 색 테두리로 건물과 구분합니다.
+                let diameter: CGFloat = 8
+                let badge = NSRect(x: rect.width - diameter - 0.5, y: rect.height - diameter - 0.5, width: diameter, height: diameter)
+                (isDark ? NSColor.black : NSColor.white).withAlphaComponent(0.85).setFill()
+                NSBezierPath(ovalIn: badge.insetBy(dx: -1.2, dy: -1.2)).fill()
+                MenuBarIcon.warningColor(isError: warning).setFill()
+                NSBezierPath(ovalIn: badge).fill()
+                NSColor.white.setFill()
+                NSBezierPath(rect: NSRect(x: badge.midX - 0.6, y: badge.minY + 3.2, width: 1.2, height: 3.2)).fill()
+                NSBezierPath(rect: NSRect(x: badge.midX - 0.6, y: badge.minY + 1.4, width: 1.2, height: 1.2)).fill()
+            }
             guard let dot = dotColor(mood) else { return true }
             let diameter: CGFloat = 7
             let dotRect = NSRect(x: rect.width - diameter - 0.5, y: 0.5, width: diameter, height: diameter)
@@ -389,6 +412,8 @@ enum MenuBarIcon {
         cache[key] = image
         return image
     }
+
+    static func warningColor(isError: Bool) -> NSColor { HookAlertStyle.nsTint(isError: isError) }
 
     static func dotColor(_ mood: Roster.Mood) -> NSColor? {
         switch mood {
