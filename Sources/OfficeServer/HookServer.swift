@@ -263,8 +263,13 @@ public final class HookServer: @unchecked Sendable {
             case .reject(let status, _):
                 reject(client, status: status)
             case .accept(let body, let term, let hostSession):
+                // 훅 스크립트가 아직 응답을 기다리는 동안 프로세스를 찾습니다 (중간 셸이 있어도 살아 있음)
+                let process = hostSession == nil
+                    ? HookRequestPolicy.hookParentPID(request.headers).flatMap(ProcessInspector.claudeProcess(fromHookParent:))
+                    : nil
                 respond(client, status: 202)
-                let delivery = HookDelivery(body: body, term: term, hostSession: hostSession, receivedAt: Date())
+                let delivery = HookDelivery(body: body, term: term, hostSession: hostSession, process: process,
+                                            app: HookRequestPolicy.appBundleID(request.headers), receivedAt: Date())
                 let handler = self.handler
                 deliveryQueue.async { handler(delivery) }
             }

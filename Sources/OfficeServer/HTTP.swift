@@ -97,12 +97,19 @@ public struct HookDelivery: Hashable, Sendable {
     public let term: String?
     /// 훅 스크립트가 보낸 데스크톱 앱 세션 id (`CLAUDE_CODE_HOST_SESSION_ID`, `local_…`). 형식이 맞을 때만.
     public let hostSession: String?
+    /// 훅을 보낸 Claude Code 프로세스 (`X-Office-Pid`에서 찾음, 개선 7). 옛 훅 스크립트거나 못 찾으면 nil.
+    public let process: ProcessIdentity?
+    /// Claude Code를 띄운 앱의 번들 id (`X-Office-App` = `__CFBundleIdentifier`). VS Code·Cursor 구별용.
+    public let app: String?
     public let receivedAt: Date
 
-    public init(body: Data, term: String?, hostSession: String? = nil, receivedAt: Date) {
+    public init(body: Data, term: String?, hostSession: String? = nil, process: ProcessIdentity? = nil, app: String? = nil,
+                receivedAt: Date) {
         self.body = body
         self.term = term
         self.hostSession = hostSession
+        self.process = process
+        self.app = app
         self.receivedAt = receivedAt
     }
 }
@@ -144,6 +151,22 @@ public struct HookRequestPolicy: Sendable {
             return .reject(status: 415, reason: "JSON만 받습니다")
         }
         return .accept(body: Data(), term: nil, hostSession: nil)
+    }
+
+    /// `X-Office-Pid`: 10진수 숫자만, 1보다 큰 Int32 (그 밖의 값은 버림)
+    public static func hookParentPID(_ headers: [String: String]) -> Int32? {
+        guard let text = headers["x-office-pid"], !text.isEmpty, text.count <= 10, text.allSatisfy({ $0.isASCII && $0.isNumber }),
+            let pid = Int32(text), pid > 1
+        else { return nil }
+        return pid
+    }
+
+    /// `X-Office-App`: 번들 id 꼴(영숫자·점·하이픈, 1~155자)만
+    public static func appBundleID(_ headers: [String: String]) -> String? {
+        guard let text = headers["x-office-app"], !text.isEmpty, text.count <= 155,
+            text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") })
+        else { return nil }
+        return text
     }
 
     /// 데스크톱 앱 세션 id 형식 (`local_` + 영숫자·하이픈). 파일 경로에 쓰므로 그 밖의 값은 버립니다.

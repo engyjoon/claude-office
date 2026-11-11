@@ -5,8 +5,9 @@ import Foundation
 /// - 데스크톱 앱 세션(`hostSession`이 있음)이면 Claude 데스크톱 앱의 그 세션으로.
 /// - 터미널 CLI 세션이면 `TERM_PROGRAM`으로 아는 터미널(에디터)을 앞으로. 모르는 터미널(tmux·zed 등)이면 `nil`이라
 ///   버튼·도움말을 보여 주지 않습니다.
-/// - VS Code 계열(VS Code·Insiders·Cursor)은 모두 `TERM_PROGRAM=vscode`이고 훅은 이 값만 보내므로 구별할 수 없습니다.
-///   앱은 후보 중 실행 중인 첫 앱을 고릅니다(`bundleIDs` 순서).
+/// - VS Code 계열(VS Code·Insiders·Cursor)은 모두 `TERM_PROGRAM=vscode`입니다. 훅 스크립트가 Claude Code를 띄운 앱의
+///   번들 id(`__CFBundleIdentifier`, 개선 7)를 보내면 그 앱을 후보 맨 앞에 둡니다. 모르면(옛 훅 스크립트) 앱은 후보 중
+///   실행 중인 첫 앱을 고릅니다(`bundleIDs` 순서).
 public struct SessionDestination: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
         /// Claude 데스크톱 앱의 세션 (`local_…`)
@@ -36,13 +37,31 @@ public struct SessionDestination: Hashable, Sendable {
     ]
 
     /// 갈 곳. 데스크톱 앱 세션이 먼저이고, 모르는 터미널이면 nil.
-    public static func resolve(hostSession: String?, term: String?) -> SessionDestination? {
+    /// `app`은 Claude Code를 띄운 앱의 번들 id입니다. 그 터미널의 후보에 있으면 맨 앞에 둡니다(Cursor 세션이 VS Code를
+    /// 올리지 않게). 후보에 없는 값(tmux 안 등)은 쓰지 않아, 버튼이 보이는지는 `term`만으로 정해집니다.
+    public static func resolve(hostSession: String?, term: String?, app: String? = nil) -> SessionDestination? {
         if let hostSession, !hostSession.isEmpty {
             return SessionDestination(kind: .desktopApp(session: hostSession), bundleIDs: [desktopBundleID],
                                       displayName: "Claude 데스크톱 앱")
         }
-        guard let term, let ids = terminalBundleIDs[term] else { return nil }
-        return SessionDestination(kind: .terminal(term: term), bundleIDs: ids, displayName: displayName(term: term) ?? term)
+        guard let term, var ids = terminalBundleIDs[term] else { return nil }
+        var name = displayName(term: term) ?? term
+        if let app, let index = ids.firstIndex(of: app) {
+            ids.insert(ids.remove(at: index), at: 0)
+            name = appNames[app] ?? name
+        }
+        return SessionDestination(kind: .terminal(term: term), bundleIDs: ids, displayName: name)
+    }
+
+    /// 같은 `TERM_PROGRAM`을 쓰는 앱의 이름 (번들 id로 구별할 때)
+    static let appNames: [String: String] = [
+        "com.microsoft.VSCodeInsiders": "VS Code Insiders",
+        "com.todesktop.230313mzl4w4u92": "Cursor",
+    ]
+
+    /// 이 세션의 갈 곳 (명단 줄 + 띄운 앱의 번들 id)
+    public static func resolve(row: RosterRow, app: String?) -> SessionDestination? {
+        resolve(hostSession: row.hostSession, term: row.term, app: app)
     }
 
     /// 터미널 이름 (보여 주기용). 모르는 값은 그대로 ("tmux"), 없으면 nil.

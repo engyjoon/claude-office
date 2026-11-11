@@ -13,6 +13,21 @@ struct SessionDestinationTests {
             hostSession: hostSession)
     }
 
+    @Test("띄운 앱의 번들 id를 알면 같은 TERM_PROGRAM의 후보 중 그 앱을 맨 앞에 둔다 (개선 7)")
+    func launchingApp() throws {
+        let cursor = "com.todesktop.230313mzl4w4u92"
+        let destination = try #require(SessionDestination.resolve(hostSession: nil, term: "vscode", app: cursor))
+        #expect(destination.bundleIDs == [cursor, "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders"])
+        #expect(destination.displayName == "Cursor")
+        #expect(destination.buttonHelp == "Cursor 창을 앞으로 가져와요")
+        // 후보에 없는 앱(tmux를 띄운 iTerm 등)은 쓰지 않음: 버튼은 term으로만 정해짐
+        #expect(SessionDestination.resolve(hostSession: nil, term: "tmux", app: "com.googlecode.iterm2") == nil)
+        #expect(SessionDestination.resolve(hostSession: nil, term: "vscode", app: "com.googlecode.iterm2")?.bundleIDs.first == "com.microsoft.VSCode")
+        let row = Self.row(term: "vscode", hostSession: nil)
+        #expect(SessionDestination.resolve(row: row, app: cursor)?.bundleIDs.first == cursor)
+        #expect(SessionDestination.resolve(row: row, app: nil) == row.destination)
+    }
+
     @Test("데스크톱 앱 세션이면 터미널 값이 있어도 앱으로 간다")
     func desktopFirst() throws {
         let destination = try #require(SessionDestination.resolve(hostSession: "local_abc", term: "vscode"))

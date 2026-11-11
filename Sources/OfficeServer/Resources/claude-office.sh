@@ -9,6 +9,9 @@
 # - 앱이 실행될 때마다 endpoint 파일에 "포트 토큰"을 기록합니다.
 # - Claude 데스크톱 앱 세션이면 그 세션 id(CLAUDE_CODE_HOST_SESSION_ID)를 함께 보냅니다.
 #   앱은 이 id로 데스크톱 앱의 세션 정보(부모 세션, 제목)를 읽어 방과 직함을 정합니다 (설계서 §4.4).
+# - 부모 프로세스 번호($PPID, Claude Code)를 보냅니다. 앱은 그 프로세스가 사라지면 SessionEnd 없이 끝난
+#   터미널 세션(kill -9, 창 닫기)을 퇴근시킵니다. ps 같은 명령을 더 띄우지 않습니다(훅은 도구마다 돔).
+# - Claude Code를 띄운 앱의 번들 id(__CFBundleIdentifier)를 보냅니다. VS Code와 Cursor는 TERM_PROGRAM이 같아서입니다.
 ENDPOINT_FILE="${CLAUDE_OFFICE_ENDPOINT:-$HOME/Library/Application Support/ClaudeOffice/endpoint}"
 if [ ! -r "$ENDPOINT_FILE" ]; then
   cat >/dev/null
@@ -27,5 +30,7 @@ curl -s --connect-timeout 0.3 -m 1 -X POST \
   -H "X-Office-Token: $TOKEN" \
   -H "X-Office-Term: ${TERM_PROGRAM:-unknown}" \
   -H "X-Office-Host-Session: ${CLAUDE_CODE_HOST_SESSION_ID:-}" \
+  -H "X-Office-Pid: $PPID" \
+  -H "X-Office-App: ${__CFBundleIdentifier:-}" \
   --data-binary @- "http://127.0.0.1:$PORT/v1/hook" >/dev/null 2>&1
 exit 0

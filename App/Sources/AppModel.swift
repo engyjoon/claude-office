@@ -98,6 +98,8 @@ final class AppModel {
     @ObservationIgnored private var server: HookServer?
     /// 지금 서버의 토큰 (엔드포인트 파일이 우리 것인지 확인·끌 때 우리 것만 지우기)
     @ObservationIgnored private var serverToken: String?
+    /// 터미널 세션마다 마지막으로 받은 Claude Code 프로세스와 띄운 앱 (개선 7): 프로세스가 사라지면 퇴근시킵니다
+    @ObservationIgnored private var sessionProcesses = SessionProcessTracker()
     /// 엔드포인트 파일이 이 서버의 것인지 (개선 7). 5초마다, 그리고 연동 상태를 새로 읽을 때 확인합니다.
     private(set) var endpointState: EndpointFile.State?
     @ObservationIgnored private var timer: Timer?
@@ -397,7 +399,15 @@ final class AppModel {
         receivedHooks += 1
         lastHookAt = delivery.receivedAt
         do {
-            let directives = try engine.handle(hookPayload: delivery.body, term: delivery.term, hint: hint, at: delivery.receivedAt)
+            var directives: [Directive] = []
+            if var event = try HookParser.parse(delivery.body, term: delivery.term, receivedAt: delivery.receivedAt) {
+                event.hint = hint
+                var ended = false
+                if case .sessionEnded = event.kind { ended = true }
+                sessionProcesses.note(session: event.session, process: delivery.process, app: delivery.app,
+                                      desktop: delivery.hostSession != nil, ended: ended)
+                directives = engine.handle(event)
+            }
             append(.hook, Self.summary(of: delivery, hint: hint))
             record(directives)
             PerfProbe.shared?.hookApplied(receivedAt: delivery.receivedAt, anyVisible: anySceneVisible)
@@ -526,6 +536,7 @@ final class AppModel {
 
     func refreshDirectories() {
         checkEndpoint()
+        sweepEndedProcesses()
         guard !loadingDirectories else { return }
         loadingDirectories = true
         let directory = desktopSessions
@@ -542,6 +553,25 @@ final class AppModel {
                 self.syncResidents(roll)
             }
         }
+    }
+
+    /// Claude Code 프로세스가 사라진 터미널 세션(kill -9, 터미널 창 닫기로 SessionEnd가 오지 않음)을 퇴근시킵니다 (개선 7).
+    /// SessionEnd를 받은 것과 같게 엔진에 넣으므로 30초 안에 온 그 세션의 늦은 훅은 버려집니다.
+    private func sweepEndedProcesses() {
+        let now = Date()
+        let events = sessionProcesses.sweep(at: now, isAlive: ProcessInspector.isAlive)
+            .filter { engine.state.parts[$0.session] != nil }
+        guard !events.isEmpty else { return }
+        for event in events {
+            let name = engine.state.parts[event.session].flatMap { engine.state.agents[$0.lead]?.displayName } ?? "세션"
+            append(.system, "\(name): Claude Code 프로세스가 끝나 퇴근했어요")
+            record(engine.handle(event))
+        }
+        notifier.apply(HookTestScenario.withoutTestNotices(engine.drainNotices()))
+        updateRoster()
+        refreshMiniFocus(now: now)
+        if let selectedAgent, roster.row(for: selectedAgent) == nil { select(nil) }
+        refreshStatusLine()
     }
 
     /// 데스크톱 앱에 열려 있는 세션을 사무실에 맞춥니다 (M5(5)): 새로 앉는 사람은 쉬는 중으로 조용히, 닫힌 세션은 퇴근.
@@ -653,7 +683,8 @@ final class AppModel {
         let agent = target.agent.flatMap { engine.state.agents[$0] }
         if let id = target.agent { acknowledge(id) }
         let name = agent?.displayName ?? "알림"
-        let destination = SessionDestination.resolve(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term)
+        let destination = SessionDestination.resolve(hostSession: part?.hostSession ?? target.hostSession, term: agent?.term ?? target.term,
+                                                     app: target.session.flatMap { sessionProcesses.app(for: $0) })
         focus(destination, name: name, via: "알림 열기")
         if let id = target.agent, roster.row(for: id) != nil, isOfficeWindowOpen {
             if visibleRoster.row(for: id) == nil { selectAllFolders() }  // 다른 디렉토리를 보고 있었으면 모두로
@@ -667,7 +698,12 @@ final class AppModel {
     func focusAgent(_ id: AgentID) {
         guard let row = roster.row(for: id) else { return }
         acknowledge(id)
-        focus(row.destination, name: row.name, via: "세션으로 이동")
+        focus(destination(for: row), name: row.name, via: "세션으로 이동")
+    }
+
+    /// 그 줄의 세션으로 갈 곳. 세션을 띄운 앱의 번들 id를 알면 같은 TERM_PROGRAM의 앱(VS Code·Cursor) 중 그것으로 (개선 7).
+    func destination(for row: RosterRow) -> SessionDestination? {
+        SessionDestination.resolve(row: row, app: sessionProcesses.app(for: row.session))
     }
 
     /// 마우스를 올린 캐릭터의 도움말 (M5(7)). 미니는 한 번 누르면 사무실 창이 열린다는 것도 알려 줍니다.
