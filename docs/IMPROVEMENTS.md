@@ -1,0 +1,229 @@
+# 개선 목록
+
+2026-11-11 전체 검토(코드·디자인·사용성)에서 나온 개선 사항입니다. 위에서 아래로 추천 순서이고, 항목마다 새 세션 하나가 맡습니다.
+
+- **확인 수준**: "재현"·"실측"은 직접 돌려 본 것, "코드"는 코드를 읽어 추적한 것, "전제 미확인"은 Claude Code나 macOS의 동작을 전제로 한 것입니다. 맡은 세션은 고치기 전에 전제를 먼저 확인합니다.
+- **상태**: 대기 → 진행 중 → 완료(커밋) / 보류(까닭).
+- 모델은 항목의 성격으로 골랐습니다: 상태 기계·구조를 다시 짜는 일은 Fable 5.2, 범위가 정해진 버그 묶음은 Opus 5.5, 작은 수정과 문구는 Sonnet 5.5.
+
+## 한눈에 보기
+
+| # | 항목 | 추천 모델 (노력도) | 상태 | 결과 |
+|---|---|---|---|---|
+| 1 | 훅 버전 감지·연동 진단 | Opus 5.5 (medium) | 대기 | |
+| 2 | 질문·계획 승인 기록 닫기 | Sonnet 5.5 (medium) | 대기 | |
+| 3 | 비밀값 가림 순서·규칙 | Sonnet 5.5 (medium) | 대기 | |
+| 4 | 끝 이벤트 없는 턴·도구·세션 복구 | Fable 5.2 (high) | 대기 | |
+| 5 | 행 머무름·화면 밖 서브 신호 | Opus 5.5 (high) | 대기 | |
+| 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 대기 | |
+| 7 | 훅 서버·설정 파일 안전 | Sonnet 5.5 (medium) | 대기 | |
+| 8 | 화면 디자인 다듬기 | Opus 5.5 (high) | 대기 | |
+| 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 대기 | |
+| 10 | 레티나 메모리 줄이기 | Opus 5.5 (high) | 대기 | |
+| 11 | 구조 정리와 안전망 | Fable 5.2 (high) | 대기 | |
+
+## 모든 항목에 공통인 규칙
+
+- 고치기 전에 해당 코드를 읽고 문제가 실제로 있는지 확인합니다. 없거나 전제가 틀렸으면 고치지 않고 이 문서에 까닭을 적습니다.
+- 동작을 바꾸면 테스트를 함께 넣습니다. `make test`가 통과해야 하고, `App/`을 고쳤으면 `make app`으로 빌드까지 확인합니다.
+- `make install`·`make run`·`make serve`는 하지 않습니다. 실행 중인 `/Applications/Claude Office.app`을 끄거나 바꾸지 않고, `~/.claude` 아래는 건드리지 않습니다.
+- 설계서에 적힌 동작이 바뀌면 `docs/DESIGN.md`의 해당 절에 한두 줄로 적습니다.
+- 끝나면 위 표의 상태·결과와 아래 항목의 "결과"를 채웁니다. 맥 화면에서 확인이 필요한 것은 "화면 확인 필요"로 남깁니다.
+- 항목 범위 밖의 문제를 발견하면 고치지 않고 맨 아래 "새로 발견한 것"에 적습니다.
+
+---
+
+## 1. 훅 버전 감지·연동 진단
+
+**문제 (재현)**: 이 맥의 `~/.claude/settings.json`에는 Claude Office 훅이 기본 9종만 등록돼 있습니다. Claude Code는 2.1.321이라 확장 5종(SubagentStart, PermissionRequest, PermissionDenied, PostToolUseFailure, StopFailure)도 들어가야 합니다.
+
+- `ClaudeVersionDetector.detect`가 `$SHELL -lc "claude --version"`을 쓰는데, GUI 앱 환경(PATH가 `/usr/bin:/bin:/usr/sbin:/sbin`)의 로그인 zsh는 `~/.zshrc`를 읽지 않아 `~/.local/bin/claude`를 못 찾습니다. `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -lc 'claude --version'`으로 재현됩니다. (`Sources/OfficeServer/HookInstaller.swift:147`)
+- `HookInstaller.status()`는 이벤트가 하나라도 있으면 `.installed`라서, 설정 → 연동이 "설치됨"으로 계속 초록입니다. Claude Code를 올린 뒤에도 마찬가지입니다. (`HookInstaller.swift:74`, `Sources/OfficeServer/HookHealth.swift:74`)
+- `disableAllHooks`나 관리 설정(`allowManagedHooksOnly`)으로 훅이 막혀 있어도 "아직 받은 이벤트가 없어요"만 보입니다. (`HookHealth.swift:120`)
+
+**고칠 방향**
+
+- 셸보다 먼저 알려진 경로(`~/.local/bin/claude`, `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`)를 찾아 직접 실행합니다.
+- 등록된 이벤트와 `recommendedEvents(for:)`를 비교해, 모자라면 "다시 설치"를 권하는 상태(메뉴 배너와 설정 → 연동)를 냅니다. 버전을 못 알아냈을 때는 경고하지 않습니다.
+- `settings.json`의 `disableAllHooks`를 읽어 구체적인 오류 문구를 보여 줍니다. 관리 설정 파일은 읽을 수 있을 때만 확인합니다.
+- `ClaudeVersion(parsing:)`이 로그인 배너의 다른 버전 문자열을 집지 않게 합니다.
+
+**완료 기준**: GUI 환경을 흉내 낸 테스트에서 버전을 찾고, 9종만 등록된 설정을 넣으면 다시 설치를 권합니다. 설치 자체(파일 쓰기)는 사용자가 앱에서 누릅니다.
+
+**결과**:
+
+## 2. 질문·계획 승인 기록 닫기
+
+**문제 (코드)**: `AskUserQuestion`·`ExitPlanMode`는 `permissionAsked` 비트만 내서 기록에 `.permission(call)` 항목이 생깁니다. 끝날 때(`toolEnded`) `openToolIndex`는 `toolCall != nil`인 `.tool` 항목만 찾으므로 새 항목을 덧붙이고 `.permission` 항목은 열린 채 남습니다. 계획을 승인한 뒤에도 현황 줄이 "계획 승인 대기 (20분째)"이고, 인스펙터 타임라인과 "[화면 밖]" 알림 줄에도 남습니다.
+
+- `Sources/OfficeCore/Model/ActivityJournal.swift:67-78`, `:138-143`
+- 보이는 곳: `Sources/OfficeCore/Model/StatusLine.swift:275`, `:306-310`
+
+**고칠 방향**: `toolEnded`에서 같은 id·이름의 열린 `.permission` 항목도 닫습니다(또는 질문 도구를 `.awaitingPermission` 상태의 `.tool` 항목으로 기록).
+
+**완료 기준**: 질문에 답한 뒤와 계획 승인 뒤의 기록·현황 줄 테스트가 있습니다.
+
+**결과**:
+
+## 3. 비밀값 가림 순서·규칙
+
+**문제 (코드)**
+
+- `commandSummary`가 명령을 40자로 자른 뒤 `makeCall`이 가립니다. `export DB_URL=postgres://admin:S3cretPassw0rd@db/x`는 `@`가 잘려 `postgres://admin:S3cretPa…`로 칩·현황 줄·알림에 나옵니다. (`Sources/OfficeCore/Model/ToolCall.swift:89`, `:128-132`)
+- 키워드 규칙의 구분자 `[=: ]`가 빈칸도 받아서 `pwd && ls`가 "pwd <가림> ls"가 되고, `kubectl get secret foo`·`grep -r secret src/`도 다음 낱말을 잃습니다. (`Sources/OfficeCore/Dialogue/Redactor.swift:19`)
+- 놓치는 것: `curl -u user:pass`, `sshpass -p …`, `mysql -p…`, `Authorization: Basic …`.
+- `shortenPaths`가 자르기 전에 첫 줄 전체에 정규식 두 개를 돌립니다(1MB 입력이면 메인 스레드에서 오래 걸림). (`ToolCall.swift:128-164`)
+
+**고칠 방향**: 첫 줄을 몇백 자로 먼저 자르고 → 가리고 → 경로를 줄이고 → 40자로 자릅니다. 키워드 뒤 빈칸은 `--flag` 꼴일 때만 구분자로 받고, 위의 놓치는 꼴에 규칙을 더합니다.
+
+**완료 기준**: 위 예들이 테스트로 들어 있고, 기존 `Redactor`·`ToolCall` 테스트가 그대로 통과합니다.
+
+**결과**:
+
+## 4. 끝 이벤트 없는 턴·도구·세션 복구
+
+**문제 (코드, 일부 전제 미확인)**: 바쁜 상태가 모두 끝 이벤트(Stop, PostToolUse, SubagentStop, SessionEnd)가 와야 풀립니다. 시간 제한이나 암묵적 종료 규칙은 압축(compaction)에만 있습니다.
+
+- **Stop 없이 끝난 턴**: 사용자가 Esc로 중단하면 메인이 다음 요청까지 `.thinking`·`.working`·`.waitingForPermission`으로 남습니다("생각 중 (3시간째)", 초록 점, 승인 알림). `idle_prompt`가 오면 상태는 `.waitingForInput`이 되지만 연출은 그대로이고, `promptSubmitted`는 `turnEnded`처럼 남은 서브를 정리하지 않습니다. (`Sources/OfficeCore/Model/OfficeState.swift:123-133`, `:227-248`, `Sources/OfficeCore/Engine/Choreographer.swift:305-312`) — 전제 미확인: 중단 때 Stop·SubagentStop 훅이 오는지. `Tests/OfficeCoreTests/Fixtures`와 `docs/DESIGN.md` §4.1에서 먼저 확인합니다.
+- **PostToolUse가 빠진 도구**: Pre(A)만 오고 Post(A)가 안 오면, 그 뒤 도구가 끝날 때마다 `runningTools.last`인 A가 되살아납니다. (`OfficeState.swift:146-149`, `:165`)
+- **서브의 승인 요청이 메인에 붙음**: `agent_id` 없는 `Notification(permission_prompt)`이 메인을 `.waitingForPermission(nil)`로 만들고, 서브의 도구가 끝나도 메인은 안 풀립니다. (`OfficeState.swift:186-218`) — 전제 미확인: 서브가 낸 알림의 실제 모양.
+- **끝나지 않는 세션**: SessionEnd를 못 받은 터미널 세션(kill -9), SubagentStop을 못 받은 백그라운드 서브는 영원히 남습니다. 끝난 세션 id를 기억하지 않아, SessionEnd 뒤 늦게 온 훅이 새 메인을 만듭니다. (`OfficeState.swift:106-110`, `:353-394`)
+- `.arriving`이 다른 상태로 넘어가지 않아 "출근 중"이 몇 시간 남습니다. (`OfficeState.swift:746`)
+- 알림 계획의 세션 키가 세션 id가 바뀔 때(`continueHostSession`) 옮겨지지 않습니다. (`Sources/OfficeCore/Model/NotificationPlanner.swift:80-85`)
+
+**고칠 방향**: `OfficeState`에 "암묵적 종료" 규칙을 한 곳에 둡니다. 쉬지 않는 메인에 `waitingForInput`이 오거나 새 `promptSubmitted`가 오면 앞 턴이 끝난 것으로 보고(도구 비우기, 포그라운드 서브 정리, 기록 닫기, 쉬는 모습), 새 Pre가 오면 그 전 묶음의 남은 도구를 버리고, 끝난 세션 id를 잠깐 기억합니다. 터미널 세션의 시간 기반 퇴근은 설계서 §5.2가 일부러 두지 않았으므로, 넣는다면 아주 긴 시간이나 수동 "퇴근"으로 하고 설계서에 적습니다.
+
+**완료 기준**: 위 경우마다 리듀서·연출 테스트가 있고, 기존 404개 테스트가 통과합니다.
+
+**결과**:
+
+## 5. 행 머무름·화면 밖 서브 신호
+
+**문제 (코드)**
+
+- **행이 계속 바뀜**: `FloorPlan.make`가 최근 활동 순 3행을 고르는데 머무름 규칙이 없습니다. 바쁜 행이 4개 이상이면 숨은 행에 훅이 올 때마다 보이는 행이 통째로 교체되고(한 팀은 바로 사라지고 다른 팀은 문에서 걸어 들어옴), 그때마다 길찾기 격자를 다시 만들고 가구를 다시 굽습니다. (`Sources/OfficeStage/OfficeFloor.swift:78-109`, `Tests/OfficeStageTests/FloorTests.swift:156-188`은 지금 동작을 고정해 둠)
+- **화면 밖 서브의 보고**: `OfficeFloor`가 숨은 서브의 지시를 버릴 때 `.signal`도 버려서, 메인의 `.await("report:<id>")`가 8초 시간 제한까지 대기열을 막고, 그 뒤 아무도 없는 곳에 하이파이브를 합니다. 숨은 서브 여럿이 잇달아 끝나면 미니의 메인 칩이 수십 초 늦습니다. (`OfficeFloor.swift:205-216`, `Sources/OfficeStage/Stage.swift:352-355`, `Sources/OfficeCore/Engine/Choreographer.swift:399-409`)
+- **미니가 다른 행을 보여 줌**: 보여 주던 행에 퇴근 중인 사람이 남아 있을 때 초점이 바뀌면, 닫히는 행이 0번을 차지해 새 행이 띠 아래로 내려갑니다. (`OfficeFloor.swift:255-275`, `Stage.swift:498-503`)
+- 늦게 온 `report:` 신호가 `signals`에 영원히 남습니다. (`Stage.swift:166`, `:350`)
+- 책상이 하나 늘 때마다 길찾기 격자를 다시 만들고 걷는 사람 전부의 길을 다시 찾습니다. (`Stage.swift:393-401`, `:536-597`)
+
+**고칠 방향**: `make`에 이전 계획을 넘겨, 보이는 행은 쉬고 있거나 30~60초 조용할 때만 밀려나게 합니다(승인 대기·답변 필요가 있는 숨은 행은 바로 올림). 버려진 `.signal`은 전역 지시로 넘기거나 짝이 되는 `.await`와 축하 연출을 함께 뺍니다. 띠 모드에서는 고르지 않은 행의 퇴근 중인 사람을 바로 치웁니다. 배치 갱신은 `enqueue` 끝에 한 번만 합니다.
+
+**완료 기준**: 네 행이 번갈아 훅을 보내는 테스트에서 행이 뒤바뀌지 않고, 숨은 서브가 보고해도 메인의 대기열이 막히지 않습니다. `make snapshot` 결과를 눈으로 확인합니다.
+
+**결과**:
+
+## 6. 조용한 실패 없애기·첫 실행 안내
+
+**문제 (코드)**
+
+- **알림 권한 캐시**: `Notifier.authorization`은 앱을 켤 때, 자기 요청 뒤, 설정 → 알림 탭이 보일 때만 새로 읽습니다. 처음에 거부했다가 시스템 설정에서 허용해도 알림이 조용히 버려집니다. (`App/Sources/Notifier.swift:45-52`, `:114-126`)
+- **세션 이동 판정이 세 벌**: 메뉴는 `term != nil`이면 "터미널로" 버튼을 보여 주지만 `TerminalFocuser`는 7개만 압니다(tmux·zed는 무반응, 도움말은 "tmux을(를) 앞으로"). `vscode`는 VS Code → Insiders → Cursor 순이라 Cursor 세션도 VS Code를 올립니다. 메뉴 경로는 `acknowledge`와 로그를 건너뜁니다. (`Sources/OfficeCore/Model/Roster.swift:115`, `App/Sources/Support.swift:62-110`, `App/Sources/MenuContentView.swift:185-205`)
+- **고장이 안 보임**: 서버 실패(`serverState == .failed`)와 훅 미설치는 메뉴 드롭다운 배너에만 나옵니다. 사무실 창·미니·메뉴바 아이콘에는 없어서, 미리 출근한 세션들이 앉아 있으면 멀쩡해 보입니다. 메뉴 배너의 "설치"는 성공·실패 결과를 보여 주지 않습니다. (`App/Sources/MenuContentView.swift:63-81`, `App/Sources/SettingsView.swift:237`)
+- **남는 알림**: 앱을 끄거나 다시 설치하면 띄워 둔 "승인 대기" 알림이 알림 센터에 남습니다. (`App/Sources/AppModel.swift:234-239`)
+- **첫 실행**: 메뉴바 아이콘만 생기고 안내가 없습니다.
+- 작은 것: `willPresent`가 조용히 바꾸는(`isUpdate`) 알림에도 배너를 다시 띄울 수 있고, 쓰지 않는 `.badge` 권한을 요청합니다. (`Notifier.swift:58`, `:181-186`)
+
+**고칠 방향**: 알림을 보낼 때마다(또는 앱이 활성화될 때) 권한을 다시 읽습니다. 이동 판정·문구·동작을 한 타입(`SessionFocuser`)으로 모으고, 모르는 터미널이면 버튼을 숨깁니다. 활성화는 `NSWorkspace.openApplication`으로 합니다. 서버 실패·훅 문제는 사무실 창 위쪽 띠와 메뉴바 아이콘 상태로도 보여 주고, 설치 결과를 배너에 보여 줍니다. 켤 때와 끌 때 자기 알림을 지웁니다. 훅이 없는 첫 실행에는 메뉴 드롭다운(또는 작은 환영 창)을 한 번 엽니다.
+
+**완료 기준**: `make app` 통과. 권한·이동·알림 동작은 "화면 확인 필요"로 적습니다.
+
+**결과**:
+
+## 7. 훅 서버·설정 파일 안전
+
+**문제 (코드, 일부 실험으로 확인)**
+
+- **엔드포인트 파일 가로채기**: 설치된 앱이 켜진 채 `make serve`·`make run`을 돌리면 두 번째 프로세스가 엔드포인트 파일을 덮어쓰고 끝날 때 지웁니다. 설치된 앱은 "서버 실행 중"으로 초록인데 이벤트를 못 받습니다. (`App/Sources/AppModel.swift:223`, `:238`, `Sources/OfficeServer/HookInstaller.swift:30-32`, `Sources/office-sim/main.swift:253-268`)
+- `EndpointFile.write`가 지운 뒤 옮겨서 원자적이지 않습니다. (`HookInstaller.swift:19-20`)
+- 강제 종료·충돌 뒤 엔드포인트 파일이 남습니다. 훅 스크립트는 빈 PORT면 80번 포트로 보냅니다. (`Sources/OfficeServer/Resources/claude-office.sh:17-23`)
+- **심볼릭 링크**: `settings.json`이 링크면 원자적 쓰기가 링크를 일반 파일로 바꿉니다(실험으로 확인). (`HookInstaller.swift:137-142`)
+- 바뀐 것이 없어도 설치·제거 때마다 백업을 만들고 지우지 않습니다. (`HookInstaller.swift:95-99`, `:122-143`)
+- 제거·재설치가 우리 명령이 든 그룹 전체를 지워, 같은 그룹에 넣어 둔 사용자 훅도 사라집니다. (`Sources/OfficeCore/Hooks/HookSettingsEditor.swift:113-128`)
+- `bundledScript`가 매번 리소스를 읽고 없으면 `preconditionFailure`라, `make install`이 번들을 바꾸는 사이에 상태를 새로 읽으면 앱이 죽습니다. (`HookInstaller.swift:62-67`)
+- **서버**: 연결마다 전체 시간 제한이 없고(`recv`마다 2초), 동시 연결 수 제한이 없고, `accept`가 EMFILE로 실패하면 바쁜 대기, 토큰 검사는 본문을 다 받은 뒤입니다. 거절한 요청(413 등)은 어디에도 남지 않습니다. (`Sources/OfficeServer/HookServer.swift:164-204`, `Sources/OfficeServer/HTTP.swift:58`, `:100`, `:111`)
+
+**고칠 방향**: 파일 내용이 자기 포트·토큰일 때만 지우고, `HookHealth`가 파일을 읽어 비교합니다. `rename(2)`로 바꿔 씁니다. 링크는 풀어서 대상에 씁니다. 바뀐 것이 없으면 쓰지 않고 백업은 최근 몇 개만 둡니다. 핸들러 단위로 지웁니다. `bundledScript`는 한 번만 읽습니다. 서버에 연결당 3초 제한·동시 연결 상한·`accept` 실패 뒤 짧은 쉼을 넣고, 머리줄을 다 받으면 토큰부터 검사하고, 거절 수를 설정 → 연동에 보여 줍니다. 본문 상한을 올린다면 `Expect: 100-continue`에 답해야 합니다(curl은 1MB 넘는 본문에 붙임).
+
+**완료 기준**: 항목마다 `OfficeServerTests`·`HookSettingsEditorTests`에 테스트가 있습니다.
+
+**결과**:
+
+## 8. 화면 디자인 다듬기
+
+**문제 (스냅샷 확인)**
+
+- **상태 칩의 주인을 알기 어려움**: 칩은 28자(라틴 약 160pt, 한글 약 257pt)까지 넓어지는데 책상 간격은 92pt입니다. 혼잡한 행에서 서브4의 칩이 안마 의자 쪽으로 밀리고 서브5의 칩이 서브4 머리 위에 놓입니다(`make snapshot`의 `floor-030.00s.svg`). 미니에서는 긴 칩 셋이 겹칩니다. (`Sources/OfficeStage/Overlay.swift:105`, `:322`, `:339-341`)
+- **밤 조명의 이모트**: ♪·Zz·전구 빛줄기·외침 선은 잉크색(0x3A3247)만 써서 밤 벽·바닥 위에서 대비가 1.3~1.6:1입니다(`office-sim snapshot Scenarios/delegation.jsonl --at 128 --night`). `OverlayArt.emote`가 조명을 받지 않습니다. (`Overlay.swift:493-497`, `:593-614`)
+- **같은 디렉토리의 메인 구별**: 폴더 표지가 둘 다 "claude-office"입니다.
+- **메뉴바 점**: 모두 끝나고 "답변 필요"만 남아도 초록 "작업 중"입니다. `.awaitingReply`의 톤이 `.calm`이 아니라서입니다. (`Sources/OfficeCore/Model/Roster.swift:155-160`)
+- 보고 연출이 메인의 상태를 무시해, 자는 메인의 Zz나 승인 대기 "!"를 지웁니다. (`Sources/OfficeCore/Engine/Choreographer.swift:398-418`)
+- NFD 한글(맥 파일 이름)은 칩 폭을 세 배쯤 넓게 잽니다. (`Overlay.swift:404-426`)
+- 종이비행기는 회전을 좌표에 구워 매 장 새 텍스처를 만듭니다(요청마다 약 39장). (`Overlay.swift:237-248`, `:677-686`)
+- 화면 확인 필요(SVG에서만 봄): 소파에 앉은 직원이 팔걸이 앞에 서 있는 것처럼 보입니다(`delegation-128.00s.svg`).
+
+**고칠 방향**: 칩은 평소 책상 간격에 맞춰 자르고, 고르거나 마우스를 올린 사람만 전체를 보여 줍니다(옆으로 밀기보다 위로 쌓기). 이모트에 조명을 넘겨 밤에는 밝은 테두리를 줍니다. 같은 폴더의 메인이 둘 이상이면 표지에 세션 제목을 덧붙입니다(표시 수준이 상세일 때만). 답변 필요만 남으면 메뉴바 점을 사무실의 "?"와 같은 파랑으로 합니다. 보고 연출의 메인 쪽은 `!waiting && rest == .none`일 때만 합니다. 폭을 재기 전에 글자를 합칩니다(NFC). 종이비행기 각도는 15° 단위로 맞추거나 회전을 따로 둡니다.
+
+**완료 기준**: 스냅샷(낮·밤·혼잡·미니)을 고치기 전후로 비교해 결과에 적고, `OverlayTests`가 통과합니다. 앱 화면은 "화면 확인 필요".
+
+**결과**:
+
+## 9. 문구·경과 시간·잔손질
+
+**문제 (코드)**
+
+- **낡은 문구**: "창을 넓히면 더 보여요"(창은 M5(9)부터 고정 크기, `App/Sources/StaffPanel.swift:42`), "세션은 사이드바에서 골라 주세요"(M5(7b)부터 세션까지 열림, `App/Sources/MenuContentView.swift:189`). 빈 상태 안내가 메뉴는 "터미널에서 claude를 실행하면", 패널은 "Claude 데스크톱 앱에서 세션을 시작하면"입니다. 같은 동작이 "사무실 보기"와 "사무실 창 열기"로 불립니다.
+- **경과 시간이 다섯 벌**: 메뉴는 분이 넘어가지 않아 "쉬는 중 4320분"(`MenuContentView.swift:219-223`), 미니는 "72시간 전"(`App/Sources/MiniOfficePanel.swift:755-761`), 인스펙터는 초 없는 사본(`App/Sources/AgentCard.swift:295-300`), 코어에 `StatusLine.elapsed`·`AgentTimeline.ago`.
+- `case 36, 76 where modifiers.isEmpty`의 `where`가 76에만 걸려 ⌘·⇧+Return도 세션 이동입니다. (`App/Sources/ClaudeOfficeApp.swift:306`)
+- 테스트 이벤트 수가 `receivedHooks - before`라 그 사이 온 실제 훅까지 셉니다. (`App/Sources/AppModel.swift:904-907`)
+- `make install`이 실행 중인 앱을 끄지 않고 번들을 바꾸고, `xcodebuild … | tail -n 20`이 빌드 오류를 자릅니다. `make uninstall`은 훅을 남깁니다. (`Makefile:76-90`)
+- 이벤트 로그가 새 줄마다 맨 아래로 스크롤해 지난 줄을 읽을 수 없습니다. 닫은 설정 창의 1초 타이머와 닫은 로그 창이 계속 갱신될 수 있습니다(전제 미확인). (`App/Sources/EventLogView.swift:16-48`, `App/Sources/SettingsView.swift:200-201`)
+- 미니 위치: 저장한 자리가 `visibleFrame` 밖으로 조금만 나가도 오른쪽 아래로 초기화하고, `keepOnScreen`이 패널이 놓인 화면이 아닌 `NSScreen.main`을 씁니다. (`MiniOfficePanel.swift:408-435`)
+- 낡은 주석: `Sources/OfficeCore/Model/OfficeState.swift:61`(curl 백그라운드), `Sources/OfficeCore/Model/OfficeEvent.swift:34`(팀장).
+
+**고칠 방향**: 문구를 지금 동작에 맞추고 용어를 하나로 합니다. 경과 시간은 코어의 함수 하나(분 → 시간 → 일)로 모읍니다. Return은 `case 36 where …, 76 where …`로 나눕니다. 테스트 이벤트는 테스트 세션 id로 셉니다. `make install`은 실행 중이면 끄라고 안내하고 멈추거나 끄고 다시 엽니다(`-quiet`로 오류는 보이게). 로그는 맨 아래를 보고 있을 때만 따라갑니다. 미니 자리는 초기화하지 않고 화면 안으로 당깁니다.
+
+**완료 기준**: 경과 시간 함수 테스트, `make test`·`make app` 통과.
+
+**결과**:
+
+## 10. 레티나 메모리 줄이기
+
+**문제 (실측)**: 5K 2배율 화면에서 실행 3시간 41분 뒤 `footprint`가 326MB입니다(목표는 1배율 150MB). 그래픽이 약 240MB입니다(unmapped graphics 146MB, IOAccelerator 77MB, IOSurface 20MB). 설계서 §8.3이 "레티나면 넘을 가능성이 큼"이라며 측정을 미뤄 둔 부분입니다.
+
+- 캐릭터·말풍선은 텍스처 배율이 바뀌어도 다시 굽지 않습니다. 1배율 화면에서 켠 뒤 레티나가 붙으면 흐리고, 반대면 4배 텍스처를 계속 듭니다. (`App/Sources/ShapeBaker.swift:27-33`, `App/Sources/OfficeScene.swift:350-354`, `:704-752`)
+- 텍스처 캐시는 300장에서 통째로 비웁니다. (`ShapeBaker.swift:49`, `:156`)
+- `AVAudioEngine`을 소리 묶음마다 메인 스레드에서 시작합니다(전제 미확인: 끊김). (`App/Sources/SoundPlayer.swift:85-118`)
+
+**고칠 방향**: 먼저 `make perf`와 `footprint`로 상황별(메뉴바만·미니·사무실 창) 메모리를 재서 어디가 큰지 나눕니다. 그다음 바닥·벽 같은 큰 층을 1배율로 굽기, 그림판 크기, 배율이 바뀔 때 캐릭터 다시 굽기, 캐시를 오래된 것부터 비우기를 차례로 재며 적용합니다. 목표를 "1배율 150MB / 2배율 ○○MB"로 나눠 설계서에 적습니다.
+
+**주의**: 측정에는 앱 실행이 필요합니다. 설치된 앱을 바꾸지 않고 `scripts/perf-launch.sh isolated`의 격리 실행을 쓰되, 실행 중인 앱과 충돌하면(엔드포인트 파일, 7번 항목) 멈추고 사용자에게 묻습니다.
+
+**완료 기준**: 고치기 전후 측정값이 `build/perf/results.md`와 이 문서에 있습니다.
+
+**결과**:
+
+## 11. 구조 정리와 안전망
+
+**문제 (코드)**: 같은 규칙이 여러 곳에 복사돼 있고 이미 어긋났습니다. 동작을 바꾸지 않는 정리입니다.
+
+- **`AppModel`(960줄)**: "엔진이 바뀐 뒤" 처리(기록 → 알림 → 직원 목록 → 미니 초점 → 선택 정리 → 현황 줄)가 네 곳에 복사돼 있고, tick 경로는 일부만 합니다. (`App/Sources/AppModel.swift:309-312`, `:340-357`, `:416-423`, `:491-506`) `settleUntil` 올리기가 네 가지 꼴입니다. (`:371`, `:412`, `:445`, `:807`) 사무실 창을 제목으로 찾는 코드가 여섯 곳입니다.
+- **훅 본문을 메인 스레드에서 두 번 파싱**: `engine.handle`과 `summary(of:)`. 전달 큐에서 한 번만 파싱할 수 있습니다. (`AppModel.swift:344-345`, `:945-958`)
+- **`Choreographer`(1030줄)**: 상태 → 모습(자세·소품·표정·이모트) 규칙이 `show`·`rest`·`settle`·`restoreRest`·`restored*`에 따로 있어, 웹 검색 중인 직원이 다시 앉으면 자세가 바뀌고 음료가 컵으로 바뀝니다. (`Sources/OfficeCore/Engine/Choreographer.swift:658-660`, `:787`, `:561-571`, `:836-838`)
+- **`OfficeLayout` ↔ `OfficeArt` 숫자**: 책상 발자국, 벽 선 160, 소파·액자 좌표, 머리 위치가 양쪽에 숫자로 적혀 있습니다. 길찾기 여유는 1pt입니다. (`Sources/OfficeStage/OfficeLayout.swift:311`, `:342`, `Sources/OfficeStage/Art/OfficeArt.swift:79-81`, `:362-363`, `:480-489`)
+- **중복**: 글자 폭 재기 두 벌(`OfficeArt.estimatedWidth`와 `TextMetrics.width`), "최근 활동" 정의 세 벌, `OfficeFloor.apply`와 `resync`, `Stage`의 `.despawn`과 `remove`.
+- **죽은 코드**: `OfficeLayout.lounge`·`wallBottom`, `Pathfinder.length`, `RenderPacer.isLively`, `MiniFocus.next(pinned:)`, 앱이 읽지 않는 `StageEvent`들, 쓰이지 않는 `OverlayTier.tiny`·`.compact`.
+- **잠복 버그**: `VectorPath`가 "Z" 뒤 숫자에서 무한 루프(`Sources/OfficeStage/VectorPath.swift:84-87`), `abs(hash)`가 `Int.min`에서 죽음(`Sources/OfficeStage/Art/CharacterArt.swift:516`).
+- **안전망**: 앱 계층은 Swift 5 모드·동시성 검사 최소이고(`App/project.yml:48-50`), 테스트와 CI가 없습니다.
+
+**고칠 방향**: `AppModel`에 `commit(_ directives:, at:)` 하나를 두고 네 경로가 쓰게 합니다. `Choreographer`에 순수 함수 `look(for:)` 하나를 둡니다. 배치 숫자는 `OfficeLayout`에서만 정의하고 그림이 읽어 갑니다. 중복과 죽은 코드를 걷어 냅니다. `make test`만 도는 GitHub Actions 워크플로 파일을 더합니다(푸시는 사용자 몫). 앱 계층의 Swift 6 전환은 범위가 커서 가능한지 조사만 하고 결과를 적습니다.
+
+**완료 기준**: 스냅샷이 정리 전과 같고(`make snapshot` 결과 비교), `make test`·`make app`이 통과합니다. 커밋은 덩어리별로 나눕니다.
+
+**결과**:
+
+---
+
+## 새로 발견한 것
+
+(항목을 진행하다 범위 밖에서 발견한 문제를 여기에 적습니다.)
