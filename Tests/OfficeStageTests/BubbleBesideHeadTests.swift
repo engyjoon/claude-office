@@ -5,32 +5,21 @@ import Testing
 @testable import OfficeStage
 
 /// M6(9): 화면 위 끝에 밀린 말풍선은 머리 옆에 두고 꼬리가 옆에서 머리를 가리킨다
-/// (미니에서 문으로 나갈 때 꼬리가 상자를 뚫고 위로 솟던 것).
+/// (미니에서 문으로 나갈 때 꼬리가 상자를 뚫고 위로 솟던 것). 미니는 이제 말풍선을 띄우지 않으므로(`StageConfig.showsBubbles`)
+/// 머리 옆 자리는 사무실 창 위 끝에서 쓰입니다.
 @Suite("머리 옆 말풍선 (M6(9))")
 struct BubbleBesideHeadTests {
-    func on(_ event: String, _ extra: String = "", _ session: String = "m") -> String {
-        hook(event, extra, session: session, cwd: "/w/\(session)")
-    }
-
     /// 앱의 미니 띠와 같은 보이는 영역 (`OfficeScene.syncOverlays`의 `.band`)
     static var miniBounds: MapRect {
         let extent = MiniOffice.extent()
         return MapRect(0, extent.y, extent.width + extent.x, extent.height)
     }
 
-    /// 꼬리 끝이 상자 아래거나 상자 옆이어야 합니다 (상자를 가로지르지 않음)
-    static func tailClear(_ item: OverlayItem) -> Bool {
-        let f = item.frame!, tip = item.origin
-        return tip.y >= f.maxY || tip.x >= f.maxX || tip.x <= f.x
-    }
-
-    @Test("미니에서 서브가 보고하고 메인이 퇴근하는 동안 말풍선 꼬리가 상자를 뚫지 않고, 상자는 화면 안에 있다")
-    func miniLeaving() throws {
-        var h = FloorHarness(width: MiniOffice.visibleMapWidth(), height: OfficeLayout.minHeight, band: true)
-        h.hook(on("SessionStart"))
-        h.select(.only(h.team("m")))  // 앱처럼 미니에 보여 줄 행을 고름 (MiniFocus)
+    /// 서브가 일하고 보고한 뒤 메인이 퇴근하는 장면 (보고 "끝났어요!"류, 퇴근 인사 말풍선이 뜸)
+    static let leavingScript: [(Double, String)] = {
+        func on(_ event: String, _ extra: String = "") -> String { hook(event, extra, session: "m", cwd: "/w/m") }
         let read = #""tool_name":"Read","tool_use_id":"r1","tool_input":{"file_path":"/x/A.swift"},"agent_id":"g1","agent_type":"general-purpose""#
-        var script: [(Double, String)] = [
+        return [
             (1, on("UserPromptSubmit", #""prompt":"x""#)),
             (2, on("PreToolUse", #""tool_name":"Agent","tool_use_id":"a1","tool_input":{"description":"일","subagent_type":"general-purpose"}"#)),
             (2.2, on("SubagentStart", #""agent_id":"g1","agent_type":"general-purpose""#)),
@@ -41,11 +30,12 @@ struct BubbleBesideHeadTests {
             (14, on("Stop")),
             (25, on("SessionEnd", #""reason":"exit""#)),
         ]
+    }()
 
-        let bounds = Self.miniBounds
-        let area = bounds.insetBy(4)
-        var sideCount = 0
-        var texts = Set<String>()
+    /// 장면을 0.1초마다 돌리며 매번 머리 위 그림을 모읍니다
+    static func play(_ h: inout FloorHarness, bounds: MapRect?) -> [(Double, [OverlayItem])] {
+        var script = leavingScript
+        var frames: [(Double, [OverlayItem])] = []
         var time = 0.0
         while time < 30 {
             while let (at, json) = script.first, at <= time {
@@ -53,18 +43,36 @@ struct BubbleBesideHeadTests {
                 h.hook(json, at: at)
             }
             h.run(until: time)
-            for item in Overlay.items(for: h.stage, options: OverlayOptions(bounds: bounds)) where item.kind == .bubble {
-                let frame = try #require(item.frame)
-                #expect(Self.tailClear(item), "\(time)초 \(item.text ?? ""): 꼬리 \(item.origin), 상자 \(frame)")
-                #expect(frame.y >= area.y - 0.01 && frame.x >= area.x - 0.01 && frame.maxX <= area.maxX + 0.01)
-                if item.origin.y < frame.maxY { sideCount += 1 }
-                texts.insert(item.text ?? "")
-            }
+            frames.append((time, Overlay.items(for: h.stage, options: OverlayOptions(bounds: bounds))))
             time += 0.1
         }
-        // 이 장면은 실제로 머리 옆 말풍선을 거칩니다 (보고 "끝났어요!"류, 퇴근 인사)
-        #expect(sideCount > 10)
-        #expect(texts.count >= 2, "\(texts)")  // 서브 보고와 메인 퇴근 인사
+        return frames
+    }
+
+    static func isBubbleSound(_ event: StageEvent) -> Bool {
+        if case .sound(let cue, _) = event { return cue.group == .bubble || cue.group == .chatter }
+        return false
+    }
+
+    @Test("미니에는 말풍선이 없고 말풍선 블립도 울리지 않는다. 상태 칩은 그대로 보인다 (사무실 창은 같은 장면에서 말풍선을 띄움)")
+    func miniHasNoBubbles() {
+        var office = FloorHarness()
+        office.hook(hook("SessionStart", session: "m", cwd: "/w/m"))
+        let officeFrames = Self.play(&office, bounds: nil)
+        let officeBubbles = Set(officeFrames.flatMap { $0.1 }.filter { $0.kind == .bubble }.compactMap(\.text))
+        #expect(officeBubbles.count >= 2, "\(officeBubbles)")  // 서브 보고와 메인 퇴근 인사
+
+        var mini = FloorHarness(width: MiniOffice.visibleMapWidth(), height: OfficeLayout.minHeight, band: true)
+        mini.hook(hook("SessionStart", session: "m", cwd: "/w/m"))
+        mini.select(.only(mini.team("m")))  // 앱처럼 미니에 보여 줄 행을 고름 (MiniFocus)
+        let miniFrames = Self.play(&mini, bounds: Self.miniBounds)
+        #expect(!mini.stage.config.showsBubbles)
+        for (time, items) in miniFrames {
+            #expect(!items.contains { $0.kind == .bubble }, "\(time)초에 말풍선")
+        }
+        #expect(miniFrames.contains { $0.1.contains { $0.kind == .pill } })
+        #expect(!mini.events.contains(where: Self.isBubbleSound))
+        #expect(mini.stage.actors.values.allSatisfy { $0.bubble == nil && $0.queuedBubble == nil })
     }
 
     @Test("머리 옆 자리는 오른쪽부터, 오른쪽 끝에 닿으면 왼쪽, 다른 말풍선이 있으면 비켜 간다")

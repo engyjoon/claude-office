@@ -6,9 +6,10 @@ import OfficeCore
 /// 사무실은 줄이지 않는다는 원칙(배율 1)에 따라, 메인 한 명과 서브 2명(일하는 서브 먼저)만 사무실 그림 그대로 보여 줍니다.
 /// 미니 전용 `OfficeFloor`(한 행 띠, `band: true`)가 그 행을 첫 행 자리에 놓고, 고른 서브를 1·2번 칸에 앉힙니다(`MiniCast`).
 /// 휴게 공간은 보여 주지 않고, 쉬러 가는 동작은 자기 책상에서 합니다(`StageConfig.commonAreasAtDesk`).
-/// 패널은 머리 위 말풍선부터 행 아래까지(지도 y `top`~`bottom`)를 배율 1로 보여 주고, 위에 24pt 머리줄이 붙습니다.
+/// 패널은 머리 위 칩부터 행 아래까지(지도 y `top`~`bottom`)를 배율 1로 보여 주고, 위에 20pt 머리줄이 붙습니다.
+/// 말풍선은 띄우지 않습니다 (`StageConfig.showsBubbles`, M6(19)).
 public enum MiniOffice {
-    /// 보여 주는 지도 영역 위쪽 (첫 행 직원의 말풍선·상태 칩이 들어가는 높이)
+    /// 보여 주는 지도 영역 위쪽 (첫 행 직원의 상태 칩이 들어가는 높이. 말풍선이 있던 때의 높이를 아직 그대로 둠)
     public static let top = OfficeLayout.firstDeskY - 140
     /// 보여 주는 지도 영역 아래쪽 (첫 행 띠의 아래 끝)
     public static let bottom = OfficeLayout.firstDeskY + 40

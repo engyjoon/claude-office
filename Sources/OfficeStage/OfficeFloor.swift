@@ -122,6 +122,7 @@ public struct OfficeFloor: Sendable {
     public private(set) var viewport: (width: Double, height: Double)
     /// 한 행 띠 (미니 사무실, M5(4)): 고른 행의 메인과 쉬지 않는 서브 `subSlots`명만 첫 행 자리에 앉힙니다.
     /// 무대 배치는 사무실과 같고(출입문은 오른쪽 밖), 공용 구역에 가는 대신 자기 책상에서 쉽니다(`StageConfig.commonAreasAtDesk`).
+    /// 말풍선은 띄우지 않습니다(`StageConfig.showsBubbles`).
     public let isBand: Bool
     public let subSlots: Int
 
@@ -129,7 +130,10 @@ public struct OfficeFloor: Sendable {
                 width: Double = OfficeLayout.defaultWidth, height: Double = OfficeLayout.defaultHeight, band: Bool = false,
                 subSlots: Int = MiniOffice.subSlots) {
         var config = config
-        if band { config.commonAreasAtDesk = true }
+        if band {
+            config.commonAreasAtDesk = true
+            config.showsBubbles = false
+        }
         stage = Stage(config: config)
         self.selection = selection
         isBand = band

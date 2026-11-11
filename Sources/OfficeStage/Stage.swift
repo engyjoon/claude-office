@@ -128,6 +128,10 @@ public struct StageConfig: Hashable, Sendable {
     /// 공용 구역(소파·안마 의자·탕비 코너·화이트보드)에 가는 대신 자기 책상에서 합니다. 미니 사무실은 휴게 공간을 보여 주지 않으므로 켭니다 (M5(4) v2).
     /// 안마는 졸기로, 화이트보드에 쓰기는 타이핑으로 바꿉니다.
     public var commonAreasAtDesk = false
+    /// 말풍선을 띄웁니다. 미니 사무실은 끕니다: 띠가 낮아 상태 칩 위에 말풍선 자리가 없어 머리 옆으로 밀린 말풍선이
+    /// 다른 직원 위를 가로지르고(화면 확인), 급한 외침 풍선의 내용은 머리줄·"!"·상태 칩이 이미 보여 줍니다.
+    /// 끄면 `say`를 버리므로 말풍선 블립도 울리지 않습니다 (승인 요청·완료 같은 알림 소리는 따로 울림).
+    public var showsBubbles = true
     /// 동작 줄이기 (설계서 §10, M5(8)): 걷는 대신 도착할 자리로 바로 옮기고(순간이동), 제스처를 생략합니다.
     public var reducedMotion = false
 
@@ -331,6 +335,7 @@ public struct Stage: Sendable {
         case .say(let bubble):
             let blip = actors[id]!.pendingBlip
             actors[id]!.pendingBlip = nil
+            guard config.showsBubbles else { break }
             present(bubble, blip: blip, for: id)
         case .dismissBubble:
             actors[id]!.pendingBlip = nil
