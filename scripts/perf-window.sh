@@ -7,18 +7,26 @@
 #   scripts/perf-window.sh minimize  사무실 창 최소화
 #   scripts/perf-window.sh restore   최소화 풀기
 #   scripts/perf-window.sh list      앱 창 목록
+# PERF_PID=<PID>를 주면 그 프로세스의 창만 조작합니다 (나란히 띄운 새 빌드, 개선 10). 주지 않으면 프로세스 이름 "Claude Office"
+# (설치된 앱과 새 빌드가 함께 떠 있으면 어느 쪽인지 정할 수 없으니 꼭 PERF_PID를 주세요).
 set -euo pipefail
 TITLE="Claude Office 사무실"
-run() { osascript -e "tell application \"System Events\" to tell process \"Claude Office\" to $1"; }
+if [[ -n "${PERF_PID:-}" ]]; then
+    [[ "$PERF_PID" =~ ^[0-9]+$ ]] || { echo "PERF_PID는 숫자여야 해요" >&2; exit 1; }
+    PROC="(first process whose unix id is $PERF_PID)"
+else
+    PROC='process "Claude Office"'
+fi
+run() { osascript -e "tell application \"System Events\" to tell $PROC to $1"; }
 case "${1:-list}" in
     open)
         # 앱이 막 켜졌으면 메뉴가 늦게 뜨므로 창이 보일 때까지 몇 번 다시 시도합니다
         for _ in 1 2 3 4 5; do
-            osascript -e 'tell application "System Events" to tell process "Claude Office"
+            osascript -e "tell application \"System Events\" to tell $PROC
                 click menu bar item 1 of menu bar 2
                 delay 1.5
                 click button 1 of group 1 of window 1
-            end tell' >/dev/null 2>&1 || true
+            end tell" >/dev/null 2>&1 || true
             sleep 1
             if run "get name of every window" | grep -q "$TITLE"; then
                 # 메뉴 창을 닫고, 사무실 창을 주 화면으로 (메뉴바 아이콘을 누른 화면에 열리면 보이지 않는 화면일 수 있음)

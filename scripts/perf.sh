@@ -14,6 +14,9 @@
 #   d  사무실 창이 다른 창에 가려짐 또는 최소화
 #   e  미니 끔 + 사무실 창 닫힘 (메뉴바만)
 #
+# PERF_PID=<PID>를 주면 그 프로세스를 잽니다 (나란히 띄운 새 빌드: PERF_PID=$(cat build/perf/side.pid), 개선 10).
+# 주지 않으면 이름에 "Claude Office.app/Contents/MacOS"가 든 첫 프로세스(설치된 앱)를 잽니다.
+#
 # 앱 안의 계측(fps·지연)은 기본으로 꺼져 있습니다. 켜려면:
 #   defaults write com.engyjoon.claudeoffice debug.perfProbe -bool true   (앱을 다시 켜야 적용)
 # 켜 두면 ~/Library/Logs/Claude Office/perf.log에 10초마다 씬별 fps와 훅→화면 지연 백분위가 남고,
@@ -23,12 +26,17 @@ set -euo pipefail
 LABEL="${1:-}"
 DURATION="${2:-30}"
 if [[ -z "$LABEL" ]]; then
-    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 
 PROCESS_PATTERN="Claude Office.app/Contents/MacOS"
-PID="$(pgrep -f "$PROCESS_PATTERN" | head -n 1 || true)"
+if [[ -n "${PERF_PID:-}" ]]; then
+    PID="$PERF_PID"
+    ps -p "$PID" >/dev/null 2>&1 || { echo "PID $PID 프로세스가 없어요" >&2; exit 1; }
+else
+    PID="$(pgrep -f "$PROCESS_PATTERN" | head -n 1 || true)"
+fi
 if [[ -z "$PID" ]]; then
     echo "실행 중인 Claude Office를 찾지 못했어요. open \"/Applications/Claude Office.app\"" >&2
     exit 1
