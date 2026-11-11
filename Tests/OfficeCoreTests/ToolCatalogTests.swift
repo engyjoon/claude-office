@@ -57,4 +57,55 @@ struct ToolCatalogTests {
     func noFalsePositive(_ input: String) {
         #expect(Redactor.redact(input) == input)
     }
+
+    @Test(
+        "놓치던 꼴도 가린다",
+        arguments: [
+            ("curl -u user:pass https://x.io", "curl -u <가림> https://x.io"),
+            ("curl --user 'me:pw d' x", "curl --user <가림> x"),
+            ("sshpass -p hunter2 ssh me@host", "sshpass -p <가림> ssh me@host"),
+            ("mysql -u root -phunter2 db", "mysql -u root -p<가림> db"),
+            ("curl -H 'Authorization: Basic dXNlcjpwYXNz' x", "curl -H 'Authorization: Basic <가림>' x"),
+            ("mytool --password xxx run", "mytool --password <가림> run"),
+            ("mytool --api-key abc run", "mytool --api-key <가림> run"),
+            ("mytool --token=abc", "mytool --token=<가림>"),
+        ])
+    func extraRedaction(_ input: String, _ expected: String) {
+        #expect(Redactor.redact(input) == expected)
+    }
+
+    @Test(
+        "비밀이 아닌 명령은 가리지 않는다",
+        arguments: [
+            "pwd && ls", "kubectl get secret foo", "grep -r secret src/", "gh auth token | pbcopy",
+            "git push -u origin main", "mkdir -p out/dir", "mysql -u root db", "mytool --token --verbose",
+            "echo basic usage", "mysql -p db",
+        ])
+    func noOverRedaction(_ input: String) {
+        #expect(Redactor.redact(input) == input)
+    }
+
+    @Test("자르기 전에 가린다")
+    func redactsBeforeTruncating() {
+        func subject(_ name: String, _ input: JSONValue) -> String? {
+            ToolCatalog.makeCall(name: name, input: input, id: nil).subject
+        }
+        let bash = subject("Bash", ["command": "export DB_URL=postgres://admin:S3cretPassw0rd@db/x"])!
+        #expect(!bash.contains("S3cret"))
+        #expect(!bash.contains("admin"))
+        #expect(subject("Bash", ["command": "pwd && ls"]) == "pwd && ls")
+        let search = subject("WebSearch", ["query": "how to use password=Sup3rS3cretValue123 in x"])!
+        #expect(!search.contains("Sup3r"))
+        let grep = subject("Grep", ["pattern": "xx password=Sup3rS3cretValue123"])!
+        #expect(!grep.contains("Sup3r"))
+        let agent = subject("Agent", ["description": "deploy with token=Sup3rS3cretValue123 to prod"])!
+        #expect(!agent.contains("Sup3r"))
+    }
+
+    @Test("아주 긴 명령도 빨리 처리한다")
+    func hugeCommand() {
+        let huge = String(repeating: "a/b ", count: 300_000)
+        let call = ToolCatalog.makeCall(name: "Bash", input: ["command": .string(huge)], id: nil)
+        #expect(call.subject!.count <= 40)
+    }
 }

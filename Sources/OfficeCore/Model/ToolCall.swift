@@ -100,19 +100,19 @@ public enum ToolCatalog {
         }
         switch name {
         case "Grep", "Search":
-            return input["pattern"]?.stringValue.map { "\"\(truncate($0, 22))\"" }
+            return input["pattern"]?.stringValue.map { "\"\(clean($0, 22))\"" }
         case "Glob":
-            return input["pattern"]?.stringValue.map { truncate($0, 28) }
+            return input["pattern"]?.stringValue.map { clean($0, 28) }
         case "LS":
             return input["path"]?.stringValue.map(fileName)
         case "Bash", "PowerShell":
             return input["command"]?.stringValue.map(commandSummary)
         case "WebSearch":
-            return input["query"]?.stringValue.map { truncate($0, 28) }
+            return input["query"]?.stringValue.map { clean($0, 28) }
         case "WebFetch":
             return input["url"]?.stringValue.map(host)
         case "Agent", "Task":
-            return (input["description"]?.stringValue ?? input["subagent_type"]?.stringValue).map { truncate($0, 40) }
+            return (input["description"]?.stringValue ?? input["subagent_type"]?.stringValue).map { clean($0, 40) }
         case "TodoWrite":
             return input["todos"]?.arrayValue.map { "할 일 \($0.count)개" }
         default:
@@ -125,10 +125,20 @@ public enum ToolCatalog {
         return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
     }
 
+    /// 가리기 전에 정규식이 볼 최대 글자 수. 긴 입력에 정규식을 돌리지 않으려고 먼저 자릅니다.
+    static let scanLimit = 300
+
+    /// 자르기 전에 가립니다: 먼저 `scanLimit`자로 자르고 → 가리고 → `limit`자로 자릅니다.
+    /// (비밀값이 자르는 자리에 걸려 앞부분만 남는 일을 막습니다.)
+    static func clean(_ text: String, _ limit: Int) -> String {
+        truncate(Redactor.redact(String(text.prefix(scanLimit))), limit)
+    }
+
+    /// 순서: 첫 줄 → `scanLimit`자 → 공백 정리 → 가리기 → 경로 줄이기 → 40자.
     static func commandSummary(_ command: String) -> String {
         let firstLine = command.split(whereSeparator: \.isNewline).first.map(String.init) ?? command
-        let collapsed = firstLine.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return truncate(shortenPaths(collapsed), 40)
+        let collapsed = firstLine.prefix(scanLimit).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return truncate(shortenPaths(Redactor.redact(collapsed)), 40)
     }
 
     /// 명령 안의 절대 경로를 마지막 폴더·파일 이름으로 줄입니다 (M5(9)):

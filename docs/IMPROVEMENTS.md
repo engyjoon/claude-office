@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 1 | 훅 버전 감지·연동 진단 | Opus 5.5 (medium) | 완료(커밋) | 알려진 경로로 버전 감지, 빠진 이벤트·`disableAllHooks`·관리 설정 진단, 배너·연동 탭 표시. 화면 확인 필요 |
 | 2 | 질문·계획 승인 기록 닫기 | Sonnet 5.5 (medium) | 완료(커밋) | 끝날 때 열린 `.permission` 항목도 닫고, 끝난 뒤 문구는 "질문 답함"·"계획 승인함" |
-| 3 | 비밀값 가림 순서·규칙 | Sonnet 5.5 (medium) | 대기 | |
+| 3 | 비밀값 가림 순서·규칙 | Sonnet 5.5 (medium) | 완료(커밋) | 300자로 먼저 자르고 → 가리고 → 경로 줄이고 → 40자. 빈칸 구분은 `--플래그 값`만, `curl -u`·`sshpass -p`·`mysql -p값`·`Authorization: Basic` 추가 |
 | 4 | 끝 이벤트 없는 턴·도구·세션 복구 | Fable 5.2 (high) | 대기 | |
 | 5 | 행 머무름·화면 밖 서브 신호 | Opus 5.5 (high) | 대기 | |
 | 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 대기 | |
@@ -85,7 +85,11 @@
 
 **완료 기준**: 위 예들이 테스트로 들어 있고, 기존 `Redactor`·`ToolCall` 테스트가 그대로 통과합니다.
 
-**결과**:
+**결과**: 고치기 전에 새 테스트가 실패하는 것을 확인했습니다.
+- `commandSummary`: 첫 줄 → 300자 → 공백 정리 → `Redactor` → `shortenPaths` → 40자. Grep·Glob·WebSearch·Agent의 `subject`도 `ToolCatalog.clean`으로 자르기 전에 가립니다. `HookParser`의 오류 문구는 가린 뒤 자르는 순서가 이미 맞습니다.
+- 키워드 규칙은 `=`·`:` 구분자만 받고, 빈칸 구분은 `--password xxx`처럼 `--플래그` 꼴(다음 낱말이 `-`로 시작하면 값이 아님)에서만 받습니다. `pwd && ls`, `kubectl get secret foo`, `grep -r secret src/`, `gh auth token | pbcopy`는 그대로 나옵니다.
+- 추가 규칙: `curl -u/--user user:pass`(값에 `:`가 있을 때만, `git push -u origin`은 그대로), `sshpass -p`, `mysql*` 명령 안의 `-p값`(붙여 쓴 꼴은 `mysql` 계열 명령일 때만 가림 — 일반 `-p<값>`은 `mkdir -p`·`ssh -p22` 같은 오탐이 커서 뺌), `Authorization: Basic`.
+- 알려진 한계: Swift `Regex`가 lookbehind를 지원하지 않아 `(?:^|\s)` 접두를 쓰고 그 접두는 그대로 되살립니다. `mysql … | tool -pxxx`처럼 파이프 뒤의 꼴은 못 가립니다.
 
 ## 4. 끝 이벤트 없는 턴·도구·세션 복구
 

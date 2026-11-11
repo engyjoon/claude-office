@@ -15,8 +15,33 @@ public enum Redactor {
         Rule(regex: try! Regex(#"://[^/\s:@]+:[^/\s@]+@"#)) { _ in "://\(mask)@" },
         // Authorization: Bearer xxx
         Rule(regex: try! Regex(#"(?i)\bbearer\s+\S+"#)) { _ in "Bearer \(mask)" },
-        // password=xxx, --token xxx, API_KEY: xxx …
-        Rule(regex: try! Regex(#"(?i)((?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|credential)[\w-]*["']?\s*[=: ]\s*)("[^"]*"|'[^']*'|\S+)"#)) {
+        // password=xxx, API_KEY: xxx … (구분자는 = 나 : 만. 빈칸은 아래 --flag 규칙에서만)
+        Rule(regex: try! Regex(#"(?i)((?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|credential)[\w-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)"#)) {
+            match in
+            (match.output[1].substring.map(String.init) ?? "") + mask
+        },
+        // --password xxx, --api-key xxx (플래그 꼴일 때만 빈칸 구분. 다음 낱말이 또 다른 플래그면 값이 아님)
+        Rule(regex: try! Regex(#"(?i)((?:^|\s)--[\w-]*(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|credential)[\w-]*\s+)("[^"]*"|'[^']*'|[^\s-]\S*)"#)) {
+            match in
+            (match.output[1].substring.map(String.init) ?? "") + mask
+        },
+        // curl -u user:pass, --user user:pass (값에 ':'가 있을 때만. `git push -u origin`은 그대로)
+        Rule(regex: try! Regex(#"((?:^|\s)(?:-u|--user|--proxy-user)(?:\s+|=))(?:"[^"\s]*:[^"]*"|'[^'\s]*:[^']*'|[^\s:'"]+:\S+)"#)) {
+            match in
+            (match.output[1].substring.map(String.init) ?? "") + mask
+        },
+        // sshpass -p xxx / sshpass -p'xxx'
+        Rule(regex: try! Regex(#"(\bsshpass\s+-p\s*)("[^"]*"|'[^']*'|\S+)"#)) {
+            match in
+            (match.output[1].substring.map(String.init) ?? "") + mask
+        },
+        // mysql -pxxx (mysql·mysqldump·mysqladmin 명령 안에서 붙여 쓴 꼴만. 다른 도구의 -p<값>(예: `mkdir -p`)은 건드리지 않음)
+        Rule(regex: try! Regex(#"(\bmysql(?:dump|admin|import|check)?\b[^|;&\n]*?\s-p)(?!\s)("[^"]*"|'[^']*'|\S+)"#)) {
+            match in
+            (match.output[1].substring.map(String.init) ?? "") + mask
+        },
+        // Authorization: Basic xxx
+        Rule(regex: try! Regex(#"(?i)(\bauthorization\s*[:=]\s*["']?basic\s+)[^\s"']+"#)) {
             match in
             (match.output[1].substring.map(String.init) ?? "") + mask
         },
