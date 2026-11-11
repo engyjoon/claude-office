@@ -442,6 +442,8 @@ public struct Choreographer: Sendable {
                 out.append(Directive(lead.id, .wait(1.3)))
                 out.append(Directive(lead.id, .gesture(.thumbsUp)))
                 out.append(Directive(lead.id, .wait(1.4)))
+                // 서브가 화면 밖(+N, 미니의 칸 밖)이면 무대가 여기까지 건너뜁니다 (개선 5). 아이콘·표정은 그때도 되돌립니다.
+                out.append(Directive(lead.id, .awaitEnd(cue)))
                 setEmote(lead.id, nil, into: &out)
                 out.append(Directive(lead.id, .express(.neutral)))
             }

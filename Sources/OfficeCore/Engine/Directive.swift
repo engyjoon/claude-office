@@ -112,6 +112,7 @@ public enum Effect: Hashable, Sendable {
 /// 씬은 직원마다 대기열을 하나씩 두고 지시를 **순서대로** 실행합니다.
 /// - `walk`는 도착할 때까지, `wait`는 그 시간만큼 다음 지시를 막습니다.
 /// - `signal`/`await`로 두 직원의 대기열을 맞춥니다 (보고하러 온 서브에이전트가 도착한 뒤 부른 사람이 하이파이브).
+///   `await`부터 `awaitEnd`까지는 신호를 보낼 사람과 함께하는 연출이라, 그 사람이 화면에 없으면 씬이 통째로 건너뜁니다.
 /// - `clearQueue`는 아직 실행하지 않은 지시를 버립니다 (승인 대기처럼 급한 일).
 /// - `agent`가 nil인 지시(팀 열기·닫기, 효과, 전역 효과음)는 즉시 실행합니다.
 public struct Directive: Hashable, Sendable, CustomStringConvertible {
@@ -140,6 +141,9 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         case wait(Double)
         case signal(String)
         case await(String, timeout: Double)
+        /// 같은 이름의 `await`로 시작한 맞춤 연출의 끝. 신호를 보낼 사람이 화면에 없으면(숨은 서브의 보고, 개선 5)
+        /// 씬은 기다리지 않고 `await`부터 여기까지를 건너뜁니다. 신호가 오거나 시간이 다 되면 아무 일도 하지 않습니다.
+        case awaitEnd(String)
         case effect(Effect)
         case sound(SoundCue)
     }
@@ -177,6 +181,7 @@ public struct Directive: Hashable, Sendable, CustomStringConvertible {
         case .wait(let seconds): what = "대기 \(seconds)초"
         case .signal(let name): what = "신호 \(name)"
         case .await(let name, let timeout): what = "신호 기다림 \(name) (최대 \(timeout)초)"
+        case .awaitEnd(let name): what = "신호 연출 끝 \(name)"
         case .effect(let effect): what = "효과 \(effect)"
         case .sound(let cue): what = "효과음 \(cue)"
         }

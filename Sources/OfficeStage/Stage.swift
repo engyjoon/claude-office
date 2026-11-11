@@ -163,7 +163,16 @@ public struct Stage: Sendable {
     private var pathfinder: Pathfinder
     private var queues: [AgentID: [Directive.Action]] = [:]
     private var blocks: [AgentID: Block] = [:]
-    private var signals: Set<String> = []
+    /// 보냈지만 아직 아무도 받지 않은 신호 → 보낸 사람
+    private(set) var signals: [String: AgentID] = [:]
+    /// 길찾기 격자를 만든 횟수 (테스트용)
+    private(set) var pathfinderBuilds = 0
+    /// 지시 묶음을 처리하는 중 (`enqueue`, `OfficeFloor`의 한 번 맞추기). 그동안 배치가 바뀌어도 격자와 길은 끝에 한 번만 다시 만듭니다.
+    private var batchDepth = 0
+    /// 배치가 바뀌어 행과 함께 옮겨진, 걷는 중인 사람 (묶음이 끝나면 길을 다시 찾음)
+    private var shiftedWalkers: Set<AgentID> = []
+    /// 묶음 안에서 의자·소파에서 일어나 걷기 시작한 사람이 먼저 나올 입구 (길을 다시 찾아도 가구를 뚫고 가지 않게)
+    private var walkExits: [AgentID: MapPoint] = [:]
     private var reservations: [String: AgentID] = [:]
     private var events: [StageEvent] = []
     /// 닫으라는 지시를 받았지만 아직 직원이 문을 나가는 중인 방
@@ -205,6 +214,8 @@ public struct Stage: Sendable {
     // MARK: - 지시 받기
 
     public mutating func enqueue(_ directives: [Directive]) {
+        beginBatch()
+        defer { endBatch() }
         var touched: [AgentID] = []
         for directive in directives {
             guard let id = directive.agent else {
@@ -280,7 +291,7 @@ public struct Stage: Sendable {
         }
         guard actors[id] != nil else { return }  // 등장 전이거나 퇴장한 직원의 지시는 버립니다
         switch action {
-        case .spawn, .openTeam, .closeTeam, .clearQueue:
+        case .spawn, .openTeam, .closeTeam, .clearQueue, .awaitEnd:
             break
         case .refresh(let agent):
             let previous = actors[id]!.agent
@@ -295,6 +306,7 @@ public struct Stage: Sendable {
             promoteQueuedBubbles(in: Self.bubbleUnit(agent))
             blocks[id] = nil
             queues[id] = nil
+            forgetSignals(from: id)
             events.append(.despawned(id))
             compactionPending = true
             finishClosingTeams()
@@ -348,9 +360,9 @@ public struct Stage: Sendable {
         case .wait(let seconds):
             if seconds > 0 { blocks[id] = .waitUntil(time + seconds) }
         case .signal(let name):
-            signals.insert(name)
+            signals[name] = id
         case .await(let name, let timeout):
-            if signals.remove(name) == nil {
+            if signals.removeValue(forKey: name) == nil {
                 blocks[id] = .awaiting(name, deadline: time + timeout)
             }
         case .effect(let effect):
@@ -408,9 +420,16 @@ public struct Stage: Sendable {
     }
 
     /// 화면에서 숨깁니다 (메인 선택이 바뀌었거나 화면에 자리가 모자람). 걷지 않고 바로 사라집니다.
+    /// 아직 보내지 못한 신호는 거둡니다: 그 신호를 기다리는 사람은 맞춤 연출을 건너뜁니다.
     public mutating func remove(_ id: AgentID) {
+        let unsent = (queues[id] ?? []).compactMap { action -> String? in
+            if case .signal(let name) = action { return name }
+            return nil
+        }
         queues[id] = nil
         blocks[id] = nil
+        forgetSignals(from: id)
+        for name in unsent { withdraw(signal: name) }
         guard let actor = actors[id] else { return }
         release(id)
         actors[id] = nil
@@ -419,6 +438,33 @@ public struct Stage: Sendable {
         compactionPending = true
         finishClosingTeams()
         updateLayout()
+    }
+
+    /// 보낼 사람이 이 무대에 없는 신호 (화면 밖 서브의 보고, 개선 5). 그 신호를 기다리거나 기다릴 사람은
+    /// 기다리지 않고 `await`부터 `awaitEnd`까지(함께하는 연출)를 건너뜁니다. 기다리는 사람이 없으면 아무 일도 없습니다.
+    public mutating func withdraw(signal name: String) {
+        for id in Set(queues.keys).union(blocks.keys).sorted() {
+            if case .awaiting(name, _) = blocks[id] {
+                blocks[id] = nil
+                queues[id] = Self.skipping(name, in: queues[id] ?? [])
+                run(id)
+            } else if var queue = queues[id],
+                let start = queue.firstIndex(where: { if case .await(name, _) = $0 { true } else { false } }) {
+                queue = Array(queue[..<start]) + Self.skipping(name, in: Array(queue[(start + 1)...]))
+                queues[id] = queue
+            }
+        }
+    }
+
+    /// `await` 다음 지시들에서 같은 이름의 `awaitEnd`까지(포함) 뺍니다. 끝 표시가 없으면 그대로 둡니다.
+    private static func skipping(_ name: String, in queue: [Directive.Action]) -> [Directive.Action] {
+        guard let end = queue.firstIndex(of: .awaitEnd(name)) else { return queue }
+        return Array(queue[(end + 1)...])
+    }
+
+    /// 이 사람이 보냈지만 아무도 받지 않은 신호를 지웁니다 (늦게 도착한 보고가 `signals`에 영원히 남지 않게, 개선 5)
+    private mutating func forgetSignals(from id: AgentID) {
+        signals = signals.filter { $0.value != id }
     }
 
     /// 보여 줄 행 (위에서부터)과 행마다 숨긴 사람 수. 빠진 행은 남은 직원이 나간 뒤 닫습니다.
@@ -567,17 +613,57 @@ public struct Stage: Sendable {
         }
     }
 
-    /// 새 배치로 바꿉니다. 자리를 옮긴 행의 직원은 행과 함께 옮기고, 걷던 직원은 새 길로 다시 걷습니다.
+    // MARK: - 지시 묶음 (개선 5)
+
+    /// 지시 묶음을 시작합니다. 묶음이 끝날 때까지 길찾기 격자를 다시 만들거나 걷는 사람의 길을 다시 찾지 않습니다.
+    /// 책상이 하나 늘 때마다(사람이 하나씩 등장할 때마다) 격자를 다시 만들고 모두의 길을 다시 찾던 것을 한 번으로 줄입니다.
+    mutating func beginBatch() {
+        batchDepth += 1
+    }
+
+    mutating func endBatch() {
+        batchDepth -= 1
+        if batchDepth == 0 { refreshRoutes() }
+    }
+
+    /// 배치에 맞게 격자를 바꾸고 걷는 사람의 길을 다시 찾습니다. 크기·장애물이 같으면 격자는 그대로 두고,
+    /// 행과 함께 옮겨진 걷는 사람만 다시 찾습니다. 묶음 안에서 낡은 격자로 찾은 길은 격자가 바뀌면 여기서 모두 다시 찾습니다.
+    private mutating func refreshRoutes() {
+        var reroute = shiftedWalkers
+        let exits = walkExits
+        shiftedWalkers = []
+        walkExits = [:]
+        if !pathfinder.fits(layout) {
+            pathfinder = Pathfinder(layout: layout)
+            pathfinderBuilds += 1
+            reroute = Set(actors.keys)
+        }
+        for id in reroute.sorted() {
+            guard var actor = actors[id], !actor.path.isEmpty, let place = actor.place else { continue }
+            var path: [MapPoint] = []
+            var start = actor.position
+            if let exit = exits[id], actor.walkedDistance == 0 {
+                path.append(exit)
+                start = exit
+            }
+            path += pathfinder.route(from: start, to: place.approach)
+            if place.final != place.approach { path.append(place.final) }
+            actor.path = path.isEmpty ? [place.final] : path
+            actors[id] = actor
+        }
+    }
+
+    /// 새 배치로 바꿉니다. 자리를 옮긴 행의 직원은 행과 함께 옮기고, 걷던 직원은 새 길로 다시 걷습니다(묶음 중이면 끝날 때).
     private mutating func relayout(to new: OfficeLayout) {
         let old = layout
         layout = new
-        pathfinder = Pathfinder(layout: new)
         func shift(_ point: MapPoint) -> Double {
             guard let index = old.rowIndex(containing: point), let moved = new.row(for: old.rows[index].team) else { return 0 }
             return moved.top - old.rows[index].top
         }
         for id in actors.keys.sorted() {
             var actor = actors[id]!
+            let before = (actor.position, actor.place)
             let dy = shift(actor.position)
             actor.position.y += dy
             if let place = actor.place {
@@ -587,13 +673,10 @@ public struct Stage: Sendable {
                     actor.place = place.shifted(by: shift(place.final))
                 }
             }
-            if !actor.path.isEmpty, let place = actor.place {
-                var path = pathfinder.route(from: actor.position, to: place.approach)
-                if place.final != place.approach { path.append(place.final) }
-                actor.path = path.isEmpty ? [place.final] : path
-            }
+            if actor.isWalking, before != (actor.position, actor.place) { shiftedWalkers.insert(id) }
             actors[id] = actor
         }
+        if batchDepth == 0 { refreshRoutes() }
     }
 
     /// 대기열의 다음 걸음이 지금 서 있는(앉은) 자리 그대로인지 (책상에서 쉬기)
@@ -622,6 +705,9 @@ public struct Stage: Sendable {
         if let current = actor.place, current.approach != current.final, position.distance(to: current.final) < 1 {
             path.append(current.approach)
             position = current.approach
+            if batchDepth > 0 { walkExits[id] = current.approach }
+        } else {
+            walkExits[id] = nil
         }
         path += pathfinder.route(from: position, to: target.approach)
         if target.final != target.approach { path.append(target.final) }
@@ -720,8 +806,8 @@ public struct Stage: Sendable {
         while progressed {
             progressed = false
             for id in blocks.keys.sorted() {
-                if case .awaiting(let name, _) = blocks[id], signals.contains(name) {
-                    signals.remove(name)
+                if case .awaiting(let name, _) = blocks[id], signals[name] != nil {
+                    signals[name] = nil
                     blocks[id] = nil
                     run(id)
                     progressed = true

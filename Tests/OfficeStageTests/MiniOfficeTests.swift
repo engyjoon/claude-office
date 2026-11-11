@@ -355,4 +355,61 @@ struct MiniOfficeTests {
         let empty = next(h, focus, selection: FloorSelection(all: false, folders: ["/w/c"]))
         #expect(empty.team == nil && empty.reason == .none && empty.tiers.isEmpty)
     }
+
+    @Test("개선 5: 칸 밖 서브가 보고해도 메인의 칩이 늦지 않고, 메인이 아무도 없는 곳에 하이파이브하지 않는다")
+    func hiddenSubReport() throws {
+        var h = Self.band()
+        h.hook(start("m"))
+        h.select(.only(h.team("m")))
+        h.hook(prompt("m"), at: 0.5)
+        for (index, agent) in ["g1", "g2", "g3"].enumerated() {
+            for json in delegate("m", "a\(index + 1)", agent: agent) { h.hook(json, at: 1 + Double(index)) }
+        }
+        h.hook(edit("m", "e1", agent: "g1"), at: 6)
+        h.hook(edit("m", "e2", agent: "g2"), at: 7)
+        h.hook(edit("m", "e3", agent: "g3"), at: 8)
+        h.run(until: 20)
+        let g3 = try #require(h.engine.state.agents.values.first { $0.subagentID == "g3" })
+        #expect(h.stage.actors[g3.id] == nil)
+        // 칸 밖 서브3이 끝나 보고하고, 메인은 곧바로 파일을 읽음
+        h.hook(on("SubagentStop", #""agent_id":"g3","agent_type":"general-purpose""#, "m"), at: 21)
+        h.hook(on("PostToolUse", #""tool_name":"Agent","tool_use_id":"a3","tool_input":{"subagent_type":"general-purpose"},"tool_response":{"status":"completed"}"#, "m"), at: 21.2)
+        h.hook(toolHook("PreToolUse", "Read", "m", "r1"), at: 21.5)
+        var highFive = false
+        while h.now < 30 {
+            h.run(until: h.now + 0.1)
+            if h.actor("lead-1")?.gesture == .highFive { highFive = true }
+            if h.now >= 22.5 { #expect(h.actor("lead-1")?.pill?.category == .read, "t=\(h.now)") }
+        }
+        #expect(!highFive)
+        #expect(h.stage.signals.isEmpty)
+    }
+
+    @Test("개선 5: 보여 주던 행에 퇴근하는 사람이 남아 있어도 초점이 바뀌면 새 행이 바로 띠 자리에 선다")
+    func focusSwitchWhileLeaving() throws {
+        var h = Self.band()
+        h.hook(start("m1"))
+        h.hook(start("m2"), at: 0.2)
+        let (one, two) = (h.team("m1"), h.team("m2"))
+        h.select(.only(one))
+        h.hook(prompt("m1"), at: 0.5)
+        for json in delegate("m1", "a1", agent: "g1") { h.hook(json, at: 1) }
+        h.hook(edit("m1", "e1", agent: "g1"), at: 3)
+        h.run(until: 15)
+        let g1 = try #require(h.engine.state.agents.values.first { $0.subagentID == "g1" })
+        #expect(h.stage.actors[g1.id] != nil)
+        // 서브1이 퇴근하는 중에 m2로 초점을 옮김
+        h.hook(on("SubagentStop", #""agent_id":"g1","agent_type":"general-purpose""#, "m1"), at: 16)
+        h.hook(on("PostToolUse", #""tool_name":"Agent","tool_use_id":"a1","tool_input":{"subagent_type":"general-purpose"},"tool_response":{"status":"completed"}"#, "m1"), at: 16.2)
+        h.run(until: 17)
+        #expect(h.stage.actors[g1.id] != nil)
+        h.select(.only(two))
+        #expect(h.stage.actors[g1.id] == nil)
+        #expect(h.stage.layout.rows.map(\.team) == [two])
+        h.run(until: 17.5)
+        let lead = try #require(h.engine.state.lead(of: SessionID("m2")))
+        #expect(h.stage.actors[lead.id]?.position == h.stage.layout.seat(two, .main).final)
+        #expect(h.stage.layout.rows.map(\.team) == [two])
+        #expect(MiniOffice.extent().contains(h.stage.actors[lead.id]!.position))
+    }
 }

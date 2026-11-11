@@ -123,6 +123,51 @@ struct StageTests {
         #expect(h.events.contains(.sound(.memberReport, AgentID("member-2"))))
     }
 
+    @Test("개선 5: 짝 없이 남은 신호는 보낸 사람이 무대에서 사라질 때 지운다")
+    func strandedSignalCleared() throws {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.run(until: 10)
+        h.hook(tool("PreToolUse", "Agent", "a1", #"{"description":"리뷰","subagent_type":"general-purpose"}"#))
+        h.hook(hook("SubagentStart", #""agent_id":"g1","agent_type":"general-purpose""#), at: 10.1)
+        h.run(until: 26)
+        // 기다리는 사람이 없는 신호 (메인이 시간 제한으로 먼저 지나간 뒤 늦게 도착한 보고)
+        h.stage.enqueue([Directive(AgentID("member-2"), .signal("report:late"))])
+        #expect(h.stage.signals["report:late"] == AgentID("member-2"))
+        h.hook(hook("SubagentStop", #""agent_id":"g1","agent_type":"general-purpose""#), at: 28)
+        h.run(until: 60)
+        #expect(h.actor("member-2") == nil)
+        #expect(h.stage.signals.isEmpty)
+    }
+
+    @Test("개선 5: 한 번에 받은 지시로 책상이 여럿 늘어도 길찾기 격자는 한 번만 만들고, +N만 바뀌면 다시 만들지 않는다")
+    func pathfinderBatched() throws {
+        var h = StageHarness()
+        h.hook(hook("SessionStart"))
+        h.run(until: 10)
+        var batch: [Directive] = []
+        for index in 1...5 {
+            let json = tool("PreToolUse", "Agent", "a\(index)", #"{"description":"일","subagent_type":"general-purpose"}"#)
+            batch += try h.engine.handle(hookPayload: Data(json.utf8), at: h.epoch.addingTimeInterval(10))
+        }
+        let before = h.stage.pathfinderBuilds
+        h.stage.enqueue(batch)
+        #expect(h.stage.layout.rows[0].desks == 6)
+        #expect(h.stage.pathfinderBuilds == before + 1)
+        let team = h.stage.layout.rows[0].team
+        h.stage.setTeams(h.stage.sortedTeams, hidden: [team: 3])
+        #expect(h.stage.layout.rows[0].hidden == 3)
+        #expect(h.stage.pathfinderBuilds == before + 1)
+        // 걷던 사람들은 새 격자로 다시 찾은 길로 자기 책상에 도착
+        h.run(until: 40)
+        let members = h.stage.actors.values.filter { !$0.agent.isMain }
+        #expect(members.count == 5)
+        for member in members {
+            #expect(member.position == h.stage.layout.seat(team, member.agent.seat).final)
+            #expect(member.seated)
+        }
+    }
+
     @Test("같은 구역에 여럿이 가면 다른 자리에 선다")
     func reservations() {
         var h = StageHarness()

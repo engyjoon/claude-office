@@ -1,4 +1,4 @@
-# M5(1) 행 배치 (혼잡): 메인 4명 — 메인1은 서브 12명(한 행 11명이라 +2), 메인2 서브 3명, 메인3 서브 1명, 메인4 서브 2명. 행은 3개까지라 가장 오래 조용한 메인3의 행을 숨김(M5(5): 최근에 활동한 행부터 보여 줌).
+# M5(1) 행 배치 (혼잡): 메인 4명 — 메인1은 서브 12명(한 행 11명이라 +2), 메인2 서브 3명, 메인3 서브 1명, 메인4 서브 2명. 행은 3개까지라 메인3의 행을 숨김: 넷째로 출근한 메인4가 쉬던(출근 중) 메인3 대신 보이고, 메인3이 마지막(2.5초)에 요청을 받을 때는 보이는 행이 모두 방금 일을 시작해 그대로 머묾(개선 5 행 머무름. 전에는 최근 활동 순이라 1.5~7초에 행이 6번 바뀜).
 # 40초: 메인1의 가운데 서브가 퇴근 → 오른쪽 끝(숨어 있던) 서브가 출입문으로 들어와 그 책상에 앉고 +1. 60초: 숨어 있던 메인3이 퇴근 → 세 행 그대로.
 # 실행: swift run office-sim snapshot Scenarios/floor.jsonl --at 30,52,80   (앱에서는 make replay처럼 office-sim replay Scenarios/floor.jsonl)
 {"t": 0.0, "term": "vscode", "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}}
@@ -6,9 +6,9 @@
 {"t": 0.5, "term": "vscode", "hook": {"session_id": "m2", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SessionStart", "source": "startup"}}
 {"t": 1.5, "hook": {"session_id": "m2", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
 {"t": 1.0, "term": "iTerm.app", "hook": {"session_id": "m3", "cwd": "/Users/demo/work/my-site", "hook_event_name": "SessionStart", "source": "startup"}}
-{"t": 2.0, "hook": {"session_id": "m3", "cwd": "/Users/demo/work/my-site", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
+{"t": 2.5, "hook": {"session_id": "m3", "cwd": "/Users/demo/work/my-site", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
 {"t": 1.5, "term": "iTerm.app", "hook": {"session_id": "m4", "cwd": "/Users/demo/work/notes", "hook_event_name": "SessionStart", "source": "startup"}}
-{"t": 2.5, "hook": {"session_id": "m4", "cwd": "/Users/demo/work/notes", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
+{"t": 2.0, "hook": {"session_id": "m4", "cwd": "/Users/demo/work/notes", "hook_event_name": "UserPromptSubmit", "prompt": "x"}}
 {"t": 3.0, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"description": "작업", "prompt": "x", "subagent_type": "general-purpose"}, "tool_use_id": "m1-a1"}}
 {"t": 3.2, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "SubagentStart", "agent_id": "m1-g1", "agent_type": "general-purpose"}}
 {"t": 4.5, "hook": {"session_id": "m1", "cwd": "/Users/demo/work/claude-office", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "swift build"}, "tool_use_id": "m1-g1-b", "agent_id": "m1-g1", "agent_type": "general-purpose"}}

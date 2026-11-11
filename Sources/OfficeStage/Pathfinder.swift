@@ -15,6 +15,11 @@ public struct Pathfinder: Sendable {
         rows = layout.gridRows
     }
 
+    /// 이 배치에서도 같은 격자인지 (크기와 장애물이 같음). 같으면 격자를 다시 만들 필요가 없습니다 (개선 5: "+N"만 바뀔 때 등).
+    public func fits(_ other: OfficeLayout) -> Bool {
+        layout.width == other.width && layout.height == other.height && layout.obstacles == other.obstacles
+    }
+
     public func isWalkable(column: Int, row: Int) -> Bool {
         column >= 0 && row >= 0 && column < columns && row < rows && grid[row * columns + column]
     }

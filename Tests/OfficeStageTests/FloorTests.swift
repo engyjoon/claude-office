@@ -153,14 +153,14 @@ struct FloorTests {
         #expect(h.stage.layout.rows[0].hidden == 3)
     }
 
-    @Test("행은 최대 3개: 가장 오래 조용한 메인을 숨기고, 숨은 메인이 일을 시작하면 다른 행 대신 보인다 (행 순서·번호 그대로)")
+    @Test("행은 최대 3개: 새 메인은 가장 오래 쉰 행 대신 보이고, 숨은 메인이 일을 시작하면 쉬는 행 대신 보인다 (행 순서·번호 그대로)")
     func overflowRows() throws {
         var h = FloorHarness(width: 1140, height: 1200)
         for (index, session) in ["a", "b", "c", "d"].enumerated() {
             h.hook(hook("SessionStart", session: session), at: Double(index) * 0.2)
         }
         let (a, b, c, d) = (h.team("a"), h.team("b"), h.team("c"), h.team("d"))
-        // 가장 먼저 와서 가장 오래 조용한 a가 숨음
+        // 새로 온 d는 쉬는(출근 중) 행 중 가장 먼저 와서 가장 오래 조용한 a 대신 보임
         h.hook(delegateHook("d", "x1"), at: 1)
         h.run(until: 20)
         #expect(h.stage.layout.rows.count == 3)
@@ -170,7 +170,8 @@ struct FloorTests {
         #expect(h.actor("lead-1") == nil)
         #expect(h.actor("lead-4")?.position == h.stage.layout.seat(d, .main).final)
 
-        // a에 요청이 옴 → a가 보이고, 이제 가장 오래 조용한 b가 숨음. 행은 메인이 온 순서 그대로
+        // a에 요청이 옴 → 보이는 행이 모두 쉬는 중이라 a가 바로 보이고, 가장 오래 쉰 b가 숨음 (일하는 행이었다면 45초 조용할 때까지
+        // 기다림: `RowStickinessTests`). 행은 메인이 온 순서 그대로
         h.hook(hook("UserPromptSubmit", #""prompt":"x""#, session: "a"), at: 21)
         h.run(until: 45)
         #expect(h.floor.plan.hiddenTeams == [b])
@@ -414,4 +415,131 @@ struct FloorTests {
         #expect(CharacterArt.seatedFootY(.sofa) > OfficeLayout.sofas[0].maxY - sofaSeatY)
     }
 
+}
+
+/// 세션 `session`(cwd `/w/<session>`)의 도구 훅
+func toolOn(_ event: String, _ name: String, _ session: String, _ id: String, agent: String? = nil) -> String {
+    hook(
+        event, #""tool_name":"\#(name)","tool_use_id":"\#(id)","tool_input":{"command":"npm test","file_path":"/x/A.swift"}"#
+            + (agent.map { #","agent_id":"\#($0)","agent_type":"general-purpose""# } ?? ""),
+        session: session, cwd: "/w/\(session)")
+}
+
+/// 개선 5: 행 머무름과 화면 밖 서브의 보고
+@Suite("무대: 행 머무름과 화면 밖 서브")
+struct RowStickinessTests {
+    func start(_ session: String) -> String { hook("SessionStart", session: session, cwd: "/w/\(session)") }
+    func prompt(_ session: String) -> String { hook("UserPromptSubmit", #""prompt":"x""#, session: session, cwd: "/w/\(session)") }
+    func stop(_ session: String) -> String { hook("Stop", session: session, cwd: "/w/\(session)") }
+
+    /// 네 세션이 출근해 요청을 받음 (1140×1200: 3행). 가장 먼저 와서 쉬던 a가 숨었다가, 마지막에 요청을 받을 때는
+    /// 보이는 행이 모두 방금 일을 시작해 그대로 숨어 있습니다.
+    func fourBusyRows() -> FloorHarness {
+        var h = FloorHarness(width: 1140, height: 1200)
+        for (index, session) in ["a", "b", "c", "d"].enumerated() { h.hook(start(session), at: Double(index) * 0.2) }
+        for (index, session) in ["b", "c", "d", "a"].enumerated() { h.hook(prompt(session), at: 1 + Double(index) * 0.2) }
+        h.run(until: 3)
+        return h
+    }
+
+    @Test("네 행이 번갈아 훅을 보내도 보이는 행이 뒤바뀌지 않는다 (바쁜 행은 조용해야 밀려남)")
+    func busyRowsStay() throws {
+        var h = fourBusyRows()
+        let shown = h.floor.plan.rows.map(\.team)
+        #expect(shown.count == 3)
+        #expect(h.floor.plan.hiddenTeams == [h.team("a")])
+        let leads = Set(h.stage.actors.values.filter(\.agent.isMain).map(\.id))
+        h.events.removeAll()
+        var call = 0
+        for _ in 0..<15 {  // 행마다 8초에 한 번씩 2분
+            for session in ["a", "b", "c", "d"] {
+                call += 1
+                h.hook(toolOn("PreToolUse", "Read", session, "r\(call)"), at: h.now + 1)
+                #expect(h.floor.plan.rows.map(\.team) == shown)
+                h.hook(toolOn("PostToolUse", "Read", session, "r\(call)"), at: h.now + 1)
+                #expect(h.floor.plan.rows.map(\.team) == shown)
+            }
+        }
+        #expect(h.floor.plan.hiddenTeams == [h.team("a")])
+        // 보이던 메인은 한 번도 무대에서 내려가지 않음
+        for id in leads { #expect(!h.events.contains(.despawned(id))) }
+        #expect(!h.events.contains { if case .teamOpened = $0 { true } else { false } })
+    }
+
+    @Test("보이는 행은 쉬거나 45초 넘게 조용할 때만 밀려나고, 숨은 행의 승인 대기는 바로 올라온다")
+    func rowsYield() throws {
+        var h = fourBusyRows()
+        let (a, b, c, d) = (h.team("a"), h.team("b"), h.team("c"), h.team("d"))
+        // b가 응답을 끝내고 쉬면 일하던 숨은 a가 바로 b 대신 보임
+        #expect(h.floor.plan.hiddenTeams == [a])
+        h.hook(stop("b"), at: 4)
+        #expect(h.floor.plan.hiddenTeams == [b])
+        h.hook(toolOn("PreToolUse", "Read", "a", "r1"), at: 5)
+        #expect(h.floor.plan.hiddenTeams == [b])
+        #expect(h.floor.plan.rows.map(\.team) == [a, c, d])
+
+        // c는 요청(1.2초) 뒤 조용함. a·d는 5초마다 일함. 숨은 b가 20초에 일을 시작해도 c가 45초 조용해질 때까지는 그대로
+        var call = 1
+        func work(_ h: inout FloorHarness, _ session: String) {
+            call += 1
+            h.hook(toolOn("PreToolUse", "Read", session, "r\(call)"))
+            h.hook(toolOn("PostToolUse", "Read", session, "r\(call)"))
+        }
+        h.hook(prompt("b"), at: 20)
+        var t = 25.0
+        while t < 46 {
+            h.run(until: t)
+            work(&h, "a")
+            work(&h, "d")
+            work(&h, "b")
+            #expect(h.floor.plan.hiddenTeams == [b], "t=\(t)")
+            t += 5
+        }
+        // 47초: c가 45초 넘게 조용 → b의 다음 훅에 c 대신 b
+        h.run(until: 47)
+        work(&h, "b")
+        #expect(h.floor.plan.hiddenTeams == [c])
+        #expect(h.floor.plan.rows.map(\.team) == [a, b, d])
+
+        // 숨은 c가 승인을 기다리면 바로 보임: 가장 오래 조용한 b(47초) 대신
+        h.run(until: 50)
+        work(&h, "a")
+        work(&h, "d")
+        h.hook(toolOn("PreToolUse", "Bash", "c", "p1"), at: 51)
+        #expect(h.floor.plan.hiddenTeams == [c])
+        h.hook(toolOn("PermissionRequest", "Bash", "c", "p1"), at: 51.2)
+        #expect(h.floor.plan.hiddenTeams == [b])
+        #expect(h.floor.plan.rows.map(\.team) == [a, c, d])
+        h.run(until: 60)
+        #expect(h.actor("lead-3")?.pose == .raisingHand)
+        // 승인을 기다리는 동안은 밀려나지 않음 (다른 행이 오래 조용한 c보다 최근이어도)
+        h.hook(toolOn("PreToolUse", "Read", "b", "r99"), at: 120)
+        #expect(h.floor.plan.rows.map(\.team).contains(c))
+    }
+
+    @Test("화면 밖(+N) 서브가 보고해도 메인의 대기열이 막히지 않고, 아무도 없는 곳에 하이파이브하지 않는다")
+    func hiddenSubReport() throws {
+        var h = FloorHarness()  // 한 행 11명
+        h.hook(start("m"))
+        h.hook(prompt("m"), at: 0.5)
+        for index in 1...14 {
+            h.hook(
+                hook("PreToolUse", #""tool_name":"Agent","tool_use_id":"a\#(index)","tool_input":{"description":"일","subagent_type":"general-purpose"}"#,
+                     session: "m", cwd: "/w/m"), at: 1 + Double(index) * 0.3)
+        }
+        h.run(until: 40)
+        let hidden = try #require(h.engine.state.agents.values.first { $0.seat.desk == 14 })
+        #expect(h.stage.actors[hidden.id] == nil)
+        // 숨은 서브(14번 책상)가 끝나 보고 → 메인이 곧바로 파일을 읽음
+        h.hook(hook("PostToolUse", #""tool_name":"Agent","tool_use_id":"a14","tool_input":{}"#, session: "m", cwd: "/w/m"), at: 41)
+        h.hook(toolOn("PreToolUse", "Read", "m", "r1"), at: 41.3)
+        var highFive = false
+        while h.now < 50 {
+            h.run(until: h.now + 0.1)
+            if h.actor("lead-1")?.gesture == .highFive { highFive = true }
+            if h.now >= 42.3 { #expect(h.actor("lead-1")?.pill?.category == .read, "t=\(h.now)") }
+        }
+        #expect(!highFive)
+        #expect(h.stage.signals.isEmpty)
+    }
 }
