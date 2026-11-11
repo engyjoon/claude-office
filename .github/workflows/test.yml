@@ -1,0 +1,23 @@
+# 코어 패키지(OfficeCore·OfficeServer·OfficeStage) 단위 테스트: `make test` (= swift test).
+# 맥 앱(App/, Xcode 프로젝트)은 여기서 빌드하지 않습니다. 앱은 `make app`으로 로컬에서 확인합니다.
+name: test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # 로컬 개발 환경(Xcode 26, Swift 6.2)과 같은 계열의 러너. Package.swift는 swift-tools-version 6.0입니다.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift 버전
+        run: swift --version
+      - name: 테스트
+        run: make test
