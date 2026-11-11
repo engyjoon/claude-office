@@ -16,7 +16,7 @@
 | 4 | 끝 이벤트 없는 턴·도구·세션 복구 | Fable 5.2 (high) | 완료(커밋) | 암묵적 종료 규칙(설계서 §5.3): idle_prompt·새 요청·1시간 침묵으로 턴 닫기, 2초 넘게 떨어진 Pre는 새 묶음, 서브의 승인 알림은 서브에게, 끝난 세션 30초 기억, 출근 중 10초. 터미널 세션의 시간 기반 퇴근은 넣지 않음(선택지는 결과에). 화면 확인 필요 |
 | 5 | 행 머무름·화면 밖 서브 신호 | Opus 5.5 (high) | 완료(커밋) | 보이던 행은 쉬거나 45초 조용할 때만 밀려남(승인 대기 숨은 행은 바로), 숨은 서브의 신호를 거둬 메인이 하이파이브 없이 바로 진행, 미니 초점 전환 때 다른 행의 퇴근자 치움, 남은 신호 지움, 길찾기 격자는 묶음당 한 번·장애물이 같으면 그대로. 화면 확인 필요 |
 | 6 | 조용한 실패 없애기·첫 실행 안내 | Opus 5.5 (medium) | 완료(커밋) | 알림 권한을 보내기 직전에 다시 읽고 켤 때·끌 때 알림 지움, 이동 판정을 `SessionDestination` 하나로(모르는 터미널은 버튼 없음, `openApplication`), `HookAlert`로 메뉴 배너·사무실 창 띠·메뉴바 아이콘에 고장 표시와 설치 결과, 첫 실행 환영 창. Cursor 구별 불가·미니에는 안 넣음. 화면 확인 필요 |
-| 7 | 훅 서버·설정 파일 안전 (+ 죽은 터미널 세션 퇴근) | Opus 5.5 (medium) — 범위가 늘어 Sonnet 5.5에서 올림 (훅 스크립트·서버·앱에 걸친 PID 확인) | 진행 중 | |
+| 7 | 훅 서버·설정 파일 안전 (+ 죽은 터미널 세션 퇴근) | Opus 5.5 (medium) — 범위가 늘어 Sonnet 5.5에서 올림 (훅 스크립트·서버·앱에 걸친 PID 확인) | 완료(커밋) | 엔드포인트 파일은 rename·자기 것만 지움·가로채이면 빨간 경고, settings.json 링크는 대상에 쓰고 바뀐 것 없으면 안 씀, 백업 5개, 핸들러 단위 제거. 서버 연결당 3초·동시 32개·accept 쉼·토큰 먼저·거절 수 표시. 훅이 `$PPID`(실측: Claude Code 자신)·`__CFBundleIdentifier`를 보내 죽은 터미널 세션 퇴근과 Cursor 구별. 훅당 추가 시간은 측정 오차 안. 다시 설치 필요, 화면 확인 필요 |
 | 8 | 화면 디자인 다듬기 | Opus 5.5 (high) | 대기 | |
 | 9 | 문구·경과 시간·잔손질 | Sonnet 5.5 (medium) | 대기 | |
 | 10 | 레티나 메모리 줄이기 | Opus 5.5 (high) | 대기 | |
@@ -229,7 +229,23 @@
 
 **완료 기준**: 항목마다 `OfficeServerTests`·`HookSettingsEditorTests`에 테스트가 있습니다. 죽은 세션 퇴근은 PID 헤더 검사와 "죽은 PID → 퇴근, 산 PID·PID 없음 → 그대로"를 테스트하고(살아 있는지 묻는 함수를 주입), 실제 `kill -9`는 "화면 확인 필요"로 남깁니다.
 
-**결과**:
+**결과** (2026-11-11, `make test` 488개 통과(473 + 15), `make app` 성공, 커밋 세 개 `개선 7(1)`·`7(2)`·`7(3)`):
+
+- **확인**: 적힌 문제는 모두 코드에 있었습니다(엔드포인트 지운 뒤 옮김·끌 때 무조건 지움, 빈 PORT면 `http://127.0.0.1:/…`, 링크를 덮는 `.atomic` 쓰기, 매번 백업, 그룹째 제거, `preconditionFailure`, `recv`마다 2초·상한 없음·EMFILE 바쁜 대기·본문 뒤 토큰 검사, 거절 기록 없음).
+- **(1) 파일 안전**: `EndpointFile.write`는 임시 파일 → `rename(2)`. `removeIfOwned`(앱 `shutdown`·`startServer`, `office-sim serve`)는 자기 포트·토큰일 때만 지웁니다. 앱은 5초마다 `EndpointFile.state`를 읽어 없어졌으면 다시 쓰고, 남의 것이면 `HookAlert.endpointLost`(빨강, 띠·아이콘·배너)와 연동 탭 "엔드포인트 파일" 항목·머리말로 알립니다(다투지 않음, "서버 다시 시작"으로 되찾음). `office-sim serve`는 파일이 이미 있으면 덮어쓴다고 경고합니다. 설치기: 링크를 풀어 대상에 쓰고 권한을 지킴, 백업은 링크가 아니라 내용(600), 결과 JSON이 같으면 쓰지도 백업하지도 않음(스크립트도 같으면 안 씀), `settings.json.bak-yyyyMMdd-HHmmss[-n]` 꼴만 최근 5개 남김. `HookSettingsEditor`는 우리 핸들러만 지우고 빈 그룹·빈 이벤트만 지웁니다(반환값은 지운 핸들러 수). `bundledScript`는 `static let`으로 한 번만 읽고, 없으면 설치가 `scriptResourceMissing` 오류를 내고 상태 판정은 비교를 건너뜁니다.
+- **(2) 서버**: 연결 전체 3초(poll로 남은 시간만큼, 넘으면 408), 동시 32개(넘으면 503), `accept` 실패(EINTR·EAGAIN·ECONNABORTED 밖) 뒤 0.1초 쉼, 머리줄을 받으면 `evaluateHead`(Origin·경로·메서드·토큰·Content-Type)부터, 그다음 본문 크기(413). 토큰 없는 큰 요청은 이제 413이 아니라 401입니다. 거절 수는 `HookServer.rejectedCounts`(상태 코드별) → 연동 탭 "거절한 요청 3개 (401 토큰 틀림 2개, 413 본문 너무 큼 1개)". 본문 상한 1MB는 그대로입니다. 훅 스크립트는 PORT가 비었거나 숫자가 아니면 보내지 않습니다.
+- **(3) 죽은 터미널 세션 퇴근 — 전제 확인**: 훅 문서 대신 실측했습니다. `CLAUDE_OFFICE_ENDPOINT`를 없는 파일로 두어 설치된 훅이 아무것도 보내지 않게 하고, 임시 설정(`--setting-sources project --settings …`, `--no-session-persistence`)으로 `claude -p`(2.1.321)를 돌려 SessionStart·UserPromptSubmit·Stop 훅에서 프로세스 트리를 적었습니다. 세 훅 모두 스크립트(`/bin/sh`)의 `$PPID`가 Claude Code(`claude`) 자신이었고(경로에 공백이 있어 따옴표로 감싼 명령도 같음), 중간 셸은 없었습니다. 그래도 다른 버전·설정을 위해 서버가 그 PID의 이름이 셸(`sh`·`bash`·`zsh`·`dash`·`ksh`·`tcsh`·`csh`·`fish`·`env`)이면 부모로 올라갑니다(4단계까지). 실행 파일 이름은 설치 방식마다 달라(`claude`, 버전 번호, npm의 `node`) 이름으로 고르지는 않습니다. 같은 실측에서 `__CFBundleIdentifier`가 훅 환경에 들어오는 것도 확인했습니다(데스크톱 앱 안이라 `com.anthropic.claudefordesktop`).
+- **(3) 구현**: 스크립트는 `X-Office-Pid: $PPID`·`X-Office-App: ${__CFBundleIdentifier:-}`만 더 보냅니다(`ps`를 띄우지 않음). 서버(`HookRequestPolicy.hookParentPID`·`appBundleID`로 꼴 검사)가 202를 보내기 전에 `ProcessInspector.claudeProcess`(Darwin `sysctl KERN_PROC_PID`, Linux `/proc/<pid>/stat`)로 번호 + 시작 시각을 `HookDelivery.process`에 담습니다(데스크톱 세션은 보지 않음). 앱의 `SessionProcessTracker`가 세션마다 기억하고, 5초 주기(`refreshDirectories`)에 `sweep(isAlive:)`이 죽은 프로세스(시작 시각이 다르면 번호 재사용으로 봄)의 세션을 `sessionEnded(reason: "process_exited")`로 돌려줘 엔진에 넣습니다. 이벤트 로그에 "메인N: Claude Code 프로세스가 끝나 퇴근했어요". SessionEnd를 받으면 잊고, PID 없는 훅은 기억을 지우지 않고, `--resume`이면 새 PID로 바꿉니다. 4번의 30초 규칙이 그대로 적용됩니다(테스트로 확인).
+- **(3) 비용**: 훅 스크립트 200번 × 2회를 로컬 서버(202 응답)에 보낸 평균이 옛 스크립트 10.56·9.56ms, 새 스크립트 9.87·9.69ms로 차이가 측정 오차 안입니다(대부분 curl 시작 시간). 서버 쪽 `sysctl` 조회는 한 번에 약 9µs입니다.
+- **(3) 다시 설치 진단**: 설치된 `~/.claude/hooks/claude-office.sh`는 이전 번들(`9f3ebdb`)과 바이트까지 같고 새 번들과 다릅니다 → `scriptState` `.outdated` → `HookAlert.scriptNeedsFix` "훅 스크립트를 업데이트해야 해요"[다시 설치]가 뜹니다. 다시 설치 전까지는 옛 스크립트로 전처럼 동작하고 PID 퇴근·앱 구별만 빠집니다. 이미 실행 중인 세션도 스크립트 파일을 매번 새로 읽으므로 다시 설치하면 다음 훅부터 PID가 옵니다.
+- **Cursor 구별**: `SessionDestination.resolve(hostSession:term:app:)` — 번들 id가 그 `TERM_PROGRAM`의 후보에 있으면 맨 앞에 두고 이름도 그 앱("Cursor"). 후보에 없는 값(tmux를 띄운 iTerm 등)은 쓰지 않아 버튼이 보이는지는 `term`만으로 정합니다. 앱의 `focusAgent`·알림 열기가 씁니다.
+- **넣지 않은 것**: `PostToolBatch` 훅(페이로드 미수집, 아래 "새로 발견한 것" 그대로). 본문 상한 올리기.
+- **테스트**: `OfficeServerTests`(엔드포인트 소유·rename, 링크 settings, 바뀐 것 없으면 안 씀·백업 5개, 머리줄 토큰 먼저·거절 수, 408, 503, 깨진 엔드포인트면 curl 안 부름), `SessionProcessTests` 5개(헤더 꼴, 죽은 PID → 퇴근·산 PID·PID 없음·데스크톱 → 그대로 + 30초 규칙, 기억 규칙, 프로세스 찾기·셸 건너뛰기·번호 재사용, 실제 스크립트 → 서버 PID·앱), `HookAlertTests.endpointLost`, `HookHealthTests.rejectedRequests`, `HookSettingsEditorTests.handlerLevelRemoval`, `SessionDestinationTests.launchingApp`. "실제 훅 스크립트 → 서버 → 엔진"·"앱이 꺼져 있어도 조용히 성공"은 그대로 통과합니다.
+- **화면 확인 필요**:
+  1. 다시 설치: 연동 띠·메뉴에 "훅 스크립트를 업데이트해야 해요"가 뜨고, [다시 설치] 뒤 settings.json 백업이 새로 생기지 않아야 합니다(훅 목록이 같으면). 백업 폴더(`~/.claude`)의 `settings.json.bak-*`이 5개 넘게 있었다면 오래된 것이 지워집니다.
+  2. 죽은 세션: 다시 설치 뒤 터미널에서 `claude`를 띄워 요청 하나를 보내고 그 프로세스를 `kill -9`(또는 터미널 창을 닫음)하면 5초쯤 뒤 그 메인이 퇴근하고 이벤트 로그에 "프로세스가 끝나 퇴근"이 남아야 합니다. 열어 둔 채 쉬는 세션은 남아야 합니다.
+  3. 가로채기: 앱이 켜진 채 `office-sim serve`를 기본 엔드포인트로 돌리면 5초 안에 빨간 띠 "훅이 이 앱을 찾지 못해…"가 뜨고, serve를 끄면 파일이 없어진 것을 보고 앱이 다시 써서 띠가 사라져야 합니다.
+  4. Cursor: VS Code와 Cursor를 함께 띄운 채 Cursor 터미널의 세션을 더블클릭하면 Cursor가 앞으로 와야 합니다.
 
 ## 8. 화면 디자인 다듬기
 
@@ -323,3 +339,9 @@
 
 - **사무실 창 Return 키의 `where`**: `OfficeSKView.keyDown`의 `case 36, 76 where modifiers.isEmpty`는 `where`가 76(Enter)에만 걸려, 수식키를 누른 Return도 이동을 합니다(빌드 경고). 9번(잔손질)에서 `case 36 where …, 76 where …`로 나누면 됩니다. (`App/Sources/ClaudeOfficeApp.swift`의 `keyDown`)
 - **Cursor 세션 구별**: 훅 스크립트가 `__CFBundleIdentifier`를 함께 보내면 VS Code·Cursor·Insiders를 구별할 수 있습니다. 스크립트 변경은 다시 설치가 필요하므로 7번에서 판단합니다.
+
+7번 항목을 하다가 (2026-11-11):
+
+- **`PostToolBatch` 훅**: 실제 페이로드를 수집하지 못해 이번에도 넣지 않았습니다(위 4번 항목의 내용 그대로).
+- **인스펙터·메뉴 버튼 도움말의 앱 이름**: 이동 동작(`AppModel.focusAgent`·알림 열기)은 띄운 앱의 번들 id를 쓰지만, `AgentCard`·`MenuContentView`의 버튼 도움말은 아직 `row.destination`이라 Cursor 세션에도 "VS Code 창을 앞으로 가져와요"라고 씁니다. `model.destination(for:)`로 바꾸면 됩니다(9번 문구 쪽).
+- **tmux 안의 세션**: `TERM_PROGRAM=tmux`라 버튼이 없지만, 번들 id(`__CFBundleIdentifier`, 예: iTerm)로 바깥 터미널은 알 수 있습니다. 버튼을 보이려면 번들 id가 `RosterRow`까지 와야 해서(코어 모델 변경) 넣지 않았습니다.
