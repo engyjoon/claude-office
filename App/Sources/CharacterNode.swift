@@ -4,7 +4,11 @@ import OfficeStage
 import SpriteKit
 
 /// 종이인형 리그 캐릭터 노드 (설계서 §9.3). 부위는 한 번 만들고, 매 프레임 RigPose만 적용합니다.
+///
+/// 부위 텍스처는 만들 때의 배율(`bakeScale`)로 굽습니다. 창이 다른 배율의 화면으로 옮겨지면 장면이 노드를 새 배율로 다시 만듭니다 (개선 10).
 final class CharacterNode: SKNode {
+    /// 부위를 굽는 배율 (장면이 창의 배율과 `BakeLayer.character`로 정함)
+    let bakeScale: CGFloat
     private let colors: CharacterArt.Colors
     private let body = SKNode()
     /// 몸통 (메인만 가슴에 별 배지. 승진하면 다시 그립니다)
@@ -64,16 +68,17 @@ final class CharacterNode: SKNode {
         calculateAccumulatedFrame().insetBy(dx: -4, dy: -4)
     }
 
-    init(agent: Agent, teamColor: ArtColor) {
+    init(agent: Agent, teamColor: ArtColor, bakeScale: CGFloat) {
         let appearance = agent.profile.appearance
+        self.bakeScale = bakeScale
         self.appearance = appearance
         self.teamColor = teamColor
         colors = CharacterArt.colors(for: appearance)
-        hairBack = ArtNodes.node(for: CharacterArt.hairBack(style: appearance.hairStyle), colors: colors)
-        leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors)
-        rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors)
-        leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
-        rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors)
+        hairBack = ArtNodes.node(for: CharacterArt.hairBack(style: appearance.hairStyle), colors: colors, scale: bakeScale)
+        leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors, scale: bakeScale)
+        rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors, scale: bakeScale)
+        leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, scale: bakeScale)
+        rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, scale: bakeScale)
         super.init()
 
         addChild(shadow)
@@ -97,7 +102,7 @@ final class CharacterNode: SKNode {
 
         headContent.position = CGPoint(x: 0, y: 20)
         headPivot.addChild(headContent)
-        headContent.addChild(ArtNodes.node(for: CharacterArt.face, colors: colors))
+        headContent.addChild(ArtNodes.node(for: CharacterArt.face, colors: colors, scale: bakeScale))
         eyes.position = Self.local(MapPoint(0, 1))  // 눈높이를 축으로 세로로 깜빡입니다
         headContent.addChild(eyes)
         headContent.addChild(faceDetails)
@@ -125,14 +130,14 @@ final class CharacterNode: SKNode {
         if shownShadow != lighting {
             shownShadow = lighting
             shadow.removeAllChildren()
-            shadow.addChild(ArtNodes.node(for: CharacterArt.shadow(lighting), colors: colors))
+            shadow.addChild(ArtNodes.node(for: CharacterArt.shadow(lighting), colors: colors, scale: bakeScale))
         }
 
         let star = actor.agent.isMain
         if shownStar != star {
             shownStar = star
             torso.removeAllChildren()
-            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors))
+            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors, scale: bakeScale))
         }
         if shownExpression != actor.expression {
             shownExpression = actor.expression
@@ -141,16 +146,16 @@ final class CharacterNode: SKNode {
         if shownProp == nil || shownProp! != actor.prop {
             shownProp = .some(actor.prop)
             handProp.removeAllChildren()
-            handProp.addChild(ArtNodes.node(for: CharacterArt.handProp(actor.prop), colors: colors))
+            handProp.addChild(ArtNodes.node(for: CharacterArt.handProp(actor.prop), colors: colors, scale: bakeScale))
             heldProp.removeAllChildren()
-            heldProp.addChild(ArtNodes.node(for: CharacterArt.heldProp(actor.prop), colors: colors))
+            heldProp.addChild(ArtNodes.node(for: CharacterArt.heldProp(actor.prop), colors: colors, scale: bakeScale))
         }
 
         let handShape: BodyGesture? = CharacterArt.handGesture(actor.gesture).isEmpty ? nil : actor.gesture
         if shownHandGesture != handShape {
             shownHandGesture = handShape
             handGesture.removeAllChildren()
-            handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors))
+            handGesture.addChild(ArtNodes.node(for: CharacterArt.handGesture(handShape), colors: colors, scale: bakeScale))
         }
 
         let seat = actor.loungeSeat
@@ -158,7 +163,7 @@ final class CharacterNode: SKNode {
             shownSeat = .some(seat)
             seatedLegs.removeAllChildren()
             if let seat {
-                seatedLegs.addChild(ArtNodes.node(for: CharacterArt.seatedLegs(seat), colors: colors))
+                seatedLegs.addChild(ArtNodes.node(for: CharacterArt.seatedLegs(seat), colors: colors, scale: bakeScale))
             }
             leftLeg.isHidden = seat != nil
             rightLeg.isHidden = seat != nil
@@ -200,7 +205,7 @@ final class CharacterNode: SKNode {
         func attach(_ shapes: [ArtShape], to parent: SKNode) {
             guard !shapes.isEmpty else { return }
             for (index, layer) in layers.enumerated() {
-                let node = ArtNodes.node(for: CharacterArt.silhouette(shapes, color: layer.color, width: layer.width), colors: colors)
+                let node = ArtNodes.node(for: CharacterArt.silhouette(shapes, color: layer.color, width: layer.width), colors: colors, scale: bakeScale)
                 node.zPosition = -0.01 * Double(layers.count - index)
                 parent.addChild(node)
                 outlineNodes.append(node)
@@ -231,11 +236,11 @@ final class CharacterNode: SKNode {
     private func rebuildFace(_ expression: FacialExpression) {
         eyes.removeAllChildren()
         // 눈 도형을 눈높이(y=1) 기준으로 옮겨서 넣습니다
-        eyes.addChild(ArtNodes.node(for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -1)), colors: colors))
+        eyes.addChild(ArtNodes.node(for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -1)), colors: colors, scale: bakeScale))
         faceDetails.removeAllChildren()
         let details = CharacterArt.blush(expression) + CharacterArt.mouth(expression) + CharacterArt.hairFront(style: appearance.hairStyle)
             + CharacterArt.brows(expression) + CharacterArt.accessory(appearance.accessory) + CharacterArt.effects(expression)
-        faceDetails.addChild(ArtNodes.node(for: details, colors: colors))
+        faceDetails.addChild(ArtNodes.node(for: details, colors: colors, scale: bakeScale))
         // 겹침 순서는 zPosition이 아니라 노드를 넣은 순서(얼굴 → 눈 → 세부)로 정합니다.
         // zPosition을 주면 팔(턱 괴기 손)보다 얼굴이 앞에 그려집니다.
     }

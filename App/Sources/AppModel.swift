@@ -312,7 +312,7 @@ final class AppModel {
                 MainActor.assumeIsolated { self?.updatePacing() }
             })
         }
-        // 레티나 화면을 연결하거나 빼면 텍스처 굽는 배율을 다시 정합니다
+        // 화면을 연결하거나 빼면 창에 붙기 전에 쓸 굽는 배율을 다시 정합니다 (창에 붙은 장면은 창의 배율을 따라 스스로 다시 굽습니다, 개선 10)
         windowObservers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { ShapeBaker.screensChanged() }
         })

@@ -9,33 +9,45 @@ import SpriteKit
 /// 매 프레임은 텍스처 사각형만 그립니다.
 ///
 /// - 좌표는 노드 안 좌표(그림 데이터 y를 뒤집은 `(x, -y)`)입니다. 기준점(0,0)이 그대로 노드 원점이라 팔·머리 축 회전이 같습니다.
-/// - 화면 배율(레티나 2배)로 굽고, 채우기는 SKShapeNode와 같은 even-odd 규칙, 선은 둥근 이음·끝입니다.
+/// - 장면이 정한 배율(창이 놓인 화면의 배율, 레티나 2배)로 굽고, 채우기는 SKShapeNode와 같은 even-odd 규칙, 선은 둥근 이음·끝입니다.
 /// - 투명도가 있는 도형은 채우기와 선을 한 덩어리로 투명하게 그립니다 (SVG 스냅숏의 opacity와 같음).
-/// - 같은 도형·색이면 텍스처를 다시 씁니다 (같은 모습의 직원, 다시 만든 가구).
+/// - 같은 도형·색·배율이면 텍스처를 다시 씁니다 (같은 모습의 직원, 다시 만든 가구). 캐시는 장 수·픽셀 합 상한에서
+///   가장 오래 안 쓴 것부터 버리고(`TextureCacheLedger`), 어느 장면도 쓰지 않게 된 배율의 텍스처는 바로 버립니다 (개선 10).
 enum ShapeBaker {
-    /// 굽는 배율: 연결된 화면 중 가장 높은 배율 (레티나 2, 일반 모니터 1).
-    /// 1배율 화면에 2배로 구우면 텍스처 메모리만 4배가 됩니다 (M6(1) 측정: QHD 1배율 화면). 화면 구성이 바뀌면 다시 정합니다.
-    private(set) static var scale: CGFloat = currentScreenScale()
-    /// 배율이 바뀔 때마다 1씩 늘어남 (장면이 가구를 다시 굽는 신호)
-    private(set) static var generation = 0
+    /// 창에 붙기 전에 쓰는 배율: 연결된 화면 중 가장 높은 배율 (레티나 2, 일반 모니터 1). 화면 구성이 바뀌면 다시 정합니다.
+    /// 장면은 창에 붙으면 그 창의 `backingScaleFactor`로 굽습니다 (`OfficeScene.screenScale`, 개선 10).
+    private(set) static var fallbackScale: CGFloat = currentScreenScale()
+
+    /// 층마다 굽는 배율 (개선 10). 기본은 모든 층을 화면 배율로. 측정할 때만 환경 변수 `CLAUDE_OFFICE_BAKE_SCALE`로 바꿉니다.
+    static let policy = BakeScalePolicy.parse(ProcessInfo.processInfo.environment[BakeScalePolicy.environmentKey])
 
     private static func currentScreenScale() -> CGFloat {
         max(1, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2)
     }
 
-    /// 화면 구성이 바뀌었을 때 부릅니다: 배율이 달라졌으면 캐시를 비우고 `generation`을 올립니다
+    /// 화면 구성이 바뀌었을 때 부릅니다: 창에 붙기 전에 쓸 배율만 다시 정합니다
+    /// (창에 붙은 장면은 다음 장에서 창의 배율이 바뀐 것을 보고 스스로 다시 굽습니다)
     static func screensChanged() {
-        let next = currentScreenScale()
-        guard next != scale else { return }
-        scale = next
-        cache.removeAll()
-        generation += 1
+        fallbackScale = currentScreenScale()
+    }
+
+    /// 장면마다 지금 쓰는 배율들. 어느 장면도 쓰지 않는 배율의 텍스처는 캐시에서 버립니다.
+    private static var scalesInUse: [ObjectIdentifier: Set<Double>] = [:]
+
+    /// 장면이 굽는 배율이 바뀌었음 (처음 정할 때 포함). 아무 장면도 쓰지 않게 된 배율의 텍스처를 캐시에서 버립니다.
+    static func use(scales: Set<Double>, by owner: AnyObject) {
+        scalesInUse[ObjectIdentifier(owner)] = scales
+        let keep = scalesInUse.values.reduce(into: Set<Double>()) { $0.formUnion($1) }
+        for key in ledger.evict(keepingScales: keep) { cache[key] = nil }
+        largeBytes = largeBytes.filter { entry in keep.contains { entry.key.hasSuffix("@\($0)x") } }
     }
 
     private struct Key: Hashable {
         let shapes: [ArtShape]
         let colors: CharacterArt.Colors?
         let clip: [Double]?
+        /// 굽는 배율 (같은 그림도 배율이 다르면 다른 텍스처)
+        let scale: Double
     }
 
     private struct Baked {
@@ -45,13 +57,13 @@ enum ShapeBaker {
     }
 
     private static var cache: [Key: Baked] = [:]
-    /// 캐시 상한 (넘으면 비움). 말풍선 바탕처럼 폭이 제각각인 그림이 쌓이지 않게 작게 둡니다.
-    private static let cacheLimit = 300
+    /// 무엇을 버릴지 (개선 10): 장 수·픽셀 합이 넘으면 가장 오래 안 쓴 것부터. 예전에는 300장에서 통째로 비웠습니다.
+    private static var ledger = TextureCacheLedger<Key>()
     private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
     /// 이보다 픽셀이 많은 층은 GPU에서 굽습니다 (약 1000×1000)
     private static let largeTexturePixels = 1_000_000
-    /// GPU 굽기용 화면 밖 뷰 (창에 붙지 않아 배율 1로 그리므로 노드를 `scale`배 키워서 그림)
+    /// GPU 굽기용 화면 밖 뷰 (창에 붙지 않아 배율 1로 그리므로 노드를 굽는 배율만큼 키워서 그림)
     /// 멈춰 둡니다: 멈추지 않은 SKView는 장면이 없어도 디스플레이 링크가 vsync마다 메인 스레드를 깨움 (`texture(from:)`은 멈춰도 됨)
     private static let offscreenView: SKView = {
         let view = SKView(frame: CGRect(x: 0, y: 0, width: 16, height: 16))
@@ -59,7 +71,7 @@ enum ShapeBaker {
         return view
     }()
 
-    private static func renderOnGPU(_ shapes: [ArtShape], colors: CharacterArt.Colors?, frame: CGRect) -> SKTexture? {
+    private static func renderOnGPU(_ shapes: [ArtShape], colors: CharacterArt.Colors?, frame: CGRect, scale: CGFloat) -> SKTexture? {
         let wrapper = SKNode()
         wrapper.setScale(scale)
         wrapper.addChild(ArtNodes.unbakedNode(for: shapes, colors: colors, transform: ArtNodes.local))
@@ -67,28 +79,36 @@ enum ShapeBaker {
         return offscreenView.texture(from: wrapper, crop: crop)
     }
 
-    /// 지금 캐시에 든 텍스처의 픽셀 바이트 합 (디버그 계측, RGBA 4바이트)
-    static var cachedBytes: Int {
-        cache.values.reduce(0) { $0 + Int($1.frame.width * scale) * Int($1.frame.height * scale) * 4 }
-    }
-    /// 마지막으로 GPU에서 구운 큰 층들의 바이트 (캐시하지 않음, 디버그 계측)
-    static var largeBytes: [String: Int] = [:]
+    /// 지금 캐시에 든 텍스처의 픽셀 바이트 합 (디버그 계측, RGBA 4바이트, 실제 배율)
+    static var cachedBytes: Int { ledger.totalPixels * 4 }
+    /// 마지막으로 GPU에서 구운 큰 층들의 바이트 ("폭x높이@배율x", 캐시하지 않음, 디버그 계측)
+    private(set) static var largeBytes: [String: Int] = [:]
 
     /// 지금 캐시에 든 텍스처 수 (디버그 계측)
     static var cachedCount: Int { cache.count }
 
+    /// 장면들이 지금 쓰는 배율 (디버그 계측)
+    static var scalesDescription: String {
+        let all = scalesInUse.values.reduce(into: Set<Double>()) { $0.formUnion($1) }
+        return all.isEmpty ? "\(fallbackScale)" : all.sorted().map { "\($0)" }.joined(separator: ",")
+    }
+
     /// 도형 묶음 → 스프라이트 하나 (그릴 것이 없으면 빈 노드)
     /// - Parameter clip: 이 영역(노드 안 좌표) 밖은 굽지 않습니다. 화면에 보이는 부분만 굽는 가구용 (미니는 지도 전체 중 한 행 띠만 보임).
-    static func node(for shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect? = nil) -> SKNode {
-        guard let baked = bake(shapes, colors: colors, clip: clip) else { return SKNode() }
+    /// - Parameter scale: 굽는 배율. 장면이 창의 배율과 층(`BakeLayer`)으로 정해 넘깁니다. 스프라이트 크기는 포인트라 배율과 무관합니다.
+    static func node(for shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect? = nil, scale: CGFloat) -> SKNode {
+        guard let baked = bake(shapes, colors: colors, clip: clip, scale: max(scale, 0.5)) else { return SKNode() }
         let sprite = SKSpriteNode(texture: baked.texture, size: baked.frame.size)
         sprite.anchorPoint = CGPoint(x: -baked.frame.minX / baked.frame.width, y: -baked.frame.minY / baked.frame.height)
         return sprite
     }
 
-    private static func bake(_ shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect?) -> Baked? {
-        let key = Key(shapes: shapes, colors: colors, clip: clip.map { [$0.minX, $0.minY, $0.width, $0.height] })
-        if let cached = cache[key] { return cached }
+    private static func bake(_ shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect?, scale: CGFloat) -> Baked? {
+        let key = Key(shapes: shapes, colors: colors, clip: clip.map { [$0.minX, $0.minY, $0.width, $0.height] }, scale: Double(scale))
+        if let cached = cache[key] {
+            ledger.touch(key)
+            return cached
+        }
 
         let local: (MapPoint) -> CGPoint = { CGPoint(x: $0.x, y: -$0.y) }
         var items: [(shape: ArtShape, path: CGPath)] = []
@@ -113,8 +133,8 @@ enum ShapeBaker {
         guard width > 0, height > 0, width <= 8192, height <= 8192 else { return nil }
         // 바닥·벽처럼 큰 층은 GPU에서 한 번 그려 GPU 텍스처로만 둡니다 (CGImage로 만들면 CPU 사본이 텍스처마다 남아 메모리가 50MB 넘게 늘었음).
         // 가구를 다시 만들 때만 그리므로(창 크기·행이 바뀔 때) 동기 렌더링 비용(수십 ms)은 괜찮습니다. 캐시하지 않습니다.
-        if width * height > largeTexturePixels, let texture = renderOnGPU(items.map(\.shape), colors: colors, frame: frame) {
-            largeBytes["\(Int(frame.width))x\(Int(frame.height))"] = width * height * 4
+        if width * height > largeTexturePixels, let texture = renderOnGPU(items.map(\.shape), colors: colors, frame: frame, scale: scale) {
+            largeBytes["\(Int(frame.width))x\(Int(frame.height))@\(Double(scale))x"] = width * height * 4
             return Baked(texture: texture, frame: frame)
         }
         guard let context = CGContext(
@@ -153,8 +173,9 @@ enum ShapeBaker {
         let texture = SKTexture(cgImage: image)
         texture.filteringMode = .linear
         let baked = Baked(texture: texture, frame: frame)
-        if cache.count >= cacheLimit { cache.removeAll(keepingCapacity: true) }
-        cache[key] = baked
+        let (stored, evicted) = ledger.insert(key, pixels: width * height, scale: Double(scale))
+        for old in evicted { cache[old] = nil }
+        if stored { cache[key] = baked }
         return baked
     }
 }

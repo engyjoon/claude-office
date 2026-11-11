@@ -4,14 +4,17 @@ import OfficeStage
 import SpriteKit
 
 /// 말풍선·상태 칩·아이콘 하나. 도형이 바뀔 때만 다시 만들고, 매 프레임에는 위치·크기·투명도만 바꿉니다.
+/// 굽는 배율이 바뀌면(창이 다른 배율의 화면으로 옮겨짐, 개선 10) 도형이 같아도 다시 굽습니다.
 final class OverlayNode: SKNode {
     private var shownShapes: [ArtShape] = []
+    private var shownScale: CGFloat = 0
 
-    func apply(_ item: OverlayItem, sceneHeight: Double) {
-        if item.shapes != shownShapes {
+    func apply(_ item: OverlayItem, sceneHeight: Double, bakeScale: CGFloat) {
+        if item.shapes != shownShapes || bakeScale != shownScale {
             shownShapes = item.shapes
+            shownScale = bakeScale
             removeAllChildren()
-            addChild(ArtNodes.node(for: item.shapes, colors: nil) { label, shape in ArtNodes.fit(label, in: item, shape: shape) })
+            addChild(ArtNodes.node(for: item.shapes, colors: nil, scale: bakeScale) { label, shape in ArtNodes.fit(label, in: item, shape: shape) })
         }
         position = CGPoint(x: item.origin.x, y: sceneHeight - item.origin.y)
         setScale(item.scale)
@@ -34,15 +37,17 @@ enum ArtNodes {
 
     /// 도형 묶음 → 노드 (노드 안 좌표 `(x, -y)`). 글자가 아닌 도형은 이어진 것끼리 비트맵 한 장으로 구워 스프라이트로 만들고
     /// (`ShapeBaker`, M6(1)), 글자는 SKLabelNode로 둡니다. 그리는 순서는 도형 순서 그대로입니다.
+    /// - Parameter scale: 굽는 배율 (`ShapeBaker.node`). 글자(SKLabelNode)는 SpriteKit이 뷰의 배율로 그리므로 상관없습니다.
     /// - Parameter onLabel: 글자 노드를 만든 뒤 부름 (말풍선 글자 폭 맞추기)
     static func node(
-        for shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect? = nil, onLabel: ((SKLabelNode, ArtShape) -> Void)? = nil
+        for shapes: [ArtShape], colors: CharacterArt.Colors?, clip: CGRect? = nil, scale: CGFloat,
+        onLabel: ((SKLabelNode, ArtShape) -> Void)? = nil
     ) -> SKNode {
         var parts: [SKNode] = []
         var run: [ArtShape] = []
         func flush() {
             guard !run.isEmpty else { return }
-            parts.append(ShapeBaker.node(for: run, colors: colors, clip: clip))
+            parts.append(ShapeBaker.node(for: run, colors: colors, clip: clip, scale: scale))
             run.removeAll()
         }
         for shape in shapes {

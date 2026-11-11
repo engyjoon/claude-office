@@ -168,7 +168,39 @@ final class OfficeScene: SKScene {
         world.addChild(liveFurniture)
         overlayLayer.zPosition = 1_000_000
         world.addChild(overlayLayer)
+        ShapeBaker.use(scales: ShapeBaker.policy.scales(screen: Double(screenScale)), by: self)
     }
+
+    // MARK: - 굽는 배율 (개선 10)
+
+    /// 창이 놓인 화면의 배율 (`backingScaleFactor`). 창에 붙기 전에는 연결된 화면 중 가장 높은 배율.
+    private(set) var screenScale: CGFloat = ShapeBaker.fallbackScale
+
+    /// 이 층을 굽는 배율 (기본은 화면 배율, `ShapeBaker.policy`)
+    func bakeScale(_ layer: BakeLayer) -> CGFloat {
+        CGFloat(ShapeBaker.policy.scale(for: layer, screen: Double(screenScale)))
+    }
+
+    /// 창의 배율이 바뀌었으면(다른 배율의 화면으로 옮김, 해상도 변경, 화면을 붙이거나 뗌) 살아 있는 노드를 새 배율로 다시 굽습니다.
+    /// 매 장 부르지만 창이 그대로면 숫자 하나 비교로 끝납니다. 장면이 멈춰 있으면(안 보임) 다시 보이는 첫 장에서 굽습니다.
+    private func refreshScreenScale() {
+        guard let next = view?.window?.backingScaleFactor, next > 0, next != screenScale else { return }
+        screenScale = next
+        // 옛 배율 텍스처는 다른 장면도 쓰지 않으면 캐시에서 버립니다 (화면의 노드가 들고 있는 것은 아래에서 다시 만들며 놓음)
+        ShapeBaker.use(scales: ShapeBaker.policy.scales(screen: Double(next)), by: self)
+        furnitureKey = nil
+        shownLiveLayers = []
+        shownDeskLights = nil
+        // 캐릭터는 부위를 만들 때 굽으므로 노드를 새로 만듭니다 (이어서 같은 장에서 같은 모습으로, 나타나는 효과 없이).
+        // 말풍선·칩은 `OverlayNode.apply`가 배율이 바뀐 것을 보고 다시 굽습니다.
+        for node in characters.values { node.removeFromParent() }
+        characters.removeAll()
+        rebakingCharacters = true
+        PerfProbe.shared?.count("\(probeName).rebaked")
+    }
+
+    /// 배율이 바뀌어 캐릭터를 다시 만드는 장 (나타나는 효과·VoiceOver 알림 없이)
+    private var rebakingCharacters = false
 
     /// 사무실 창이 화면에 보이는지 (장식성 효과음은 보일 때만 울립니다, 설계서 §11.3)
     var isVisibleOnScreen: Bool {
@@ -320,6 +352,7 @@ final class OfficeScene: SKScene {
     }
 
     private func sync() {
+        refreshScreenScale()
         if reportedSize != size, size.width > 1, size.height > 1 {
             reportedSize = size
             // 사무실은 둘레 여백 안쪽 크기를 따릅니다 (띠는 왼쪽 여백만)
@@ -334,11 +367,6 @@ final class OfficeScene: SKScene {
         let extent = fitWorld(officeHeight: height)
         // 가구가 바뀌었는지는 0.25초마다만 봅니다 (명패 계산이 매 프레임 하기엔 무거움). 크기가 바뀌면 바로.
         let now = Date()
-        if bakedGeneration != ShapeBaker.generation {
-            bakedGeneration = ShapeBaker.generation
-            furnitureKey = nil
-            shownLiveLayers = []
-        }
         if furnitureKey == nil || now.timeIntervalSince(furnitureCheckedAt) >= 0.25 || extent != lastExtent {
             furnitureCheckedAt = now
             lastExtent = extent
@@ -360,12 +388,14 @@ final class OfficeScene: SKScene {
             if let existing = characters[actor.id] {
                 node = existing
             } else {
-                membersChanged = true
                 let colorIndex = stage.teams[actor.agent.teamID]?.colorIndex ?? 0
-                node = CharacterNode(agent: actor.agent, teamColor: Swatch.team(colorIndex).color)
+                node = CharacterNode(agent: actor.agent, teamColor: Swatch.team(colorIndex).color, bakeScale: bakeScale(.character))
                 node.isSelected = actor.id == selectedAgent
-                node.alpha = 0
-                node.run(.fadeIn(withDuration: 0.2))
+                if !rebakingCharacters {
+                    membersChanged = true
+                    node.alpha = 0
+                    node.run(.fadeIn(withDuration: 0.2))
+                }
                 world.addChild(node)
                 characters[actor.id] = node
             }
@@ -376,6 +406,7 @@ final class OfficeScene: SKScene {
             membersChanged = true
             node.run(.sequence([.fadeOut(withDuration: 0.25), .removeFromParent()]))
         }
+        rebakingCharacters = false
         noteAccessibilityMembers(stage, membersChanged: membersChanged)
         syncOverlays(stage, extent: extent)
     }
@@ -401,7 +432,7 @@ final class OfficeScene: SKScene {
                 overlays[item.id] = node
                 return node
             }()
-            node.apply(item, sceneHeight: height)
+            node.apply(item, sceneHeight: height, bakeScale: bakeScale(.overlay))
             node.zPosition = Double(index)
         }
         for (id, node) in overlays where !present.contains(id) {
@@ -425,7 +456,7 @@ final class OfficeScene: SKScene {
         liveFurniture.removeAllChildren()
         for layer in layers {
             // 구운 텍스처는 캐시에서 다시 씁니다 (M6(1) 측정: 매 프레임 도형 노드를 새로 만들면 Metal 버퍼 할당·해제가 사무실 창 CPU의 절반)
-            let node = ArtNodes.node(for: layer.shapes, colors: nil)
+            let node = ArtNodes.node(for: layer.shapes, colors: nil, scale: bakeScale(.furniture))
             node.position = CGPoint(x: 0, y: height)
             node.zPosition = layer.depth
             liveFurniture.addChild(node)
@@ -440,7 +471,7 @@ final class OfficeScene: SKScene {
         shownDeskLights = (seats, height)
         deskLights.removeAllChildren()
         for seat in seats {
-            let node = ArtNodes.node(for: OfficeArt.deskLight(at: seat), colors: nil)
+            let node = ArtNodes.node(for: OfficeArt.deskLight(at: seat), colors: nil, scale: bakeScale(.furniture))
             node.position = CGPoint(x: 0, y: height)
             deskLights.addChild(node)
         }
@@ -565,7 +596,6 @@ final class OfficeScene: SKScene {
 
     private var furnitureKey: FurnitureKey?
     private var furnitureCheckedAt = Date.distantPast
-    private var bakedGeneration = ShapeBaker.generation
     private var lastExtent: MapRect?
 
     /// 오래 안 보이면 가구 텍스처를 놓습니다 (다시 보이면 다음 장에서 다시 구움, M6(1) 메모리)
@@ -605,7 +635,9 @@ final class OfficeScene: SKScene {
         // 보이는 영역(지도 좌표, y 아래로) → 노드 안 좌표 (x, -y)
         let visible = CGRect(x: extent.x, y: -(extent.y + extent.height), width: extent.width, height: extent.height).insetBy(dx: -2, dy: -2)
         for group in Self.groupByDepth(layers) {
-            let node = ArtNodes.node(for: group.shapes, colors: nil, clip: visible)
+            // 깊이 −∞ 묶음(바탕·벽·행 표지, 창 크기만 한 한 장)과 나머지 가구는 굽는 배율을 따로 정할 수 있습니다 (개선 10, 기본은 같음)
+            let layer: BakeLayer = group.depth == -.infinity ? .background : .furniture
+            let node = ArtNodes.node(for: group.shapes, colors: nil, clip: visible, scale: bakeScale(layer))
             node.position = CGPoint(x: 0, y: height)
             node.zPosition = group.depth == -.infinity ? -100_000 : group.depth
             furniture.addChild(node)
