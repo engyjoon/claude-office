@@ -176,11 +176,13 @@ public enum OfficeArt {
         let x = frame.x, y = frame.y, w = frame.width, h = frame.height
         let ix = x + 7, iy = y + 7, iw = w - 14, ih = h - 14
         let dressing = windowDressing(frame)
+        // 해와 집은 창살에 가려지지 않게 칸 가운데에 놓습니다
+        let sunX = ix + iw * paneCenter(0.9, innerWidth: iw)
         var shapes: [ArtShape] = dressing.back + [
             .rect(ix, iy, iw, ih, r: 3, fill: .color(ArtColor(0xDDF0F7)), outline: false),
             .rect(ix, iy + ih * 0.28, iw, ih * 0.4, fill: .color(ArtColor(0xEAF6F4)), outline: false),
-            .circle(ix + iw * 0.84, iy + 14, 10.5, fill: .swatch(.butter), outline: false, opacity: 0.35),
-            .circle(ix + iw * 0.84, iy + 14, 7, fill: .swatch(.butter), width: 1.1),
+            .circle(sunX, iy + 14, 10.5, fill: .swatch(.butter), outline: false, opacity: 0.35),
+            .circle(sunX, iy + 14, 7, fill: .swatch(.butter), width: 1.1),
         ]
         shapes += cloud(ix + iw * 0.2, iy + 15, 1.15) + cloud(ix + iw * 0.52, iy + 11, 0.85, opacity: 0.92) + cloud(ix + iw * 0.68, iy + 19, 0.6, opacity: 0.85)
         // 새 두 마리
@@ -193,7 +195,7 @@ public enum OfficeArt {
                   fill: .color(ArtColor(0xA9DDB9)), outline: false),
         ]
         // 뒤 언덕 위의 집과 뾰족한 나무
-        let hx = ix + iw * 0.4, hy = iy + ih * 0.53
+        let hx = ix + iw * paneCenter(0.4, innerWidth: iw), hy = iy + ih * 0.53
         shapes += [
             .rect(hx - 6.5, hy - 8, 13, 9, r: 0.8, fill: .color(ArtColor(0xFFF8EE)), width: 1),
             .path("M\(hx - 8.6),\(hy - 7.4) L\(hx),\(hy - 15) L\(hx + 8.6),\(hy - 7.4) Z", fill: .swatch(.alert), width: 1),
@@ -263,14 +265,14 @@ public enum OfficeArt {
             shapes.append(.circle(ix + iw * min(max(fx, 0.02), 0.98), iy + 4 + ih * fy, radius, fill: .color(ArtColor(0xFFF6D8)), outline: false, opacity: opacity))
         }
         // 초승달 (옅은 달무리 → 달 원 위에 하늘색 원을 겹침)
-        let moon = MapPoint(ix + iw * 0.84, iy + 15)
+        let moon = MapPoint(ix + iw * paneCenter(0.9, innerWidth: iw), iy + 15)
         shapes += [
             .circle(moon.x, moon.y, 12, fill: .color(ArtColor(0xFFF1B8)), outline: false, opacity: 0.12),
             ArtShape(.circle(center: moon, radius: 8), fill: .color(ArtColor(0xFFF1B8)), stroke: ink, lineWidth: 1.1),
             .circle(moon.x + 4, moon.y - 3, 7, fill: .color(sky), outline: false),
         ]
         // 언덕 (뒤 → 앞), 뒤 언덕 위의 불 켜진 집
-        let hx = ix + iw * 0.4, hy = iy + ih * 0.57
+        let hx = ix + iw * paneCenter(0.4, innerWidth: iw), hy = iy + ih * 0.57
         shapes += [
             .path("M\(ix),\(iy + ih * 0.66) C\(ix + iw * 0.25),\(iy + ih * 0.40) \(ix + iw * 0.55),\(iy + ih * 0.70) \(ix + iw * 0.75),\(iy + ih * 0.50) "
                 + "C\(ix + iw * 0.88),\(iy + ih * 0.42) \(ix + iw),\(iy + ih * 0.56) \(ix + iw),\(iy + ih * 0.56) L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",

@@ -116,7 +116,7 @@ extension OfficeArt {
         ]
         var front: [ArtShape] = [ArtShape(.rect(MapRect(ix, iy, iw, ih), radius: 3), stroke: .swatch(.ink), lineWidth: 1.2)]
         // 창살: 폭에 따라 칸을 나눕니다 (약 120pt마다)
-        let panes = max(2, Int((iw / 120).rounded()))
+        let panes = windowPanes(iw)
         for pane in 1..<panes {
             front.append(.rect(ix + iw * Double(pane) / Double(panes) - 2.5, iy, 5, ih, fill: .swatch(.woodDark), width: 1.2))
         }
@@ -142,6 +142,18 @@ extension OfficeArt {
             front += tinyPot(index, at: MapPoint(x + w * spot, y + h - 3))
         }
         return (back, front)
+    }
+
+    /// 풍경 창의 칸 수 (창 안쪽 폭 약 120pt마다 한 칸)
+    static func windowPanes(_ innerWidth: Double) -> Int {
+        max(2, Int((innerWidth / 120).rounded()))
+    }
+
+    /// 창밖 그림에서 눈에 띄는 것(해·달·집)을 놓을 자리: 가로 비율 `fraction`이 들어 있는 칸의 가운데 (비율).
+    /// 창 폭이 달라져도 창살 뒤에 가려지지 않습니다.
+    static func paneCenter(_ fraction: Double, innerWidth: Double) -> Double {
+        let panes = Double(windowPanes(innerWidth))
+        return ((fraction * panes).rounded(.down) + 0.5) / panes
     }
 
     /// 뭉게구름 (타원 셋)
