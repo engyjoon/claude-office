@@ -47,6 +47,12 @@ struct EventLogView: View {
                     .onAppear { visibleIDs.insert(entry.id) }
                     .onDisappear { visibleIDs.remove(entry.id) }
                 }
+                // 창을 열면 가장 새 줄부터 보입니다 (화면 점검 2026-11-16: 가장 오래된 줄에서 열려 직접 내려야 따라갔음).
+                // 목록이 줄을 놓은 뒤에 내려야 해서 한 박자 미룹니다.
+                .onAppear {
+                    guard let last = entries.last?.id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(last, anchor: .bottom) }
+                }
                 // 맨 아래(방금까지의 마지막 줄)를 보고 있을 때만 새 줄을 따라갑니다. 위로 올려 읽는 중이면 그대로 둡니다.
                 .onChange(of: entries.last?.id) { old, last in
                     guard let last else { return }

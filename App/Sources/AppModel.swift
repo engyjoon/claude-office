@@ -57,6 +57,8 @@ final class AppModel {
     private(set) var hookBlocker: HookBlocker?
     /// 마지막으로 버전을 확인한 때. Claude Code는 스스로 업데이트하므로 가끔 다시 봅니다.
     private var versionCheckedAt: Date?
+    /// 마지막으로 훅 파일(settings.json·스크립트·차단 설정)을 읽은 때
+    @ObservationIgnored private var hookFilesCheckedAt = Date.distantPast
     private var isCheckingVersion = false
     /// 테스트 이벤트를 보내는 중 (설정 → 연동)
     private(set) var isSendingTest = false
@@ -152,6 +154,8 @@ final class AppModel {
     private static let selectedFoldersKey = "office.selection.folders"
     /// 디렉토리 목록을 새로 읽는 간격
     private static let directoryRefreshInterval: TimeInterval = 5
+    /// 훅 파일 상태를 다시 읽는 간격 (디렉토리 새로 고침 때 함께 봄)
+    private static let hookFilesRefreshInterval: TimeInterval = 30
     private static let maxLogEntries = 600
 
     init() {
@@ -609,6 +613,7 @@ final class AppModel {
 
     func refreshDirectories() {
         checkEndpoint()
+        refreshHookFilesIfStale()
         sweepEndedProcesses()
         guard !loadingDirectories else { return }
         loadingDirectories = true
@@ -963,11 +968,27 @@ final class AppModel {
     }
 
     func refreshHookStatus() {
-        hookStatus = installer.status()
-        hookScript = installer.scriptState()
-        hookBlocker = installer.blocker()
+        refreshHookFiles()
         checkEndpoint()
         checkClaudeVersion()
+    }
+
+    /// settings.json·훅 스크립트·차단 설정을 다시 읽습니다 (작은 파일 몇 개). 바뀐 값만 넣어 화면을 괜히 다시 그리지 않습니다.
+    private func refreshHookFiles(now: Date = Date()) {
+        hookFilesCheckedAt = now
+        let status = installer.status()
+        if status != hookStatus { hookStatus = status }
+        let script = installer.scriptState()
+        if script != hookScript { hookScript = script }
+        let blocker = installer.blocker()
+        if blocker != hookBlocker { hookBlocker = blocker }
+    }
+
+    /// 메뉴·설정을 열지 않아도 훅 상태를 가끔 다시 읽습니다 (화면 점검 2026-11-16: 앱 밖에서 훅을 다시 설치한 뒤
+    /// 메뉴를 열 때까지 메뉴바 아이콘의 느낌표가 며칠 남아 있었음). 버전 확인(`claude --version`)은 하지 않습니다.
+    private func refreshHookFilesIfStale(now: Date = Date()) {
+        guard now.timeIntervalSince(hookFilesCheckedAt) >= Self.hookFilesRefreshInterval else { return }
+        refreshHookFiles(now: now)
     }
 
     /// `claude --version`을 백그라운드에서 실행합니다. 10분 안에 확인했으면 다시 하지 않습니다(`force`면 바로).

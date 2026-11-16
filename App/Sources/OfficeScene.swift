@@ -605,6 +605,18 @@ final class OfficeScene: SKScene {
     /// 오래 안 보이면 가구 텍스처를 놓습니다 (다시 보이면 다음 장에서 다시 구움, M6(1) 메모리)
     func releaseFurnitureIfHidden(for seconds: TimeInterval, now: Date = Date()) {
         guard pace == .paused, furnitureKey != nil, now.timeIntervalSince(pausedAt) >= seconds else { return }
+        releaseFurniture()
+    }
+
+    /// 창이 닫혀 뷰에서 떨어지면(사무실 창은 닫혀 있는 동안 뷰를 내려놓음) 기다리지 않고 가구 텍스처와 캐시를 놓습니다.
+    /// 다시 붙으면 `didMove(to:)`가 다시 굽습니다 (화면 점검 2026-11-16: 닫은 뒤에도 텍스처가 남아 있었음).
+    override func willMove(from view: SKView) {
+        super.willMove(from: view)
+        if furnitureKey != nil { releaseFurniture() }
+        ShapeBaker.purge()
+    }
+
+    private func releaseFurniture() {
         furniture.removeAllChildren()
         liveFurniture.removeAllChildren()
         shownLiveLayers = []

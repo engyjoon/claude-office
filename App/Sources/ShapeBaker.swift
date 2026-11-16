@@ -42,6 +42,12 @@ enum ShapeBaker {
         largeBytes = largeBytes.filter { entry in keep.contains { entry.key.hasSuffix("@\($0)x") } }
     }
 
+    /// 캐시를 비웁니다 (화면의 노드가 든 텍스처는 그대로). 사무실 창이 닫혀 장면이 뷰에서 떨어질 때 부릅니다.
+    static func purge() {
+        for key in ledger.evict(keepingScales: []) { cache[key] = nil }
+        cache.removeAll()
+    }
+
     private struct Key: Hashable {
         let shapes: [ArtShape]
         let colors: CharacterArt.Colors?

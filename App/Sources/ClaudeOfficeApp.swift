@@ -51,49 +51,31 @@ struct OfficeWindowView: View {
     @State private var escapeMonitor: Any?
     /// 창이 놓인 화면의 쓸 수 있는 크기와 제목 막대 높이 (화면이 작을 때 줄이려고)
     @State private var screen = OfficeWindowSize.Screen.unknown
+    /// 창이 떠 있거나 Dock에 최소화돼 있는지. SwiftUI는 닫은 창과 그 안의 뷰를 그대로 들고 있어서, 닫혀 있는 동안에는
+    /// 내용(SpriteKit 뷰·패널)을 내려놓아 그림판과 레이어를 돌려줍니다 (화면 점검 2026-11-16: 닫은 뒤에도 메모리가 그대로였음).
+    @State private var presented = true
+
+    static let floorColor = Color(red: 0.945, green: 0.902, blue: 0.839)
 
     var body: some View {
         // 연동이 고장 나면 사무실 위에 얇은 띠 (개선 6). 띠만큼 창이 높아집니다 (작은 화면이면 사무실을 그만큼 줄임).
         let strip = HookAlertStrip.isShown(model) ? HookAlertStrip.height : 0
         let office = OfficeWindowSize.office(screen: screen, panel: showStaffPanel, extra: strip)
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                if strip > 0 {
-                    HookAlertStrip(model: model)
-                        .frame(width: office.width)
-                }
-                OfficeSpriteView(scene: model.officeScene)
-                    .frame(width: office.width, height: office.height)
-                    .background(Color(red: 0.945, green: 0.902, blue: 0.839))
-                    .overlay(alignment: .topTrailing) {
-                        // 캐릭터(또는 세션 패널의 줄)를 고르면 인스펙터를 보여줍니다 (M5(7)). 빈 곳 클릭·✕·Esc로 닫습니다.
-                        if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
-                            AgentCard(
-                                row: row, team: team, privacy: model.privacy, timeline: model.inspectorTimeline,
-                                destination: model.destination(for: row),
-                                agentDescription: model.agentDescription(for: row, in: team),
-                                onSelect: { model.select($0) },
-                                onFocus: { model.focusAgent(id) },
-                                onClose: { model.select(nil) })
-                                .padding(12)
-                                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
-                        }
-                    }
-                    .animation(.easeOut(duration: 0.15), value: model.selectedAgent)
-                // 사무실 바로 아래 세 줄 (사무실 영역은 줄어들지 않고, 창 높이에 이만큼 더합니다)
-                StatusLineView(line: model.statusLine)
-                    .frame(width: office.width)
-            }
-            if showStaffPanel {
-                Divider()
-                StaffPanel(model: model)
+        Group {
+            if presented {
+                content(office: office, strip: strip)
+            } else {
+                // 닫혀 있는 동안의 빈 바탕 (다시 열리는 첫 장에 잠깐 보일 수 있어 사무실 바닥색)
+                Self.floorColor
             }
         }
         // 창이 안 보이면 현황 줄·인스펙터의 시계 글자를 멈춥니다 (M6(1))
         .environment(\.liveClock, model.officeVisible)
         // 내용 크기를 못 박아 창 크기를 고정합니다 (`.windowResizability(.contentSize)`)
         .frame(width: office.width + (showStaffPanel ? OfficeWindowSize.panel : 0), height: office.height + StatusLineView.height + strip)
-        .background(WindowAccessor { window in
+        .background(WindowAccessor(onPresence: { shown in
+            if shown != presented { presented = shown }
+        }) { window in
             OfficeWindowSize.lock(window)
             let next = OfficeWindowSize.Screen(window: window)
             if next != screen {
@@ -135,6 +117,43 @@ struct OfficeWindowView: View {
         .onDisappear {
             if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
             escapeMonitor = nil
+        }
+    }
+
+    /// 사무실 + 현황 줄 + 오른쪽 패널
+    private func content(office: CGSize, strip: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if strip > 0 {
+                    HookAlertStrip(model: model)
+                        .frame(width: office.width)
+                }
+                OfficeSpriteView(scene: model.officeScene)
+                    .frame(width: office.width, height: office.height)
+                    .background(Self.floorColor)
+                    .overlay(alignment: .topTrailing) {
+                        // 캐릭터(또는 세션 패널의 줄)를 고르면 인스펙터를 보여줍니다 (M5(7)). 빈 곳 클릭·✕·Esc로 닫습니다.
+                        if let id = model.selectedAgent, let row = model.roster.row(for: id), let team = model.roster.team(of: id) {
+                            AgentCard(
+                                row: row, team: team, privacy: model.privacy, timeline: model.inspectorTimeline,
+                                destination: model.destination(for: row),
+                                agentDescription: model.agentDescription(for: row, in: team),
+                                onSelect: { model.select($0) },
+                                onFocus: { model.focusAgent(id) },
+                                onClose: { model.select(nil) })
+                                .padding(12)
+                                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.15), value: model.selectedAgent)
+                // 사무실 바로 아래 세 줄 (사무실 영역은 줄어들지 않고, 창 높이에 이만큼 더합니다)
+                StatusLineView(line: model.statusLine)
+                    .frame(width: office.width)
+            }
+            if showStaffPanel {
+                Divider()
+                StaffPanel(model: model)
+            }
         }
     }
 
@@ -193,35 +212,55 @@ enum OfficeWindowSize {
 
 /// 뷰가 붙은 창을 알려 줍니다 (붙을 때, 화면을 옮길 때, 다시 그릴 때)
 struct WindowAccessor: NSViewRepresentable {
+    /// 창이 떠 있거나 최소화돼 있으면 true, 닫히면 false (닫힐 때·다시 보일 때·최소화가 풀릴 때 알림)
+    var onPresence: (@MainActor (Bool) -> Void)?
     let onWindow: @MainActor (NSWindow) -> Void
 
     func makeNSView(context: Context) -> WindowAccessorView {
         let view = WindowAccessorView()
         view.onWindow = onWindow
+        view.onPresence = onPresence
         return view
     }
 
     func updateNSView(_ view: WindowAccessorView, context: Context) {
         view.onWindow = onWindow
+        view.onPresence = onPresence
         if let window = view.window { DispatchQueue.main.async { onWindow(window) } }
     }
 }
 
 final class WindowAccessorView: NSView {
     var onWindow: (@MainActor (NSWindow) -> Void)?
-    private var screenObserver: NSObjectProtocol?
+    var onPresence: (@MainActor (Bool) -> Void)?
+    private var observers: [NSObjectProtocol] = []
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-        screenObserver = nil
+        let center = NotificationCenter.default
+        observers.forEach(center.removeObserver)
+        observers.removeAll()
         guard let window else { return }
-        DispatchQueue.main.async { [weak self] in self?.onWindow?(window) }
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onWindow?(window) }
+        DispatchQueue.main.async { [weak self] in
+            self?.onWindow?(window)
+            self?.reportPresence(window)
         }
+        observers.append(center.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onWindow?(window) }
+        })
+        // 닫히는 순간에는 아직 isVisible이 true라서 닫힘은 따로 알립니다
+        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onPresence?(false) }
+        })
+        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification, NSWindow.didDeminiaturizeNotification] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportPresence(window) }
+            })
+        }
+    }
+
+    private func reportPresence(_ window: NSWindow) {
+        onPresence?(window.isVisible || window.isMiniaturized)
     }
 }
 
