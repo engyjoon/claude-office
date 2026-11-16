@@ -84,54 +84,72 @@ public enum SVGRenderer {
 
     /// `outline`이 있으면 같은 자세의 실루엣을 층마다 먼저 그려 몸 둘레에 테를 두릅니다 (앱 CharacterNode와 같은 결과)
     static func character(_ actor: StageActor, time: Double, lighting: Lighting = .day, outline: [CharacterArt.OutlineLayer] = []) -> String {
-        let pose = RigAnimator.pose(for: actor, time: time)
-        let colors = CharacterArt.colors(for: actor.agent.profile.appearance)
-        let appearance = actor.agent.profile.appearance
-        let e = actor.expression
+        let seated = actor.loungeSeat != nil
+        return "<g transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
+            + figure(
+                actor.agent.profile.appearance, isLead: actor.agent.isMain, expression: actor.expression,
+                pose: RigAnimator.pose(for: actor, time: time), prop: actor.prop, gesture: actor.gesture, legs: !seated,
+                shadow: seated ? nil : lighting, outline: outline)
+            + "</g>"
+    }
+
+    /// 직원 한 명의 그림 (원점: 발 위치). 무대 없이도 그릴 수 있어 캐릭터 시트(`office-sim sheet`)가 함께 씁니다.
+    /// - Parameters:
+    ///   - legs: 서 있는 다리를 그릴지 (소파·안마 의자에 앉으면 다리는 `seatedLegs`로 가구 앞에 따로 그립니다)
+    ///   - shadow: 발밑 그림자의 조명 (nil이면 그리지 않음)
+    public static func figure(
+        _ appearance: Appearance, isLead: Bool, expression e: FacialExpression = .neutral, pose: RigPose = RigPose(), prop: Prop? = nil,
+        gesture: BodyGesture? = nil, legs: Bool = true, shadow: Lighting? = .day, outline: [CharacterArt.OutlineLayer] = []
+    ) -> String {
+        let colors = CharacterArt.colors(for: appearance)
+        let outfit = CharacterArt.outfit(for: appearance)
         func group(_ transform: String, _ shapes: [ArtShape]) -> String {
             "<g transform=\"\(transform)\">" + shapes.map { element($0, colors: colors) }.joined() + "</g>"
         }
         let head = "translate(0,\(f(CharacterArt.headOrigin.y + pose.headDrop))) rotate(\(f(pose.headRotation)),0,20)"
-        let eyes = "translate(0,1) scale(1,\(f(pose.eyeScale))) translate(0,-1)"
-        let seated = actor.loungeSeat != nil
-        // 외곽선: 부위마다 실루엣을 같은 변환으로 (머리는 얼굴 원 + 앞머리 + 액세서리)
+        let eyeLine = f(CharacterArt.eyeLine)
+        let eyes = "translate(0,\(eyeLine)) scale(1,\(f(pose.eyeScale))) translate(0,-\(eyeLine))"
+        let leftArm = "translate(\(f(CharacterArt.leftShoulder.x)),\(f(CharacterArt.leftShoulder.y))) rotate(\(f(pose.leftArm)))"
+        let rightArm = "translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))"
+        let held = "translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))"
+        let arm = CharacterArt.arm(outfit)
+        let body = CharacterArt.body(isLead: isLead, outfit: outfit)
+        // 외곽선: 부위마다 실루엣을 같은 변환으로 (머리는 얼굴 원 + 귀 + 앞머리 + 액세서리)
         var silhouettes = ""
         for layer in outline {
             func g(_ transform: String, _ shapes: [ArtShape]) -> String {
                 group(transform, CharacterArt.silhouette(shapes, color: layer.color, width: layer.width))
             }
-            if !seated {
+            if legs {
                 silhouettes += g("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
                 silhouettes += g("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
             }
             silhouettes += g(head, CharacterArt.hairBack(style: appearance.hairStyle))
-            silhouettes += g("", CharacterArt.body(isLead: actor.agent.isMain))
+            silhouettes += g("", body)
             silhouettes += g(head, CharacterArt.headOutline(appearance))
-            silhouettes += g("translate(\(f(CharacterArt.leftShoulder.x)),\(f(CharacterArt.leftShoulder.y))) rotate(\(f(pose.leftArm)))", CharacterArt.arm)
-            silhouettes += g("translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))", CharacterArt.arm + CharacterArt.handProp(actor.prop) + CharacterArt.handGesture(actor.gesture))
-            silhouettes += g("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
+            silhouettes += g(leftArm, arm)
+            silhouettes += g(rightArm, arm + CharacterArt.handProp(prop) + CharacterArt.handGesture(gesture))
+            silhouettes += g(held, CharacterArt.heldProp(prop))
         }
         var inner = silhouettes
-        // 소파·안마 의자에 앉으면 다리는 seatedLegs로 가구 앞에 따로 그립니다
-        if !seated {
+        if legs {
             inner += group("translate(0,\(f(pose.leftLegLift)))", CharacterArt.leftLeg)
             inner += group("translate(0,\(f(pose.rightLegLift)))", CharacterArt.rightLeg)
         }
         inner += group(head, CharacterArt.hairBack(style: appearance.hairStyle))
-        inner += group("", CharacterArt.body(isLead: actor.agent.isMain))
+        inner += group("", body)
         inner += "<g transform=\"\(head)\">"
-            + (CharacterArt.face + CharacterArt.blush(e)).map { element($0, colors: colors) }.joined()
+            + (CharacterArt.ears + CharacterArt.face + CharacterArt.blush(e)).map { element($0, colors: colors) }.joined()
             + group(eyes, CharacterArt.eyes(e))
             + (CharacterArt.mouth(e) + CharacterArt.hairFront(style: appearance.hairStyle) + CharacterArt.brows(e)
                 + CharacterArt.accessory(appearance.accessory) + CharacterArt.effects(e)).map { element($0, colors: colors) }.joined()
             + "</g>"
-        inner += group("translate(\(f(CharacterArt.leftShoulder.x)),\(f(CharacterArt.leftShoulder.y))) rotate(\(f(pose.leftArm)))", CharacterArt.arm)
-        inner += group("translate(\(f(CharacterArt.rightShoulder.x)),\(f(CharacterArt.rightShoulder.y))) rotate(\(f(pose.rightArm)))", CharacterArt.arm + CharacterArt.handProp(actor.prop) + CharacterArt.handGesture(actor.gesture))
-        inner += group("translate(\(f(CharacterArt.heldPropOrigin.x)),\(f(CharacterArt.heldPropOrigin.y)))", CharacterArt.heldProp(actor.prop))
+        inner += group(leftArm, arm)
+        inner += group(rightArm, arm + CharacterArt.handProp(prop) + CharacterArt.handGesture(gesture))
+        inner += group(held, CharacterArt.heldProp(prop))
         let scaleX = pose.mirrored ? -1.0 : 1.0
-        return "<g transform=\"translate(\(f(actor.position.x)),\(f(actor.position.y)))\">"
-            + (seated ? "" : CharacterArt.shadow(lighting).map { element($0, colors: colors) }.joined())
-            + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g></g>"
+        return (shadow.map { CharacterArt.shadow($0).map { element($0, colors: colors) }.joined() } ?? "")
+            + "<g transform=\"translate(0,\(f(pose.bob))) scale(\(f(scaleX)),\(f(pose.stretch)))\">\(inner)</g>"
     }
 
     static func seatedLegs(_ actor: StageActor, _ seat: LoungeSeat, outline: [CharacterArt.OutlineLayer] = []) -> String {
@@ -209,15 +227,25 @@ public enum SVGRenderer {
     }
 
     public static func resolve(_ paint: Paint, colors: CharacterArt.Colors?) -> ArtColor {
+        let colors = colors ?? defaultColors
         switch paint {
-        case .swatch(let swatch): swatch.color
-        case .color(let color): color
-        case .skin: colors?.skin ?? ArtColor(0xFBDDC8)
-        case .hair: colors?.hair ?? ArtColor(0x3B2F3A)
-        case .top: colors?.top ?? ArtColor(0x9FD8C7)
-        case .pants: colors?.pants ?? ArtColor(0x5D5670)
+        case .swatch(let swatch): return swatch.color
+        case .color(let color): return color
+        case .skin: return colors.skin
+        case .hair: return colors.hair
+        case .top: return colors.top
+        case .pants: return colors.pants
+        case .skinShade: return colors.skinShade
+        case .hairShine: return colors.hairShine
+        case .hairShade: return colors.hairShade
+        case .topShade: return colors.topShade
+        case .topLight: return colors.topLight
         }
     }
+
+    /// 직원 색을 모를 때 쓰는 색
+    static let defaultColors = CharacterArt.Colors(
+        skin: ArtColor(0xFBDDC8), hair: ArtColor(0x3B2F3A), top: ArtColor(0x9FD8C7), pants: ArtColor(0x5D5670))
 
     static func f(_ value: Double) -> String {
         VectorPath.format(value)

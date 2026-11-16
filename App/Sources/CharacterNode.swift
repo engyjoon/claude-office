@@ -38,6 +38,7 @@ final class CharacterNode: SKNode {
     private var outlineNodes: [SKNode] = []
     private var shownOutline: OutlineKey?
     private let appearance: Appearance
+    private let outfit: CharacterArt.Outfit
     private var shownExpression: FacialExpression?
     private var shownProp: Prop??
     private var shownHandGesture: BodyGesture?
@@ -73,12 +74,14 @@ final class CharacterNode: SKNode {
         self.bakeScale = bakeScale
         self.appearance = appearance
         self.teamColor = teamColor
+        let outfit = CharacterArt.outfit(for: appearance)
+        self.outfit = outfit
         colors = CharacterArt.colors(for: appearance)
         hairBack = ArtNodes.node(for: CharacterArt.hairBack(style: appearance.hairStyle), colors: colors, scale: bakeScale)
         leftLeg = ArtNodes.node(for: CharacterArt.leftLeg, colors: colors, scale: bakeScale)
         rightLeg = ArtNodes.node(for: CharacterArt.rightLeg, colors: colors, scale: bakeScale)
-        leftArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, scale: bakeScale)
-        rightArm = ArtNodes.node(for: CharacterArt.arm, colors: colors, scale: bakeScale)
+        leftArm = ArtNodes.node(for: CharacterArt.arm(outfit), colors: colors, scale: bakeScale)
+        rightArm = ArtNodes.node(for: CharacterArt.arm(outfit), colors: colors, scale: bakeScale)
         super.init()
 
         addChild(shadow)
@@ -102,8 +105,9 @@ final class CharacterNode: SKNode {
 
         headContent.position = CGPoint(x: 0, y: 20)
         headPivot.addChild(headContent)
-        headContent.addChild(ArtNodes.node(for: CharacterArt.face, colors: colors, scale: bakeScale))
-        eyes.position = Self.local(MapPoint(0, 1))  // 눈높이를 축으로 세로로 깜빡입니다
+        // 귀는 얼굴 원보다 먼저 그려 바깥쪽 반만 보입니다
+        headContent.addChild(ArtNodes.node(for: CharacterArt.ears + CharacterArt.face, colors: colors, scale: bakeScale))
+        eyes.position = Self.local(MapPoint(0, CharacterArt.eyeLine))  // 눈높이를 축으로 세로로 깜빡입니다
         headContent.addChild(eyes)
         headContent.addChild(faceDetails)
         body.addChild(headPivot)
@@ -137,7 +141,7 @@ final class CharacterNode: SKNode {
         if shownStar != star {
             shownStar = star
             torso.removeAllChildren()
-            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star), colors: colors, scale: bakeScale))
+            torso.addChild(ArtNodes.node(for: CharacterArt.body(isLead: star, outfit: outfit), colors: colors, scale: bakeScale))
         }
         if shownExpression != actor.expression {
             shownExpression = actor.expression
@@ -218,10 +222,10 @@ final class CharacterNode: SKNode {
             attach(CharacterArt.rightLeg, to: rightLeg)
         }
         attach(CharacterArt.hairBack(style: appearance.hairStyle), to: hairBack)
-        attach(CharacterArt.body(isLead: key.star), to: torso)
+        attach(CharacterArt.body(isLead: key.star, outfit: outfit), to: torso)
         attach(CharacterArt.headOutline(appearance), to: headContent)
-        attach(CharacterArt.arm, to: leftArm)
-        attach(CharacterArt.arm, to: rightArm)
+        attach(CharacterArt.arm(outfit), to: leftArm)
+        attach(CharacterArt.arm(outfit), to: rightArm)
         attach(CharacterArt.handProp(key.prop), to: handProp)
         attach(CharacterArt.handGesture(key.handGesture), to: handGesture)
         attach(CharacterArt.heldProp(key.prop), to: heldProp)
@@ -235,8 +239,9 @@ final class CharacterNode: SKNode {
 
     private func rebuildFace(_ expression: FacialExpression) {
         eyes.removeAllChildren()
-        // 눈 도형을 눈높이(y=1) 기준으로 옮겨서 넣습니다
-        eyes.addChild(ArtNodes.node(for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -1)), colors: colors, scale: bakeScale))
+        // 눈 도형을 눈높이 기준으로 옮겨서 넣습니다
+        eyes.addChild(ArtNodes.node(
+            for: CharacterArt.eyes(expression).transformed(offset: MapPoint(0, -CharacterArt.eyeLine)), colors: colors, scale: bakeScale))
         faceDetails.removeAllChildren()
         let details = CharacterArt.blush(expression) + CharacterArt.mouth(expression) + CharacterArt.hairFront(style: appearance.hairStyle)
             + CharacterArt.brows(expression) + CharacterArt.accessory(appearance.accessory) + CharacterArt.effects(expression)

@@ -62,7 +62,7 @@ public enum NightPalette {
         switch paint {
         case .swatch(let swatch): .color(color(swatch.color))
         case .color(let day): .color(color(day))
-        case .skin, .hair, .top, .pants: paint
+        case .skin, .hair, .top, .pants, .skinShade, .hairShine, .hairShade, .topShade, .topLight: paint
         }
     }
 }
@@ -145,6 +145,8 @@ public enum Paint: Hashable, Sendable {
     case swatch(Swatch)
     case color(ArtColor)
     case skin, hair, top, pants
+    /// 부위 색에서 만든 색 (`CharacterArt.Colors`): 살의 그늘, 머리 윤기·결, 옷의 솔기·밝은 무늬
+    case skinShade, hairShine, hairShade, topShade, topLight
 }
 
 public enum TextAnchor: String, Hashable, Sendable {

@@ -46,7 +46,7 @@ public enum AppIconArt {
         let toHead = MapPoint(-CharacterArt.headOrigin.x, -CharacterArt.headOrigin.y)
         let style = appearance.hairStyle
         var shapes = CharacterArt.hairBack(style: style)
-            + CharacterArt.body(isLead: full).map { $0.transformed(offset: toHead) }
+            + CharacterArt.body(isLead: full, outfit: CharacterArt.outfit(for: appearance)).map { $0.transformed(offset: toHead) }
             + CharacterArt.face + CharacterArt.eyes(.happy)
             + (full ? CharacterArt.blush(.happy) : [])
             + CharacterArt.mouth(.happy) + CharacterArt.hairFront(style: style)

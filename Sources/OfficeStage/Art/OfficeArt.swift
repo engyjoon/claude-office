@@ -37,7 +37,7 @@ public enum OfficeArt {
         // 행 표지는 스스로 조명·대비를 맞춥니다 (밤에도 행 색을 밝게 둠, M6(8)). 깊이 −∞ 층들 가운데 나중에 두어 바닥·러그 위에 그립니다.
         layers += signs
         // 벽 가구는 스스로 밤 색을 칠합니다 (창밖 그림이 낮·밤으로 다름). 바탕 바로 뒤에 둡니다.
-        layers.insert(contentsOf: wallFurniture(layout, lighting: lighting), at: 1)
+        layers.insert(contentsOf: wallFurniture(layout, lighting: lighting, lounge: lounge), at: 1)
         if lighting == .night, lounge {
             // 소파 옆 스탠드와 그 불빛 (휴게 공간은 늘 켜 둠). 불빛은 바닥·러그 위, 가구 아래.
             layers.insert(ArtLayer("lounge-light", depth: -.infinity, loungeGlow()), at: 1)
@@ -78,109 +78,153 @@ public enum OfficeArt {
         let top = min(area.y, 0)
         let bottom = max(area.maxY, layout.height)
         let width = right - left
-        // 벽 · 걸레받이(벽 아래 10pt) · 바닥
+        // 벽 · 허리 판벽(벽 아래 44pt, 세로 홈 64pt마다) · 걸레받이(벽 아래 10pt) · 바닥
         let wall = OfficeLayout.wallBottom
         var shapes: [ArtShape] = [
             .rect(left, top, width, wall - top, fill: .swatch(.wall), outline: false),
+            .rect(left, wall - 44, width, 34, fill: .swatch(.wallTrim), outline: false),
+            .rect(left, wall - 46.5, width, 2.5, fill: .swatch(.baseboard), outline: false),
             .rect(left, wall - 10, width, 10, fill: .swatch(.baseboard), outline: false),
             .rect(left, wall, width, bottom - wall, fill: .swatch(.floor), outline: false),
         ]
-        // 바닥 줄눈: 가로줄은 36pt마다, 세로줄은 210pt마다 한 줄씩 엇갈립니다 (사무실 밖으로도 같은 무늬)
+        var groove = (left / 64).rounded(.down) * 64 + 32
+        while groove < right {
+            shapes.append(.rect(groove, wall - 39, 1.5, 24, r: 0.75, fill: .swatch(.wall), outline: false))
+            groove += 64
+        }
+        // 마루: 가로줄은 36pt마다, 세로 이음매는 210pt마다 한 줄씩 엇갈립니다 (사무실 밖으로도 같은 무늬).
+        // 널 몇 장은 조금 짙게 칠하고 짧은 나뭇결을 넣습니다 (널 번호로 정해 늘 같은 자리).
         var y = wall + 36
         var row = 0
         let limit = extent == nil ? bottom : bottom + 36  // 화면을 채울 때는 맨 아래 반쪽 줄까지
         while y < limit {
             shapes.append(.rect(left, y, width, 2, fill: .swatch(.floorLine), outline: false))
-            var x = row % 2 == 1 ? 60.0 : 150.0
-            while x - 210 >= left { x -= 210 }
-            while x < right {
-                shapes.append(.rect(x, y - 34, 2, 34, fill: .swatch(.floorLine), outline: false))
-                x += 210
+            let base = row % 2 == 1 ? 60.0 : 150.0
+            var plank = ((left - base) / 210).rounded(.down)
+            while base + plank * 210 < right {
+                let x = base + plank * 210
+                if x >= left { shapes.append(.rect(x, y - 34, 2, 34, fill: .swatch(.floorLine), outline: false)) }
+                let seed = StableHashLite.value("plank \(row) \(Int(plank))")
+                if seed % 4 == 0 {
+                    shapes.append(.rect(x + 2, y - 34, 208, 34, fill: .swatch(.floorLine), outline: false, opacity: 0.36))
+                }
+                let grainX = x + 16 + Double(seed % 140)
+                let grainY = y - 26 + Double((seed / 7) % 16)
+                shapes.append(.rect(grainX, grainY, 14 + Double(seed % 15), 1.3, r: 0.65, fill: .swatch(.floorLine), outline: false))
+                if seed % 3 == 0 {
+                    shapes.append(.rect(grainX + 22, grainY + 5, 9, 1.3, r: 0.65, fill: .swatch(.floorLine), outline: false))
+                }
+                plank += 1
             }
             y += 36
             row += 1
         }
-        // 행 러그: 메인 색 (책상 수만큼)
+        // 벽 바로 아래 바닥에 떨어지는 옅은 그늘
+        shapes.append(.rect(left, wall, width, 5, fill: .swatch(.shadow), outline: false, opacity: 0.55))
+        // 행 러그: 메인 색 (책상 수만큼) + 안쪽 테두리 한 줄
         for row in layout.rows {
             let color = teams.first { $0.id == row.team }?.colorIndex ?? 0
+            let swatch = Swatch.teamRugs[color % 4]
             let from = OfficeLayout.deskX(0) - 52
             let to = row.endX + 11
-            shapes.append(.rect(from, row.deskY - 84, to - from, 112, r: 26, fill: .swatch(Swatch.teamRugs[color % 4]), outline: false, opacity: 0.5))
+            shapes.append(.rect(from, row.deskY - 84, to - from, 112, r: 26, fill: .swatch(swatch), outline: false, opacity: 0.5))
+            shapes.append(ArtShape(.rect(MapRect(from + 6, row.deskY - 78, to - from - 12, 100), radius: 20), stroke: .swatch(swatch), lineWidth: 1.6))
         }
-        // 휴게 공간 러그(소파 구역), 안마 구역 러그, 현관 매트
+        // 휴게 공간 러그(소파 구역, 양 끝에 술), 안마 구역 러그, 현관 매트
         if lounge {
             let sofas = OfficeLayout.sofaArea
+            let trim = Paint.color(ArtColor(0xC3B8E6))
+            var fringe = ""
+            var fy = sofas.y + 27
+            while fy <= sofas.maxY - 27 {
+                fringe += "M\(sofas.x - 4.5),\(fy) H\(sofas.x + 1) M\(sofas.maxX - 1),\(fy) H\(sofas.maxX + 4.5) "
+                fy += 6
+            }
+            shapes.append(.line(fringe, width: 1.5, color: trim))
             shapes.append(.rect(sofas.x, sofas.y, sofas.width, sofas.height, r: 26, fill: .swatch(.rugC), outline: false, opacity: 0.8))
+            shapes.append(ArtShape(.rect(MapRect(sofas.x + 6, sofas.y + 6, sofas.width - 12, sofas.height - 12), radius: 20), stroke: trim, lineWidth: 1.6))
             let m = OfficeLayout.massageArea
             shapes.append(.rect(m.x, m.y + 4, m.width, m.height - 6, r: 22, fill: .color(ArtColor(0xD4E2F2)), outline: false, opacity: 0.85))
+            shapes.append(ArtShape(.rect(MapRect(m.x + 6, m.y + 10, m.width - 12, m.height - 18), radius: 16), stroke: .color(ArtColor(0xB6CBE6)), lineWidth: 1.6))
         }
-        shapes.append(.rect(layout.doorX + 4, wall + 2, OfficeLayout.doorWidth - 8, 10, r: 5, fill: .swatch(.rugC)))
+        let mat = MapRect(layout.doorX + 5, wall + 2.5, OfficeLayout.doorWidth - 10, 11)
+        shapes.append(.rect(mat.x, mat.y, mat.width, mat.height, r: 4.5, fill: .swatch(.rugB), width: 1.5))
+        shapes.append(ArtShape(.rect(mat.insetBy(3), radius: 2.5), stroke: .swatch(.white), lineWidth: 1.1, dash: 2.4))
         return shapes
     }
 
-    static func wallFurniture(_ layout: OfficeLayout, lighting: Lighting = .day) -> [ArtLayer] {
-        var shapes: [ArtShape] = []
-        // 벽시계 (액자와 화이트보드 사이)
-        let clock = layout.clockCenter
-        shapes += [
-            .circle(clock.x, clock.y, 18, fill: .swatch(.white)),
-            .line("M\(clock.x),\(clock.y) L\(clock.x),\(clock.y - 11) M\(clock.x),\(clock.y) L\(clock.x + 8),\(clock.y + 4)"),
-            .circle(clock.x, clock.y, 2, fill: .swatch(.ink), outline: false),
-        ]
-        // 화이트보드 (위로 올림: 윗변 y = wallArtTop)
-        let board = MapPoint(layout.whiteboardX - 512, OfficeLayout.wallArtTop - 36)
-        shapes += [
-            .rect(512, 36, OfficeLayout.whiteboardWidth, 80, r: 6, fill: .swatch(.board)),
-            .line("M528,54 h8 v8 h-8 z M542,58 h56 M528,72 h8 v8 h-8 z M542,76 h44 M528,90 h8 v8 h-8 z M542,94 h66", width: 1.5),
-            .line("M529,57 l3,3 l5,-6 M529,75 l3,3 l5,-6", width: 2, color: .swatch(.check)),
-            .rect(532, 116, 88, 6, r: 3, fill: .swatch(.wallTrim)),
-            .rect(600, 111, 12, 5, r: 2, fill: .swatch(.alert), outline: false),
-        ].transformed(offset: board)
-        // 출입문 (벽과 바닥의 경계에 섭니다)
-        let door = layout.doorX
-        let wall = OfficeLayout.wallBottom
-        shapes += [
-            .rect(door, wall - 112, OfficeLayout.doorWidth, 112, r: 6, fill: .swatch(.woodDark)),
-            .rect(door + 8, wall - 104, OfficeLayout.doorWidth - 16, 104, r: 4, fill: .swatch(.wood)),
-            .rect(door + 20, 68, 32, 30, r: 4, fill: .swatch(.sky)),
-            .circle(door + 54, 114, 3.5, fill: .swatch(.butter)),
-        ]
+    static func wallFurniture(_ layout: OfficeLayout, lighting: Lighting = .day, lounge: Bool = true) -> [ArtLayer] {
+        // 벽시계 (풍경 창과 화이트보드 사이) · 화이트보드 (윗변 y = wallArtTop) · 출입문 · 탕비 코너
+        var shapes = clock(at: layout.clockCenter)
+        shapes += whiteboard(at: MapPoint(layout.whiteboardX, OfficeLayout.wallArtTop))
+        shapes += door(x: layout.doorX)
         shapes += pantry().transformed(offset: MapPoint(layout.pantryX - pantryDesignX, 0))
-        // 풍경 창 (뒷벽 왼쪽, 가로로 긴 액자): 낮에는 정원, 밤에는 밤하늘
+        // 벽 앞 꾸밈 (걷는 영역보다 위): 화이트보드와 문 사이 우산꽂이, 문과 냉장고 사이 게시판, 소파와 안마 의자 사이 큰 화분
+        shapes += umbrellaStand(at: MapPoint(layout.doorX - 24, OfficeLayout.wallBottom + 7))
+        shapes += noticeBoard(centerX: layout.doorX + OfficeLayout.doorWidth + (OfficeLayout.doorToPantry - OfficeLayout.doorWidth) / 2)
+        if lounge {
+            let gap = (OfficeLayout.sofaArea.maxX + OfficeLayout.massageArea.x) / 2
+            shapes += floorPlant(at: MapPoint(gap, OfficeLayout.wallBottom + 9))
+        }
+        // 풍경 창 (뒷벽 왼쪽, 가로로 긴 창): 낮에는 정원, 밤에는 밤하늘
         let window = lighting == .night ? nightWindow(in: layout.gardenFrame) : garden(in: layout.gardenFrame)
         return [ArtLayer("wall", depth: -.infinity, window + shapes.lit(lighting))]
     }
 
-    /// 가로로 긴 녹색 정원 그림 액자: 하늘, 겹친 언덕, 나무, 꽃, 오솔길
+    /// 풍경 창 (낮): 하늘과 뭉게구름, 겹친 언덕, 빨간 지붕 집, 나무, 꽃, 오솔길. 그 위에 창살·커튼·창턱.
     static func garden(in frame: MapRect) -> [ArtShape] {
         let x = frame.x, y = frame.y, w = frame.width, h = frame.height
         let ix = x + 7, iy = y + 7, iw = w - 14, ih = h - 14
-        var shapes: [ArtShape] = [
-            .rect(x, y, w, h, r: 6, fill: .swatch(.woodDark)),
+        let dressing = windowDressing(frame)
+        var shapes: [ArtShape] = dressing.back + [
             .rect(ix, iy, iw, ih, r: 3, fill: .color(ArtColor(0xDDF0F7)), outline: false),
-            .circle(ix + iw * 0.86, iy + 14, 7, fill: .swatch(.butter), width: 1.1),
-            .ellipse(ix + iw * 0.22, iy + 13, 14, 5, fill: .swatch(.white), outline: false),
-            .ellipse(ix + iw * 0.55, iy + 10, 11, 4, fill: .swatch(.white), outline: false, opacity: 0.9),
+            .rect(ix, iy + ih * 0.28, iw, ih * 0.4, fill: .color(ArtColor(0xEAF6F4)), outline: false),
+            .circle(ix + iw * 0.84, iy + 14, 10.5, fill: .swatch(.butter), outline: false, opacity: 0.35),
+            .circle(ix + iw * 0.84, iy + 14, 7, fill: .swatch(.butter), width: 1.1),
+        ]
+        shapes += cloud(ix + iw * 0.2, iy + 15, 1.15) + cloud(ix + iw * 0.52, iy + 11, 0.85, opacity: 0.92) + cloud(ix + iw * 0.68, iy + 19, 0.6, opacity: 0.85)
+        // 새 두 마리
+        let bx = ix + iw * 0.36, by = iy + 13
+        shapes.append(.line("M\(bx),\(by) q2,-2.4 4,0 q2,-2.4 4,0 M\(bx + 11),\(by + 4) q1.6,-2 3.2,0 q1.6,-2 3.2,0", width: 0.9, opacity: 0.55))
+        shapes += [
             // 뒤 언덕 → 앞 언덕
             .path("M\(ix),\(iy + ih * 0.62) C\(ix + iw * 0.25),\(iy + ih * 0.30) \(ix + iw * 0.55),\(iy + ih * 0.62) \(ix + iw * 0.75),\(iy + ih * 0.42) "
                 + "C\(ix + iw * 0.88),\(iy + ih * 0.32) \(ix + iw),\(iy + ih * 0.48) \(ix + iw),\(iy + ih * 0.48) L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
-                  fill: .color(ArtColor(0x9FD8B4)), outline: false),
+                  fill: .color(ArtColor(0xA9DDB9)), outline: false),
+        ]
+        // 뒤 언덕 위의 집과 뾰족한 나무
+        let hx = ix + iw * 0.4, hy = iy + ih * 0.53
+        shapes += [
+            .rect(hx - 6.5, hy - 8, 13, 9, r: 0.8, fill: .color(ArtColor(0xFFF8EE)), width: 1),
+            .path("M\(hx - 8.6),\(hy - 7.4) L\(hx),\(hy - 15) L\(hx + 8.6),\(hy - 7.4) Z", fill: .swatch(.alert), width: 1),
+            .rect(hx - 4.4, hy - 4.8, 3.2, 5.8, fill: .swatch(.woodDark), outline: false),
+            .rect(hx + 1, hy - 5.4, 3.6, 3.2, fill: .swatch(.skyBlue), width: 0.7),
+        ]
+        for (fx, fy, scale) in [(0.55, 0.58, 1.0), (0.59, 0.56, 0.75), (0.47, 0.54, 0.7)] {
+            let tx = ix + iw * fx, base = iy + ih * fy
+            shapes += [
+                .path("M\(tx - 4.6 * scale),\(base) L\(tx),\(base - 10 * scale) L\(tx + 4.6 * scale),\(base) Z", fill: .color(leafDeep), width: 0.9),
+                .path("M\(tx - 3.6 * scale),\(base - 5.6 * scale) L\(tx),\(base - 14 * scale) L\(tx + 3.6 * scale),\(base - 5.6 * scale) Z", fill: .color(leafDeep), width: 0.9),
+            ]
+        }
+        shapes += [
             .path("M\(ix),\(iy + ih * 0.80) C\(ix + iw * 0.30),\(iy + ih * 0.58) \(ix + iw * 0.62),\(iy + ih * 0.86) \(ix + iw),\(iy + ih * 0.66) "
                 + "L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
-                  fill: .color(ArtColor(0x7CBF9E)), outline: false),
+                  fill: .color(ArtColor(0x86C9A9)), outline: false),
             // 오솔길
             .path("M\(ix + iw * 0.46),\(iy + ih) C\(ix + iw * 0.50),\(iy + ih * 0.86) \(ix + iw * 0.58),\(iy + ih * 0.80) \(ix + iw * 0.62),\(iy + ih * 0.74) "
                 + "L\(ix + iw * 0.65),\(iy + ih * 0.75) C\(ix + iw * 0.63),\(iy + ih * 0.84) \(ix + iw * 0.60),\(iy + ih * 0.92) \(ix + iw * 0.58),\(iy + ih) Z",
-                  fill: .color(ArtColor(0xF3E3C3)), outline: false),
+                  fill: .color(ArtColor(0xF6E8CB)), outline: false),
         ]
-        // 나무 (줄기 + 둥근 잎)
-        for (fx, scale) in [(0.12, 1.0), (0.30, 0.8), (0.80, 0.95), (0.93, 0.7)] {
+        // 둥근 나무 (줄기 + 겹친 잎)
+        for (fx, scale) in [(0.13, 1.0), (0.29, 0.8), (0.79, 0.95), (0.92, 0.7)] {
             let tx = ix + iw * fx
             let base = iy + ih * 0.72
             shapes += [
-                .rect(tx - 2, base - 12 * scale, 4, 12 * scale, r: 1.5, fill: .swatch(.woodDark), outline: false),
+                .rect(tx - 1.8, base - 12 * scale, 3.6, 12 * scale, r: 1.5, fill: .swatch(.woodDark), outline: false),
                 .circle(tx, base - 18 * scale, 10 * scale, fill: .swatch(.mint), width: 1.1),
-                .circle(tx - 5 * scale, base - 14 * scale, 6 * scale, fill: .color(ArtColor(0x86C9A9)), outline: false),
+                .circle(tx - 4.6 * scale, base - 14.6 * scale, 5.6 * scale, fill: .color(leafMid), outline: false),
+                .circle(tx + 3.6 * scale, base - 21.6 * scale, 3 * scale, fill: .color(ArtColor(0xBDE6D8)), outline: false),
             ]
         }
         // 꽃
@@ -190,20 +234,22 @@ public enum OfficeArt {
         ]
         for (fx, fy, color) in flowers {
             shapes.append(.circle(ix + iw * fx, iy + ih * fy, 2.4, fill: .swatch(color), width: 0.8))
+            shapes.append(.circle(ix + iw * fx, iy + ih * fy, 0.8, fill: .swatch(.white), outline: false))
         }
-        shapes.append(ArtShape(.rect(MapRect(ix, iy, iw, ih), radius: 3), stroke: .swatch(.ink), lineWidth: 1.2))
-        return shapes
+        return shapes + dressing.front
     }
 
     // MARK: - 밤 (M6(6))
 
-    /// 밤 풍경 창: 남색 하늘, 별, 초승달, 어두운 언덕, 먼 마을 불빛. 별은 반짝이지 않습니다 (계속 다시 그리지 않게).
+    /// 밤 풍경 창: 남색 하늘, 별, 초승달, 어두운 언덕, 불 켜진 집과 먼 마을 불빛. 별은 반짝이지 않습니다 (계속 다시 그리지 않게).
+    /// 창틀·커튼·창턱은 낮 그림을 밤 팔레트로 칠해 씁니다.
     static func nightWindow(in frame: MapRect) -> [ArtShape] {
         let x = frame.x, y = frame.y, w = frame.width, h = frame.height
         let ix = x + 7, iy = y + 7, iw = w - 14, ih = h - 14
         let sky = ArtColor(0x27315E)
-        var shapes: [ArtShape] = [
-            ArtShape.rect(x, y, w, h, r: 6, fill: .swatch(.woodDark)).lit(.night),
+        let dressing = windowDressing(frame)
+        let ink = Paint.color(NightPalette.color(Swatch.ink.color))
+        var shapes: [ArtShape] = dressing.back.lit(.night) + [
             .rect(ix, iy, iw, ih, r: 3, fill: .color(sky), outline: false),
             .rect(ix, iy + ih * 0.55, iw, ih * 0.45, fill: .color(ArtColor(0x33407A)), outline: false, opacity: 0.6),
         ]
@@ -216,17 +262,23 @@ public enum OfficeArt {
             let opacity = 0.6 + Double(StableHashLite.value("star-o\(index)") % 40) / 100
             shapes.append(.circle(ix + iw * min(max(fx, 0.02), 0.98), iy + 4 + ih * fy, radius, fill: .color(ArtColor(0xFFF6D8)), outline: false, opacity: opacity))
         }
-        // 초승달 (달 원 위에 하늘색 원을 겹침)
-        let moon = MapPoint(ix + iw * 0.86, iy + 15)
+        // 초승달 (옅은 달무리 → 달 원 위에 하늘색 원을 겹침)
+        let moon = MapPoint(ix + iw * 0.84, iy + 15)
         shapes += [
-            ArtShape(.circle(center: moon, radius: 8), fill: .color(ArtColor(0xFFF1B8)), stroke: .color(NightPalette.color(Swatch.ink.color)), lineWidth: 1.1),
+            .circle(moon.x, moon.y, 12, fill: .color(ArtColor(0xFFF1B8)), outline: false, opacity: 0.12),
+            ArtShape(.circle(center: moon, radius: 8), fill: .color(ArtColor(0xFFF1B8)), stroke: ink, lineWidth: 1.1),
             .circle(moon.x + 4, moon.y - 3, 7, fill: .color(sky), outline: false),
         ]
-        // 언덕 (뒤 → 앞)
+        // 언덕 (뒤 → 앞), 뒤 언덕 위의 불 켜진 집
+        let hx = ix + iw * 0.4, hy = iy + ih * 0.57
         shapes += [
             .path("M\(ix),\(iy + ih * 0.66) C\(ix + iw * 0.25),\(iy + ih * 0.40) \(ix + iw * 0.55),\(iy + ih * 0.70) \(ix + iw * 0.75),\(iy + ih * 0.50) "
                 + "C\(ix + iw * 0.88),\(iy + ih * 0.42) \(ix + iw),\(iy + ih * 0.56) \(ix + iw),\(iy + ih * 0.56) L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
                   fill: .color(ArtColor(0x2F4E57)), outline: false),
+            .rect(hx - 6.5, hy - 8, 13, 9, r: 0.8, fill: .color(ArtColor(0x3D4A6B)), outline: false),
+            .path("M\(hx - 8.6),\(hy - 7.4) L\(hx),\(hy - 15) L\(hx + 8.6),\(hy - 7.4) Z", fill: .color(ArtColor(0x4A3F5E)), outline: false),
+            .rect(hx + 1, hy - 5.4, 3.6, 3.2, fill: .color(ArtColor(0xFFD27A)), outline: false),
+            .rect(hx - 4.4, hy - 4.8, 3.2, 3.2, fill: .color(ArtColor(0xFFD27A)), outline: false, opacity: 0.8),
             .path("M\(ix),\(iy + ih * 0.84) C\(ix + iw * 0.30),\(iy + ih * 0.66) \(ix + iw * 0.62),\(iy + ih * 0.90) \(ix + iw),\(iy + ih * 0.72) "
                 + "L\(ix + iw),\(iy + ih) L\(ix),\(iy + ih) Z",
                   fill: .color(ArtColor(0x253F49)), outline: false),
@@ -235,8 +287,7 @@ public enum OfficeArt {
         for (fx, fy) in [(0.18, 0.78), (0.21, 0.80), (0.52, 0.84), (0.55, 0.82), (0.83, 0.76), (0.90, 0.80)] {
             shapes.append(.rect(ix + iw * fx, iy + ih * fy, 2.4, 2.4, fill: .color(ArtColor(0xFFD27A)), outline: false))
         }
-        shapes.append(ArtShape(.rect(MapRect(ix, iy, iw, ih), radius: 3), stroke: .color(NightPalette.color(Swatch.ink.color)), lineWidth: 1.2))
-        return shapes
+        return shapes + dressing.front.lit(.night)
     }
 
     /// 은은한 불빛: 같은 중심의 반투명 타원을 겹쳐 가운데가 밝고 가장자리로 갈수록 옅어지게 합니다 (렌더러에 그라데이션이 없어도 됨)
@@ -298,40 +349,80 @@ public enum OfficeArt {
     /// 탕비 코너 그림의 왼쪽 끝 x (아래 도형들은 x 908부터 `OfficeLayout.pantryWidth`만큼의 폭에 그린 좌표입니다)
     static let pantryDesignX = 908.0
 
-    /// 탕비 코너 (오른쪽 벽): 냉장고, 정수기, 프린터
+    /// 탕비 코너 (오른쪽 벽): 냉장고(위에 화분, 문에 자석·사진), 정수기, 프린터(받침장 위)와 그 위 벽 선반
     static func pantry() -> [ArtShape] {
-        var shapes: [ArtShape] = [
-            // 냉장고
-            .rect(908, 32, 72, 128, r: 9, fill: .color(ArtColor(0xF4F7F8))),
+        let appliance = Paint.color(ArtColor(0xF4F7F8))
+        let applianceShade = Paint.color(ArtColor(0xDDE4E8))
+        var shapes: [ArtShape] = []
+        // 냉장고 위: 늘어진 덩굴 화분과 바구니
+        shapes += [
+            .line("M922,24 C914,26 913,36 915,46", width: 1.3, color: .color(stemGreen)),
+            .circle(914.6, 34, 2.6, fill: .color(leafLight), width: 1),
+            .circle(915.4, 44, 2.4, fill: .color(leafMid), width: 1),
+            .circle(924, 14.5, 5, fill: .color(leafMid), width: 1.2),
+            .circle(932, 11.5, 5.6, fill: .color(leafLight), width: 1.2),
+            .circle(939, 15, 4.6, fill: .color(leafDeep), width: 1.2),
+        ]
+        shapes += pot(width: 15, height: 9, fill: Swatch.pot.color, rim: potLight, line: 1.2).transformed(offset: MapPoint(931, 32))
+        shapes += [
+            .rect(952, 20, 20, 12, r: 2.4, fill: .swatch(.woodTop), width: 1.3),
+            .line("M952,24.6 H972 M958.6,20 V32 M965.4,20 V32", width: 0.9, color: .swatch(.woodDark)),
+        ]
+        shapes += [
+            // 냉장고 (위 냉동칸, 아래 냉장칸)
+            .rect(908, 32, 72, 128, r: 9, fill: appliance),
+            .rect(972.6, 38, 4, 116, r: 2, fill: applianceShade, outline: false),
             .line("M908,78 L980,78", width: 1.6),
-            .rect(968, 46, 4, 22, r: 2, fill: .swatch(.metal), width: 1.1),
-            .rect(968, 90, 4, 30, r: 2, fill: .swatch(.metal), width: 1.1),
-            .circle(922, 52, 4, fill: .swatch(.peach), width: 1),
-            .rect(930, 96, 14, 10, r: 2, fill: .swatch(.butter), width: 1),
-            .circle(924, 116, 3.5, fill: .swatch(.mint), width: 1),
-            // 정수기
-            .rect(998, 92, 48, 68, r: 7, fill: .color(ArtColor(0xF4F7F8))),
-            .rect(1006, 104, 32, 16, r: 4, fill: .swatch(.rackDark), outline: false),
-            .rect(1012, 108, 5, 7, r: 1.5, fill: .swatch(.skyBlue), outline: false),
-            .rect(1026, 108, 5, 7, r: 1.5, fill: .swatch(.alert), outline: false),
-            .rect(1008, 136, 28, 4, r: 2, fill: .swatch(.metal), width: 1),
+            .rect(966, 46, 4.4, 22, r: 2.2, fill: .swatch(.metal), width: 1.1),
+            .rect(966, 88, 4.4, 30, r: 2.2, fill: .swatch(.metal), width: 1.1),
+            // 자석, 사진, 쪽지
+            .circle(921, 50, 3.6, fill: .swatch(.peach), width: 1),
+            .path("M933,58 l2.6,-4.4 l2.6,4.4 z", fill: .swatch(.mint), width: 1),
+            .rect(917, 92, 13, 15, r: 1.2, fill: .swatch(.white), width: 1),
+            .rect(918.8, 93.8, 9.4, 8.4, fill: .swatch(.sky), outline: false),
+            .circle(923.4, 98.6, 2, fill: .swatch(.butter), outline: false),
+            .rect(935, 98, 11, 11, r: 1.2, fill: .swatch(.butter), width: 1),
+            .line("M937.4,102 h6 M937.4,105 h4", width: 0.8, color: .swatch(.plateInk), opacity: 0.6),
+            .circle(940.6, 97.6, 1.5, fill: .swatch(.alert), width: 0.8),
+            .circle(924, 120, 3.2, fill: .swatch(.lavender), width: 1),
+            .line("M916,156.4 H972", width: 1.2, color: applianceShade),
+            // 정수기: 물통(물결·반짝임·공기 방울) → 본체 → 조작판 → 물받이
             .rect(1008, 40, 28, 52, r: 10, fill: .swatch(.drop), opacity: 0.85),
-            .rect(1014, 48, 5, 30, r: 2.5, fill: .swatch(.white), outline: false, opacity: 0.6),
+            .rect(1010.4, 42.4, 23.2, 8, r: 4, fill: .swatch(.white), outline: false, opacity: 0.55),
+            .rect(1013, 54, 4.4, 26, r: 2.2, fill: .swatch(.white), outline: false, opacity: 0.6),
+            .circle(1027, 72, 1.7, fill: .swatch(.white), outline: false, opacity: 0.75),
+            .circle(1023.4, 64, 1.2, fill: .swatch(.white), outline: false, opacity: 0.75),
+            .circle(1028, 58, 0.9, fill: .swatch(.white), outline: false, opacity: 0.75),
             .rect(1014, 86, 16, 8, r: 2, fill: .swatch(.metal), width: 1.2),
-            // 프린터 (받침장 위): 뒤로 꽂힌 종이, 본체, 조작판, 앞으로 나온 인쇄물
+            .rect(998, 92, 48, 68, r: 7, fill: appliance),
+            .rect(1039.6, 98, 3.6, 56, r: 1.8, fill: applianceShade, outline: false),
+            .rect(1006, 104, 32, 17, r: 4, fill: .swatch(.rackDark), outline: false),
+            .rect(1011.4, 108, 5.4, 8, r: 1.6, fill: .swatch(.skyBlue), outline: false),
+            .rect(1025.4, 108, 5.4, 8, r: 1.6, fill: .swatch(.alert), outline: false),
+            .rect(1011.4, 116, 5.4, 2.4, fill: .swatch(.metalDot), outline: false),
+            .rect(1025.4, 116, 5.4, 2.4, fill: .swatch(.metalDot), outline: false),
+            .rect(1008, 136, 28, 4.4, r: 2.2, fill: .swatch(.metal), width: 1),
+            // 물받이 위의 종이컵
+            .path("M1018.6,129 h7 l-1,7 h-5 z", fill: .swatch(.white), width: 1),
+            // 프린터 받침장 (문 두 짝)
             .rect(1060, 118, 50, 42, r: 5, fill: .swatch(.wood)),
             .rect(1058, 112, 54, 8, r: 3, fill: .swatch(.woodTop)),
-            .line("M1066,136 L1104,136", width: 1.2),
+            .line("M1085,122 V157", width: 1.2, color: .swatch(.woodDark)),
+            .circle(1081, 138, 1.5, fill: .swatch(.woodDark), outline: false),
+            .circle(1089, 138, 1.5, fill: .swatch(.woodDark), outline: false),
+            // 프린터: 뒤로 꽂힌 종이, 본체, 조작판, 앞으로 나온 인쇄물
             .rect(1070, 68, 30, 18, r: 1.5, fill: .swatch(.white), width: 1.2),
+            .line("M1075,73 h20 M1075,77 h14", width: 0.8, color: .swatch(.plateInk), opacity: 0.45),
             .rect(1062, 80, 46, 32, r: 6, fill: .color(ArtColor(0xE6EAEE))),
-            .rect(1062, 80, 46, 8, r: 4, fill: .color(ArtColor(0xCDD4DB)), outline: false),
+            .rect(1062.9, 80.9, 44.2, 7.6, r: 4, fill: .color(ArtColor(0xCDD4DB)), outline: false),
             .rect(1090, 92, 13, 7, r: 2, fill: .swatch(.screenGlow), width: 1),
-            .circle(1070, 95, 2.4, fill: .swatch(.mint), width: 0.9),
-            .circle(1078, 95, 2.4, fill: .swatch(.alert), width: 0.9),
+            .circle(1070, 95.5, 2.4, fill: .swatch(.mint), width: 0.9),
+            .circle(1078, 95.5, 2.4, fill: .swatch(.alert), width: 0.9),
             .rect(1068, 103, 34, 4, r: 2, fill: .swatch(.rackDark), outline: false),
             .rect(1071, 105, 28, 10, r: 1.5, fill: .swatch(.white), width: 1.1),
             .line("M1075,109 L1094,109 M1075,112 L1088,112", width: 0.8),
         ]
+        shapes += shelf(x: 1056, y: 50)
         return shapes
     }
 
@@ -376,8 +467,13 @@ public enum OfficeArt {
         var desk: [ArtShape] = [
             .rect(left, top, width, 11, r: 4, fill: .swatch(.woodTop)),
             .rect(left, top + 9, width, y + OfficeLayout.deskBottom - (top + 9), r: 5, fill: .swatch(.wood)),
+            // 상판의 빛 줄과 앞판 안쪽 홈
+            .line("M\(left + 6),\(top + 3.4) H\(left + 26) M\(left + 30),\(top + 3.4) H\(left + 33)", width: 1.3, color: .swatch(.plate), opacity: 0.75),
+            ArtShape(.rect(MapRect(left + 5, top + 13.5, width - 10, 18), radius: 3.5), stroke: .swatch(.woodDark), lineWidth: 1.1, opacity: 0.6),
+            // 노트북 (뒷면: 덮개와 로고, 아래에 본체)
+            .rect(x - 42, y - 33.6, 30, 3.2, r: 1.6, fill: .color(ArtColor(0xD3D8E3)), width: 1.1),
             .rect(x - 40, y - 46, 26, 14, r: 3, fill: .swatch(.metal)),
-            .circle(x - 27, y - 39, 2, fill: .swatch(.metalDot), outline: false),
+            .circle(x - 27, y - 39, 2.1, fill: .swatch(.metalDot), outline: false),
         ]
         if let plate {
             let (text, textWidth) = fitted(plate, size: plateFontSize, maxWidth: width - 4 - 2 * platePadding)
@@ -390,11 +486,21 @@ public enum OfficeArt {
                 .text(text, x, plateCenter + plateTextDrop, size: plateFontSize, bold: true, baseline: .central),
             ]
         }
+        // 상판 오른쪽 뒤: 메인 책상은 화분, 서브 책상은 자리마다 다른 소품
         if plant {
-            desk += self.plant(at: MapPoint(x + 29, y - 33), scale: 0.4)
+            desk += self.plant(at: MapPoint(x + 29, y - 31), scale: 0.42)
+        } else {
+            desk += deskItem(chair, at: MapPoint(x + 28, y - 30.5))
         }
+        let chairColor = ArtColor(chairColors[chair % 4])
         return [
-            ArtLayer("chair-\(name)", depth: y - 1, [.rect(x - 17, y - 60, 34, 36, r: 11, fill: .color(ArtColor(chairColors[chair % 4])))]),
+            ArtLayer("chair-\(name)", depth: y - 1, [
+                // 책상 아래 바닥의 옅은 그늘 → 의자 등받이 (안쪽 쿠션, 윗선 빛)
+                .rect(left + 3, y + OfficeLayout.deskBottom - 3, width - 6, 7.5, r: 3.5, fill: .swatch(.shadow), outline: false, opacity: 0.6),
+                .rect(x - 17, y - 60, 34, 36, r: 11, fill: .color(chairColor)),
+                .rect(x - 12, y - 55.5, 24, 24, r: 7.5, fill: .color(chairColor.mixed(with: ArtColor(0xFFFFFF), amount: 0.28)), outline: false),
+                .line("M\(x - 6),\(y - 51.6) H\(x + 3)", width: 1.4, color: .swatch(.white), opacity: 0.7),
+            ]),
             ArtLayer("desk-\(name)", depth: y + 3, desk),
         ]
     }
@@ -514,40 +620,74 @@ public enum OfficeArt {
         // 3인용 소파 (앉는 자리는 `OfficeLayout.sofaSeatY`): 등받이는 앉은 직원 뒤, 앉는 판과 팔걸이는 앞
         let seatY = OfficeLayout.sofaSeatY
         let seats = OfficeLayout.sofaSeatOffsets
+        let sofaDeep = ArtColor(0x9C8FCF), sofaLight = ArtColor(0xB3A7E2), sofaSeam = ArtColor(0x8679BE), sofaShine = ArtColor(0xC9BFEE)
         for (index, sofa) in OfficeLayout.sofas.enumerated() {
             let x = sofa.x
             let y = sofa.y
             let w = sofa.width
-            layers.append(ArtLayer("sofa-back-\(index)", depth: y + 16, [
-                .rect(x + 6, y + 4, w - 12, 38, r: 16, fill: .color(ArtColor(0x9C8FCF))),
-            ]))
+            var back: [ArtShape] = [
+                .rect(x + 6, y + 4, w - 12, 38, r: 16, fill: .color(sofaDeep)),
+                .line("M\(x + 24),\(y + 8.4) H\(x + w - 24)", width: 1.6, color: .color(sofaShine)),
+            ]
+            // 등받이 솔기 (앉는 자리 사이)
+            for (a, b) in zip(seats, seats.dropFirst()) {
+                back.append(.line("M\(x + (a + b) / 2),\(y + 12) V\(y + 32)", width: 1.3, color: .color(sofaSeam)))
+            }
+            // 양 끝 쿠션 (누가 앉으면 가려집니다)
+            back += [
+                .rect(x + 15, y + 17, 18, 16, r: 4.5, fill: .swatch(index == 0 ? .butter : .mint), width: 1.5),
+                .line("M\(x + 19),\(y + 21) l10,8 M\(x + 29),\(y + 21) l-10,8", width: 1, color: .swatch(.white), opacity: 0.8),
+                .rect(x + w - 33, y + 18, 18, 16, r: 4.5, fill: .swatch(index == 0 ? .pink : .peach), width: 1.5),
+                .circle(x + w - 28, y + 23, 1.2, fill: .swatch(.white), outline: false),
+                .circle(x + w - 21, y + 23, 1.2, fill: .swatch(.white), outline: false),
+                .circle(x + w - 24.5, y + 28, 1.2, fill: .swatch(.white), outline: false),
+            ]
+            layers.append(ArtLayer("sofa-back-\(index)", depth: y + 16, back))
             // 직원(앉는 자리) 바로 앞, 앉은 다리(앉는 자리 + CharacterArt.seatedLegsDepth)보다 뒤
-            var front: [ArtShape] = [.rect(x + 10, y + 32, w - 20, 26, r: 10, fill: .color(ArtColor(0xB3A7E2)))]
+            var front: [ArtShape] = [
+                // 나무 다리 → 앉는 판
+                .rect(x + 16, y + 54, 6, 7, r: 2, fill: .swatch(.woodDark), width: 1.4),
+                .rect(x + w - 22, y + 54, 6, 7, r: 2, fill: .swatch(.woodDark), width: 1.4),
+                .rect(x + 10, y + 32, w - 20, 26, r: 10, fill: .color(sofaLight)),
+                .line("M\(x + 22),\(y + 36.4) H\(x + w - 22)", width: 1.4, color: .color(sofaShine)),
+            ]
             // 앉는 자리 사이 칸막이 선
             for (a, b) in zip(seats, seats.dropFirst()) {
-                front.append(.rect(x + (a + b) / 2 - 1, y + 34, 2, 20, r: 1, fill: .color(ArtColor(0x9C8FCF)), outline: false))
+                front.append(.rect(x + (a + b) / 2 - 1, y + 39, 2, 16, r: 1, fill: .color(sofaDeep), outline: false))
             }
             front += [
-                .rect(x - 2, y + 16, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
-                .rect(x + w - 16, y + 16, 18, 44, r: 9, fill: .color(ArtColor(0x9C8FCF))),
+                .rect(x - 2, y + 16, 18, 44, r: 9, fill: .color(sofaDeep)),
+                .rect(x + w - 16, y + 16, 18, 44, r: 9, fill: .color(sofaDeep)),
+                .line("M\(x + 3.4),\(y + 22) q3.6,-3.4 7.2,0 M\(x + w - 10.6),\(y + 22) q3.6,-3.4 7.2,0", width: 1.4, color: .color(sofaShine)),
             ]
             layers.append(ArtLayer("sofa-front-\(index)", depth: seatY + 1.5, front))
         }
         // 안마 의자: 등판·팔걸이(직원 뒤) → 롤러(움직임, liveLayers) → 직원 → 앉는 판·발판(앞) → 앉은 다리
         // 팔걸이는 팔꿈치 높이(발 위치 -30)로 낮춰 직원 뒤에 그립니다: 안마 자세의 팔(30°)이 팔걸이 위에 얹히고, 몸통 옆을 가리지 않습니다.
         // 앉는 판은 몸통 아랫단(-14)에 살짝만 걸쳐(-16) 배를 덮지 않고, 그 위를 앉은 다리의 허벅지가 덮습니다 (M6(2)).
+        let shell = ArtColor(0x6F86A8), pad = ArtColor(0x8EA6C8), seam = ArtColor(0x7B93B6), shine = ArtColor(0xAFC3DF)
         for (index, s) in OfficeLayout.massageSeats.enumerated() {
             layers.append(ArtLayer("massage-back-\(index)", depth: s.y - 1, [
-                .rect(s.x - 26, s.y - 98, 52, 80, r: 16, fill: .color(ArtColor(0x6F86A8))),
-                .rect(s.x - 20, s.y - 90, 40, 64, r: 12, fill: .color(ArtColor(0x8EA6C8)), outline: false),
-                .rect(s.x - 18, s.y - 108, 36, 18, r: 9, fill: .color(ArtColor(0x8EA6C8))),
-                .rect(s.x - 37, s.y - 30, 15, 26, r: 7, fill: .color(ArtColor(0x6F86A8))),
-                .rect(s.x + 22, s.y - 30, 15, 26, r: 7, fill: .color(ArtColor(0x6F86A8))),
-                .rect(s.x + 26, s.y - 17, 7, 5, r: 2, fill: .swatch(.mint), outline: false),
+                .rect(s.x - 26, s.y - 98, 52, 80, r: 16, fill: .color(shell)),
+                .rect(s.x - 20, s.y - 90, 40, 64, r: 12, fill: .color(pad), outline: false),
+                // 등판 누빔 선
+                .line("M\(s.x - 8),\(s.y - 72) H\(s.x + 8) M\(s.x - 8),\(s.y - 56) H\(s.x + 8) M\(s.x - 8),\(s.y - 40) H\(s.x + 8)", width: 1.2, color: .color(seam)),
+                // 머리 받침
+                .rect(s.x - 18, s.y - 108, 36, 18, r: 9, fill: .color(pad)),
+                .line("M\(s.x - 9),\(s.y - 103.6) H\(s.x + 5)", width: 1.4, color: .color(shine)),
+                // 팔걸이와 조작 단추
+                .rect(s.x - 37, s.y - 30, 15, 26, r: 7, fill: .color(shell)),
+                .rect(s.x + 22, s.y - 30, 15, 26, r: 7, fill: .color(shell)),
+                .line("M\(s.x - 33),\(s.y - 25.6) q3.4,-2.6 6.8,0 M\(s.x + 26.2),\(s.y - 25.6) q3.4,-2.6 6.8,0", width: 1.3, color: .color(shine)),
+                .rect(s.x + 25, s.y - 18.6, 9, 6.4, r: 2.4, fill: .swatch(.rackDark), outline: false),
+                .circle(s.x + 27.6, s.y - 15.4, 1.3, fill: .swatch(.mint), outline: false),
+                .circle(s.x + 31.4, s.y - 15.4, 1.3, fill: .swatch(.butter), outline: false),
             ]))
             layers.append(ArtLayer("massage-front-\(index)", depth: s.y + 1, [
-                .rect(s.x - 25, s.y - 16, 50, 13, r: 6, fill: .color(ArtColor(0x8EA6C8))),
-                .rect(s.x - 14, s.y - 4, 28, 12, r: 5, fill: .color(ArtColor(0x6F86A8))),
+                .rect(s.x - 25, s.y - 16, 50, 13, r: 6, fill: .color(pad)),
+                .line("M\(s.x - 17),\(s.y - 12.4) H\(s.x + 12)", width: 1.3, color: .color(shine)),
+                .rect(s.x - 14, s.y - 4, 28, 12, r: 5, fill: .color(shell)),
+                .line("M\(s.x - 8),\(s.y + 2.4) H\(s.x + 8)", width: 1.2, color: .color(seam)),
             ]))
         }
         return layers
@@ -584,15 +724,5 @@ public enum OfficeArt {
     /// 0.25pt 단위로 반올림 (움직이는 가구가 부동소수점 오차로 매번 다른 그림이 되지 않게)
     static func quarter(_ value: Double) -> Double {
         (value * 4).rounded() / 4
-    }
-
-    /// 화분 (발 위치 기준)
-    static func plant(at origin: MapPoint, scale: Double) -> [ArtShape] {
-        [
-            .path("M0,-20 C-16,-24 -22,-44 -12,-52 C-6,-40 -2,-32 0,-20 Z", fill: .color(ArtColor(0x86C9A9))),
-            .path("M0,-20 C14,-28 20,-46 10,-54 C4,-42 1,-32 0,-20 Z", fill: .swatch(.mint)),
-            .path("M0,-20 C-4,-34 -2,-50 2,-58 C6,-46 4,-32 0,-20 Z", fill: .color(ArtColor(0x7CBF9E))),
-            .path("M-12,-22 H12 L9,0 H-9 Z", fill: .swatch(.pot)),
-        ].transformed(scale: scale, offset: origin)
     }
 }

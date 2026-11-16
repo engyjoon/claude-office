@@ -1,7 +1,8 @@
 import Foundation
 import OfficeCore
 
-/// 종이인형 리그 캐릭터 그림 (설계서 §9.3, 미리보기의 character()를 옮긴 것).
+/// 종이인형 리그 캐릭터 그림 (설계서 §9.3). 처음 그림은 미리보기의 character()를 옮긴 것이고,
+/// 2026-11-16에 얼굴·머리·옷·신발을 다시 그렸습니다 (리그의 축과 크기는 그대로).
 /// 좌표는 발 위치가 원점이고 y가 아래로 증가합니다.
 public enum CharacterArt {
     // MARK: - 색
@@ -16,6 +17,17 @@ public enum CharacterArt {
         public var hair: ArtColor
         public var top: ArtColor
         public var pants: ArtColor
+
+        /// 귀 안쪽 같은 살의 그늘
+        public var skinShade: ArtColor { skin.mixed(with: ArtColor(0xC0604F), amount: 0.3) }
+        /// 머리카락 윤기
+        public var hairShine: ArtColor { hair.mixed(with: ArtColor(0xFFFFFF), amount: 0.3) }
+        /// 가르마·머리 결
+        public var hairShade: ArtColor { hair.mixed(with: ArtColor(0x1E1826), amount: 0.35) }
+        /// 옷의 솔기·소매 끝·후드
+        public var topShade: ArtColor { top.mixed(with: ArtColor(0x5A4E66), amount: 0.26) }
+        /// 줄무늬처럼 옷보다 밝은 무늬
+        public var topLight: ArtColor { top.mixed(with: ArtColor(0xFFFFFF), amount: 0.55) }
     }
 
     public static func colors(for appearance: Appearance) -> Colors {
@@ -27,6 +39,25 @@ public enum CharacterArt {
         )
     }
 
+    // MARK: - 옷차림
+
+    /// 윗옷 모양. 외형 값에서 정해지므로 같은 직원은 언제나 같은 옷을 입습니다.
+    public enum Outfit: Int, CaseIterable, Hashable, Sendable {
+        /// 후드 티: 목 둘레 후드, 끈 두 가닥, 앞주머니
+        case hoodie
+        /// 셔츠: 흰 깃, 단추
+        case shirt
+        /// 줄무늬 반소매 티
+        case stripes
+        /// 카디건: 안에 받쳐 입은 흰 티, 단추
+        case cardigan
+    }
+
+    public static func outfit(for appearance: Appearance) -> Outfit {
+        let sum = abs(appearance.topColor) + abs(appearance.hairStyle) + abs(appearance.hairColor) + abs(appearance.skinTone)
+        return Outfit.allCases[sum % Outfit.allCases.count]
+    }
+
     // MARK: - 부위 위치
 
     public static let headOrigin = MapPoint(0, -62)
@@ -35,6 +66,10 @@ public enum CharacterArt {
     public static let leftShoulder = MapPoint(-14, -38)
     public static let rightShoulder = MapPoint(14, -38)
     public static let heldPropOrigin = MapPoint(0, -28)
+    /// 눈높이 (머리 중심 기준 y). 깜빡일 때 눈을 이 높이를 축으로 세로로 줄입니다.
+    public static let eyeLine = 2.5
+    /// 눈 사이 거리의 절반
+    static let eyeX = 8.5
 
     // MARK: - 몸
 
@@ -89,13 +124,29 @@ public enum CharacterArt {
         }
     }
 
-    /// 외곽선용 머리 실루엣: 얼굴 원 + 앞머리 + 액세서리 (표정 효과·눈·입은 얼굴 안이라 빼도 모양이 같습니다)
+    /// 외곽선용 머리 실루엣: 얼굴 원 + 귀 + 앞머리 + 액세서리 (표정 효과·눈·입은 얼굴 안이라 빼도 모양이 같습니다)
     public static func headOutline(_ appearance: Appearance) -> [ArtShape] {
-        face + hairFront(style: appearance.hairStyle) + accessory(appearance.accessory)
+        face + ears + hairFront(style: appearance.hairStyle) + accessory(appearance.accessory)
     }
 
-    public static let leftLeg: [ArtShape] = [.rect(-10, -17, 8.5, 17, r: 4, fill: .pants)]
-    public static let rightLeg: [ArtShape] = [.rect(1.5, -17, 8.5, 17, r: 4, fill: .pants)]
+    /// 신발 색 (흰 운동화)
+    static let shoe = ArtColor(0xFFFBF3)
+    /// 신발 밑창
+    static let sole = ArtColor(0xD9D2E0)
+
+    static func standingLeg(_ side: Double) -> [ArtShape] {
+        // side −1 = 왼쪽(화면 왼쪽), +1 = 오른쪽
+        let legX = side < 0 ? -10.0 : 1.5
+        let shoeX = side < 0 ? -11.4 : 1.0
+        return [
+            .rect(legX, -17, 8.5, 14.5, r: 3.5, fill: .pants),
+            .rect(shoeX, -6, 10.4, 6, r: 3, fill: .color(shoe), width: 1.6),
+            .line("M\(shoeX + 1.6),-1.7 L\(shoeX + 8.8),-1.7", width: 1.1, color: .color(sole)),
+        ]
+    }
+
+    public static let leftLeg: [ArtShape] = standingLeg(-1)
+    public static let rightLeg: [ArtShape] = standingLeg(1)
 
     /// 앉은 다리를 그리는 깊이 (직원 발 위치 + 이 값). 소파 좌판(+1.5)·안마 의자 앞판(+1)보다 앞, 책상(+3)보다 뒤입니다.
     public static let seatedLegsDepth = 2.0
@@ -112,8 +163,8 @@ public enum CharacterArt {
             .rect(-9.5, knee - 2, 8, foot - knee, r: 4, fill: .pants),
             .rect(1.5, knee - 2, 8, foot - knee, r: 4, fill: .pants),
             // 발 (앞을 향한 발끝)
-            .rect(-11, foot - 4.5, 10, 5.5, r: 2.75, fill: .color(shoe)),
-            .rect(1, foot - 4.5, 10, 5.5, r: 2.75, fill: .color(shoe)),
+            .rect(-11.2, foot - 5, 10.4, 6, r: 3, fill: .color(shoe), width: 1.6),
+            .rect(0.8, foot - 5, 10.4, 6, r: 3, fill: .color(shoe), width: 1.6),
             // 허벅지 (엉덩이에서 무릎까지, 몸 아랫단을 덮어 무릎에 앉은 느낌)
             .rect(-11.5, -20, 11, 20 + knee + 3, r: 5.5, fill: .pants),
             .rect(0.5, -20, 11, 20 + knee + 3, r: 5.5, fill: .pants),
@@ -128,35 +179,100 @@ public enum CharacterArt {
         }
     }
 
-    /// 앉은 다리에서만 보이는 신발 색 (앞을 향한 발끝)
-    static let shoe = ArtColor(0x4A4258)
-
-    public static func body(isLead: Bool) -> [ArtShape] {
-        var shapes: [ArtShape] = [.rect(-15, -44, 30, 30, r: 12, fill: .top)]
+    /// 몸통 (윗옷). 메인은 가슴에 별 배지를 답니다.
+    public static func body(isLead: Bool, outfit: Outfit = .hoodie) -> [ArtShape] {
+        let torso = MapRect(-15, -44, 30, 30)
+        var shapes: [ArtShape] = [ArtShape(.rect(torso, radius: 12), fill: .top, stroke: .swatch(.ink))]
+        let white = Paint.swatch(.white)
+        switch outfit {
+        case .hoodie:
+            shapes += [
+                // 목 둘레 후드 (머리가 위쪽을 덮어 턱 아래 초승달만 보입니다)
+                ArtShape(.ellipse(center: MapPoint(0, -42), rx: 11, ry: 4.2), fill: .topShade, stroke: .swatch(.ink), lineWidth: 1.4),
+                // 끈 두 가닥 (길이가 조금 다름)
+                .line("M-2.8,-38 L-3.2,-32.4", width: 2.6),
+                .line("M-2.8,-38 L-3.2,-32.4", width: 1.3, color: white),
+                .line("M2.8,-38 L3.1,-34", width: 2.6),
+                .line("M2.8,-38 L3.1,-34", width: 1.3, color: white),
+                // 앞주머니
+                .line("M-8.6,-15.4 L-6.6,-21.6 L6.6,-21.6 L8.6,-15.4", width: 1.3, color: .topShade),
+            ]
+        case .shirt:
+            shapes += [
+                .line("M0,-39 L0,-14.8", width: 1.1, color: .topShade),
+                ArtShape(.circle(center: MapPoint(0, -32.6), radius: 1.1), fill: white, stroke: .topShade, lineWidth: 0.8),
+                ArtShape(.circle(center: MapPoint(0, -26.2), radius: 1.1), fill: white, stroke: .topShade, lineWidth: 0.8),
+                ArtShape(.circle(center: MapPoint(0, -19.8), radius: 1.1), fill: white, stroke: .topShade, lineWidth: 0.8),
+                // 흰 깃
+                .path("M-0.4,-39.2 L-8.2,-42.6 L-6.2,-35.4 Z", fill: white, width: 1.2),
+                .path("M0.4,-39.2 L8.2,-42.6 L6.2,-35.4 Z", fill: white, width: 1.2),
+            ]
+        case .stripes:
+            shapes += [
+                // 줄무늬 (둥근 모서리 안쪽 폭에 맞춤) → 몸 테두리를 다시 그려 가장자리를 정리
+                .rect(-14.4, -36.4, 28.8, 3, fill: .topLight, outline: false),
+                .rect(-15, -29.8, 30, 3, fill: .topLight, outline: false),
+                .path("M-14.6,-23.2 L14.6,-23.2 L13.5,-20.2 L-13.5,-20.2 Z", fill: .topLight, outline: false),
+                ArtShape(.rect(torso, radius: 12), stroke: .swatch(.ink)),
+                .line("M-6,-40.6 Q0,-36.8 6,-40.6", width: 1.5, color: .topShade),
+            ]
+        case .cardigan:
+            shapes += [
+                // 안에 받쳐 입은 흰 티 (V자) → 여밈선 → 단추
+                .path("M-7.6,-43 L7.6,-43 L0,-30.4 Z", fill: white, width: 1.2),
+                .line("M0,-30.4 L0,-14.8", width: 1.2, color: .topShade),
+                ArtShape(.circle(center: MapPoint(2.8, -26.4), radius: 1.2), fill: white, stroke: .topShade, lineWidth: 0.8),
+                ArtShape(.circle(center: MapPoint(2.8, -20.2), radius: 1.2), fill: white, stroke: .topShade, lineWidth: 0.8),
+            ]
+        }
         if isLead {
             shapes.append(ArtShape(.path(star5(MapPoint(7, -31), 4.6)), fill: .swatch(.butter), stroke: .swatch(.ink), lineWidth: 1.3))
         }
         return shapes
     }
 
-    /// 어깨가 원점, 아래로 늘어진 팔 (회전은 렌더러가 적용)
-    public static let arm: [ArtShape] = [
-        .rect(-3.6, -2, 7.2, 17, r: 3.6, fill: .top),
-        .circle(0, 16, 4.2, fill: .skin),
-    ]
+    /// 어깨가 원점, 아래로 늘어진 팔 (회전은 렌더러가 적용). 줄무늬 티만 반소매입니다.
+    public static func arm(_ outfit: Outfit = .hoodie) -> [ArtShape] {
+        let hand = ArtShape.circle(0, 16, 4.2, fill: .skin)
+        switch outfit {
+        case .stripes:
+            return [
+                .rect(-3.1, 3, 6.2, 12, r: 3.1, fill: .skin),
+                .rect(-3.8, -2, 7.6, 10.6, r: 3.6, fill: .top),
+                .line("M-2.7,5.4 L2.7,5.4", width: 1.4, color: .topLight),
+                hand,
+            ]
+        default:
+            return [
+                .rect(-3.6, -2, 7.2, 17, r: 3.6, fill: .top),
+                .line("M-2.5,11.3 L2.5,11.3", width: 1.3, color: .topShade),
+                hand,
+            ]
+        }
+    }
 
     /// 오른손에 드는 소품 (팔과 함께 회전)
     public static func handProp(_ prop: Prop?) -> [ArtShape] {
         switch prop {
         case .cup:
-            return [.rect(-4.5, 11, 9, 9, r: 2, fill: .swatch(.white)), .line("M4.5,13 q4,1 0,5", width: 1.4)]
+            return [
+                .line("M4.5,13 q4.2,1 0,5.2", width: 1.5),
+                .rect(-4.5, 11, 9, 9.4, r: 2.2, fill: .swatch(.white)),
+                .rect(-4.5, 14, 9, 2.6, fill: .swatch(.peach), outline: false),
+                ArtShape(.rect(MapRect(-4.5, 11, 9, 9.4), radius: 2.2), stroke: .swatch(.ink)),
+            ]
         case .marker:
-            return [.rect(-1.6, 12, 3.2, 12, r: 1.2, fill: .swatch(.alert), width: 1)]
+            return [
+                .rect(-1.7, 12, 3.4, 12, r: 1.3, fill: .swatch(.alert), width: 1),
+                .rect(-1.7, 12, 3.4, 3.4, r: 1.3, fill: .swatch(.ink), outline: false),
+            ]
         case .drink:
             // 냉장고에서 꺼낸 캔 음료
             return [
                 .rect(-4, 10, 8, 12, r: 2, fill: .swatch(.peach), width: 1.3),
-                .rect(-4, 14, 8, 3, fill: .swatch(.white), outline: false),
+                .rect(-4, 14, 8, 3.2, fill: .swatch(.white), outline: false),
+                .line("M-2.4,11.4 L2.4,11.4", width: 1, color: .swatch(.metalDot)),
+                ArtShape(.rect(MapRect(-4, 10, 8, 12), radius: 2), stroke: .swatch(.ink), lineWidth: 1.3),
             ]
         default:
             return []
@@ -176,15 +292,20 @@ public enum CharacterArt {
         switch prop {
         case .book:
             return [
-                .rect(-12, -7.5, 24, 15, r: 2, fill: .swatch(.lavender)),
-                .rect(-10, -5.5, 20, 11, r: 1, fill: .swatch(.white), outline: false),
-                .line("M0,-5.5 L0,5.5 M-8,-2.5 L-3,-2.5 M-8,0.5 L-3,0.5 M3,-2.5 L8,-2.5 M3,0.5 L7,0.5", width: 1.1),
+                .rect(-12, -7.5, 24, 15, r: 2.2, fill: .swatch(.lavender)),
+                .rect(-10, -5.6, 20, 11.2, r: 1.2, fill: .swatch(.white), outline: false),
+                .line("M0,-5.6 L0,5.6", width: 1.1),
+                .line("M-8,-2.6 L-3,-2.6 M-8,0.2 L-3.6,0.2 M-8,3 L-4.4,3 M3,-2.6 L8,-2.6 M3,0.2 L7,0.2", width: 0.9, color: .swatch(.plateInk), opacity: 0.7),
+                // 책갈피 끈
+                .path("M5.4,5.6 L5.4,10 L6.7,8.8 L8,10 L8,5.6 Z", fill: .swatch(.alert), width: 0.8),
             ]
         case .documents:
             return [
-                .rect(-12, -6, 22, 14, r: 1.5, fill: .swatch(.white), width: 1.2),
-                .rect(-9, -9, 22, 14, r: 1.5, fill: .swatch(.white), width: 1.2),
-                .line("M-6,-5 L8,-5 M-6,-2 L6,-2 M-6,1 L8,1", width: 1),
+                .rect(-12, -6, 22, 14, r: 1.6, fill: .swatch(.white), width: 1.2),
+                .rect(-9, -9, 22, 14, r: 1.6, fill: .swatch(.white), width: 1.2),
+                .line("M-6,-5.2 L8,-5.2 M-6,-2.2 L6,-2.2 M-6,0.8 L8,0.8", width: 0.9, color: .swatch(.plateInk), opacity: 0.7),
+                // 클립
+                .line("M9.6,-10.4 L9.6,-6.2", width: 1.6, color: .swatch(.skyBlue)),
             ]
         default:
             return []
@@ -195,67 +316,129 @@ public enum CharacterArt {
 
     public static let face: [ArtShape] = [.circle(0, 0, 21, fill: .skin)]
 
-    public static func blush(_ expression: FacialExpression) -> [ArtShape] {
-        let opacity = [.happy, .proud, .eager].contains(expression) ? 0.72 : 0.45
-        return [
-            .ellipse(-13, 7, 3.8, 2.4, fill: .swatch(.blush), opacity: opacity),
-            .ellipse(13, 7, 3.8, 2.4, fill: .swatch(.blush), opacity: opacity),
+    /// 귀. 얼굴 원보다 먼저 그려 바깥쪽 반만 보입니다 (긴 머리·헤드폰·비니는 그 위를 덮습니다).
+    public static let ears: [ArtShape] = [-1.0, 1.0].flatMap { side -> [ArtShape] in
+        [
+            .circle(side * 20.3, 5.2, 3.3, fill: .skin, width: 1.6),
+            .line("M\(side * 21.3),4.1 Q\(side * 22.4),5.2 \(side * 21.3),6.4", width: 0.9, color: .skinShade),
         ]
     }
+
+    public static func blush(_ expression: FacialExpression) -> [ArtShape] {
+        let opacity = [.happy, .proud, .eager].contains(expression) ? 0.7 : 0.42
+        return [
+            .ellipse(-13.6, 9.2, 4.2, 2.6, fill: .swatch(.blush), opacity: opacity),
+            .ellipse(13.6, 9.2, 4.2, 2.6, fill: .swatch(.blush), opacity: opacity),
+        ]
+    }
+
+    // 머리 모양 5종: 0 단발(앞머리) · 1 삐죽 머리 · 2 긴 생머리 · 3 양갈래 똥머리 · 4 짧은 가르마(바보털)
+    // 뒷머리의 윗부분은 앞머리 안쪽에 숨기고(선이 두 겹으로 보이지 않게), 옆과 아래로만 나옵니다.
 
     public static func hairBack(style: Int) -> [ArtShape] {
         switch abs(style) % 5 {
         case 0: [bobBack]
-        case 1: [shortBack]
-        case 2: [.path("M-24,2 C-26,-23 -12,-27 0,-27 C12,-27 26,-23 24,2 L26,30 C18,34 -18,34 -26,30 Z", fill: .hair)]
-        case 3: [.circle(0, -27, 8.5, fill: .hair), shortBack]
+        case 1: [shortBack, .path("M-9,-22 Q-9.6,-27 -7,-30 Q-5.4,-26.6 -3,-25.6 Q-2,-29.6 1,-31.6 Q1.6,-27.6 4.6,-25.6 Q6,-28 9,-29 Q8.6,-25 10,-21.6 Z", fill: .hair)]
+        case 2: [longBack, .line("M-22.6,9 L-23.6,26 M22.6,9 L23.6,26", width: 1, color: .hairShade)]
+        case 3:
+            [
+                .circle(-16, -21.5, 7.6, fill: .hair), .circle(16, -21.5, 7.6, fill: .hair),
+                .line("M-20.6,-25.4 Q-18.6,-27.8 -15.6,-27.6 M11.4,-25.4 Q13.4,-27.8 16.4,-27.6", width: 1.6, color: .hairShine),
+                shortBack,
+            ]
         default: [shortBack]
         }
     }
 
     public static func hairFront(style: Int) -> [ArtShape] {
         switch abs(style) % 5 {
-        case 0, 3: [bobFront]
-        case 1: [.path("M-21.5,-2 C-22.5,-18 -11,-25 0,-25 C11,-25 22.5,-18 21.5,-2 L17,-9 L13,-5 L10,-12 L5,-7 L1,-13 L-4,-8 L-8,-13 L-12,-7 L-16,-10 Z", fill: .hair)]
-        default: [sweptFront]
+        case 0, 3: [fringe, shine]
+        case 1: [spikyFringe, shine]
+        case 2:
+            [
+                // 귀 앞으로 내려온 옆머리 → 가르마 탄 앞머리 → 가르마 선
+                .path("M-21.6,-1 C-22.8,5 -22.2,10 -20.2,14.5 C-19.2,9 -18.8,3 -17.4,-2.8 Z", fill: .hair),
+                .path("M21.6,-1 C22.8,5 22.2,10 20.2,14.5 C19.2,9 18.8,3 17.4,-2.8 Z", fill: .hair),
+                .path("M-21.6,-1 C-23,-18 -10,-25 1,-25 C12,-25 23,-18 21.6,-1 C14,-4 6,-9.5 -1,-16 C-5,-9 -13,-4 -21.6,-1 Z", fill: .hair),
+                .line("M-1,-16 Q-2.8,-20 -2.2,-24", width: 1.1, color: .hairShade),
+                shine,
+            ]
+        default:
+            [
+                // 바보털 → 반대쪽으로 가르마 탄 앞머리
+                .path("M0.4,-23.4 C-1.2,-29.6 3,-34.6 9,-34 C6,-31.4 4.8,-28 5.6,-23.4 Z", fill: .hair),
+                .path("M21.6,-1 C23,-18 10,-25 -1,-25 C-12,-25 -23,-18 -21.6,-1 C-14,-4 -6,-9.5 1,-16 C5,-9 13,-4 21.6,-1 Z", fill: .hair),
+                .line("M1,-16 Q2.8,-20 2.2,-24", width: 1.1, color: .hairShade),
+                shine,
+            ]
         }
     }
 
-    static let bobBack = ArtShape.path("M-24,6 C-26,-22 -12,-27 0,-27 C12,-27 26,-22 24,6 C24,12 20,15 16,15 L-16,15 C-20,15 -24,12 -24,6 Z", fill: .hair)
     static let shortBack = ArtShape.circle(0, -3, 22.5, fill: .hair)
-    static let bobFront = ArtShape.path("M-21.5,-3 C-22,-19 -11,-24.5 0,-24.5 C11,-24.5 22,-19 21.5,-3 C17,-9 11,-11.5 5,-9.5 C1,-14 -9,-14 -13,-9 C-16,-8 -19,-6 -21.5,-3 Z", fill: .hair)
-    static let sweptFront = ArtShape.path("M-21.5,-1 C-22,-19 -9,-25 1,-24.5 C13,-24 22,-17 21.5,-3 C13,-5 5,-10 -1,-16 C-5,-9 -13,-4 -21.5,-1 Z", fill: .hair)
+    static let bobBack = ArtShape.path(
+        "M-21,-6 C-22,-18 -11,-24 0,-24 C11,-24 22,-18 21,-6 C23.6,-2 24.8,6 23.6,11 C22.8,15.6 19.6,17.6 16.6,17.2 C13.6,16.8 12.6,14 14,12 "
+            + "L-14,12 C-12.6,14 -13.6,16.8 -16.6,17.2 C-19.6,17.6 -22.8,15.6 -23.6,11 C-24.8,6 -23.6,-2 -21,-6 Z", fill: .hair)
+    static let longBack = ArtShape.path(
+        "M-21,-6 C-22,-18 -11,-24 0,-24 C11,-24 22,-18 21,-6 C24,-1 24.6,8 25,16 L26.4,27 C26.4,31 22.6,33.2 18.6,31.6 "
+            + "L-18.6,31.6 C-22.6,33.2 -26.4,31 -26.4,27 L-25,16 C-24.6,8 -24,-1 -21,-6 Z", fill: .hair)
+    /// 둥근 술 세 갈래가 내려온 앞머리
+    static let fringe = ArtShape.path(
+        "M-21.6,-1 C-23,-18 -11,-25 0,-25 C11,-25 23,-18 21.6,-1 Q20.4,-6.4 15,-8.6 Q10.6,-3.4 6,-8.6 Q0.4,-3 -5,-8.6 Q-9.8,-3.4 -14.4,-8.6 "
+            + "Q-19.6,-7 -21.6,-1 Z", fill: .hair)
+    /// 한쪽으로 쓸린 뾰족한 앞머리
+    static let spikyFringe = ArtShape.path(
+        "M-21.6,-1.5 C-23,-18 -11,-25 0,-25 C11,-25 23,-18 21.6,-1.5 Q19.6,-6.6 16.6,-9.6 Q15.6,-6 13,-4.6 Q12.6,-9 9.6,-12 Q8,-7.6 4.6,-6 "
+            + "Q4,-10 1,-13 Q-1,-9 -4.6,-7.6 Q-5,-11 -8,-13 Q-9.6,-8.6 -13,-6.6 Q-13.6,-9 -16,-10.6 Q-19.6,-7 -21.6,-1.5 Z", fill: .hair)
+    /// 정수리 왼쪽의 윤기 (짧은 호 + 점)
+    static let shine = ArtShape.line("M-14,-15.4 Q-9.4,-20.6 -3,-21.4 M0.8,-21.5 L1.6,-21.5", width: 2, color: .hairShine)
 
     public static func accessory(_ accessory: Accessory?) -> [ArtShape] {
         switch accessory {
         case .glasses:
+            let ex = eyeX, ey = eyeLine
             return [
-                ArtShape(.circle(center: MapPoint(-8, 1.5), radius: 5.4), stroke: .swatch(.ink), lineWidth: 1.6),
-                ArtShape(.circle(center: MapPoint(8, 1.5), radius: 5.4), stroke: .swatch(.ink), lineWidth: 1.6),
-                .line("M-2.6,1 Q0,-0.5 2.6,1", width: 1.6),
+                .circle(-ex, ey, 5.5, fill: .swatch(.white), outline: false, opacity: 0.2),
+                .circle(ex, ey, 5.5, fill: .swatch(.white), outline: false, opacity: 0.2),
+                ArtShape(.circle(center: MapPoint(-ex, ey), radius: 5.7), stroke: .swatch(.ink), lineWidth: 1.5),
+                ArtShape(.circle(center: MapPoint(ex, ey), radius: 5.7), stroke: .swatch(.ink), lineWidth: 1.5),
+                .line("M-2.8,\(ey - 0.6) Q0,\(ey - 2) 2.8,\(ey - 0.6)", width: 1.5),
+                .line("M-14.2,\(ey - 1) L-19.6,\(ey - 2) M14.2,\(ey - 1) L19.6,\(ey - 2)", width: 1.3),
             ]
         case .headphones:
+            let band = "M-23,2 C-24,-31 24,-31 23,2"
             return [
-                .line("M-23,2 C-24,-31 24,-31 23,2", width: 4, color: .color(ArtColor(0x7B6FB0))),
-                .rect(-27, -4, 7, 12, r: 3, fill: .swatch(.lavender)),
-                .rect(20, -4, 7, 12, r: 3, fill: .swatch(.lavender)),
+                .line(band, width: 5.6),
+                .line(band, width: 3, color: .color(ArtColor(0x8F84C6))),
+                .rect(-27.5, -4.5, 8, 13.5, r: 3.6, fill: .swatch(.lavender)),
+                .rect(19.5, -4.5, 8, 13.5, r: 3.6, fill: .swatch(.lavender)),
+                .line("M-25.4,-1.6 L-25.4,2 M25.4,-1.6 L25.4,2", width: 1.3, color: .swatch(.white)),
             ]
         case .beanie:
+            let knit = Paint.color(ArtColor(0xD98A70))
             return [
                 .path("M-22,-7 C-22,-31 22,-31 22,-7 Z", fill: .swatch(.peach)),
-                .rect(-23, -11, 46, 7, r: 3.5, fill: .color(ArtColor(0xEE9F84))),
-                .circle(0, -29, 4.5, fill: .swatch(.white)),
+                .line("M-11,-12 Q-10,-20 -5.4,-24 M0,-12 L0,-25 M11,-12 Q10,-20 5.4,-24", width: 1, color: knit, opacity: 0.55),
+                .rect(-23, -11.5, 46, 7.6, r: 3.8, fill: .color(ArtColor(0xEE9F84))),
+                .line("M-16.5,-9.6 L-16.5,-5.8 M-10,-9.6 L-10,-5.8 M-3.4,-9.6 L-3.4,-5.8 M3.4,-9.6 L3.4,-5.8 M10,-9.6 L10,-5.8 M16.5,-9.6 L16.5,-5.8", width: 1, color: knit),
+                .circle(0, -29.4, 4.8, fill: .swatch(.white)),
+                .line("M-1.8,-31 Q-0.4,-32.2 1.2,-31.6", width: 0.9, color: .swatch(.metal)),
             ]
         case .ribbon:
+            let dark = Paint.color(ArtColor(0xE77F98))
             return [
-                .path("M14,-19 L7.8,-26.4 L4.3,-17 Z M14,-19 L20.2,-11.6 L23.7,-21 Z", fill: .swatch(.pink)),
-                .circle(14, -19, 2.2, fill: .swatch(.pink)),
+                // 리본 고리 둘 → 매듭 → 주름
+                .path("M14,-19.5 C11,-26 4.4,-25 5,-19.5 C4.4,-14 11,-13 14,-19.5 Z", fill: .swatch(.pink)),
+                .path("M14,-19.5 C17,-26 23.6,-25 23,-19.5 C23.6,-14 17,-13 14,-19.5 Z", fill: .swatch(.pink)),
+                .line("M8,-19.5 L10.6,-19.5 M20,-19.5 L17.4,-19.5", width: 1, color: dark),
+                .circle(14, -19.5, 2.4, fill: dark, width: 1.4),
             ]
         case .sprout:
+            let stem = Paint.color(ArtColor(0x5FA77F))
             return [
-                .line("M0,-24 C0,-30 1,-33 0,-36", width: 2, color: .color(ArtColor(0x5FA77F))),
-                .ellipse(-5, -37, 5, 3, fill: .swatch(.mint), outline: true),
-                .ellipse(5, -39, 5, 3, fill: .swatch(.mint), outline: true),
+                .line("M0,-24 C0,-30 1,-33 0,-36", width: 2, color: stem),
+                .path("M0,-36 C-3,-41.4 -9.6,-41 -10.4,-37 C-7,-34.4 -2.6,-34.4 0,-36 Z", fill: .swatch(.mint), width: 1.5),
+                .path("M0,-36.4 C2,-42.4 8.6,-43.4 10.4,-39.6 C7.6,-36.2 3,-35.2 0,-36.4 Z", fill: .swatch(.mint), width: 1.5),
+                .line("M-1.6,-36.6 L-7,-38 M1.6,-37.2 L7,-39.6", width: 0.9, color: stem),
             ]
         case .none:
             return []
@@ -264,35 +447,50 @@ public enum CharacterArt {
 
     // MARK: - 표정 (설계서 §9.3 표정 10종)
 
-    static func dotEye(_ x: Double) -> [ArtShape] {
-        [.ellipse(x, 1, 2.5, 3.1, fill: .swatch(.ink)), .circle(x + 0.9, -0.3, 0.85, fill: .swatch(.white), outline: false)]
+    /// 동그란 눈: 잉크 눈동자 + 오른쪽 위 큰 반짝임 + 왼쪽 아래 작은 반짝임
+    static func dotEye(_ x: Double, _ y: Double = eyeLine, rx: Double = 2.9, ry: Double = 3.6) -> [ArtShape] {
+        [
+            .ellipse(x, y, rx, ry, fill: .swatch(.ink)),
+            .circle(x + rx * 0.36, y - ry * 0.36, rx * 0.38, fill: .swatch(.white), outline: false),
+            .circle(x - rx * 0.36, y + ry * 0.42, rx * 0.17, fill: .swatch(.white), outline: false, opacity: 0.85),
+        ]
     }
 
-    static let worried: [ArtShape] = [.line("M-11,-5 L-5,-7.5", width: 1.6), .line("M5,-7.5 L11,-5", width: 1.6)]
+    /// 눈 두 개 (왼쪽·오른쪽 같은 모양)
+    static func bothEyes(_ eye: (Double) -> [ArtShape]) -> [ArtShape] { eye(-eyeX) + eye(eyeX) }
+
+    static let worried: [ArtShape] = [.line("M-11.6,-3.6 L-5.6,-6.2", width: 1.5), .line("M5.6,-6.2 L11.6,-3.6", width: 1.5)]
+    static let raisedBrows: [ArtShape] = [.line("M-11.6,-5.4 Q-8.5,-8 -5.4,-5.6", width: 1.5), .line("M5.4,-5.6 Q8.5,-8 11.6,-5.4", width: 1.5)]
 
     public static func eyes(_ expression: FacialExpression) -> [ArtShape] {
+        let ex = eyeX, ey = eyeLine
         switch expression {
-        case .neutral, .troubled: dotEye(-8) + dotEye(8)
-        case .happy: [.line("M-11,2.5 Q-8,-1.5 -5,2.5", width: 2.3), .line("M5,2.5 Q8,-1.5 11,2.5", width: 2.3)]
-        case .focus: [.ellipse(-8, 2, 2.5, 2.2, fill: .swatch(.ink)), .ellipse(8, 2, 2.5, 2.2, fill: .swatch(.ink))]
-        case .think: [.ellipse(-6.5, -0.5, 2.3, 2.9, fill: .swatch(.ink)), .ellipse(9.5, -0.5, 2.3, 2.9, fill: .swatch(.ink))]
+        case .neutral, .troubled: return bothEyes { dotEye($0) }
+        case .happy:
+            // 웃어서 감긴 눈 (⌒)
+            return [.line("M\(-ex - 3.2),\(ey + 1.6) Q\(-ex),\(ey - 3) \(-ex + 3.2),\(ey + 1.6)", width: 2.2), .line("M\(ex - 3.2),\(ey + 1.6) Q\(ex),\(ey - 3) \(ex + 3.2),\(ey + 1.6)", width: 2.2)]
+        case .focus:
+            return bothEyes { [.ellipse($0, ey + 0.6, 2.8, 2.5, fill: .swatch(.ink)), .circle($0 + 1, ey - 0.2, 0.9, fill: .swatch(.white), outline: false)] }
+        case .think:
+            // 위를 올려다보는 눈
+            return dotEye(-ex + 1.6, ey - 1.4, rx: 2.6, ry: 3.2) + dotEye(ex + 1.6, ey - 1.4, rx: 2.6, ry: 3.2)
         case .surprised:
-            [
-                .circle(-8, 1, 3.8, fill: .swatch(.white), width: 1.4), .circle(-8, 1.4, 2, fill: .swatch(.ink), outline: false),
-                .circle(8, 1, 3.8, fill: .swatch(.white), width: 1.4), .circle(8, 1.4, 2, fill: .swatch(.ink), outline: false),
-            ]
-        case .sleepy: [.line("M-11,2 L-5,2"), .line("M5,2 L11,2")]
-        case .proud: [ArtShape(.path(star4(MapPoint(-8, 1), 4)), fill: .swatch(.ink)), ArtShape(.path(star4(MapPoint(8, 1), 4)), fill: .swatch(.ink))]
+            return bothEyes { [.circle($0, ey, 4, fill: .swatch(.white), width: 1.3), .circle($0, ey + 0.3, 1.9, fill: .swatch(.ink), outline: false)] }
+        case .sleepy:
+            // 졸려서 감긴 눈 (‿)
+            return [.line("M\(-ex - 3),\(ey) Q\(-ex),\(ey + 3) \(-ex + 3),\(ey)", width: 2), .line("M\(ex - 3),\(ey) Q\(ex),\(ey + 3) \(ex + 3),\(ey)", width: 2)]
+        case .proud:
+            return bothEyes { [ArtShape(.path(star4(MapPoint($0, ey), 4.4)), fill: .swatch(.ink))] }
         case .sad:
-            [
-                .ellipse(-8, 1, 2.2, 2.8, fill: .swatch(.ink)), .ellipse(8, 1, 2.2, 2.8, fill: .swatch(.ink)),
-                .line("M-8,5.5 L-8,10", width: 2.2, color: .swatch(.drop)), .line("M8,5.5 L8,10", width: 2.2, color: .swatch(.drop)),
-            ]
+            return bothEyes { dotEye($0, ey + 0.4, rx: 2.5, ry: 3) }
         case .eager:
-            [
-                .circle(-8, 1, 3.4, fill: .swatch(.ink), outline: false), .circle(-6.8, -0.3, 1.25, fill: .swatch(.white), outline: false),
-                .circle(8, 1, 3.4, fill: .swatch(.ink), outline: false), .circle(9.2, -0.3, 1.25, fill: .swatch(.white), outline: false),
-            ]
+            return bothEyes {
+                [
+                    .circle($0, ey, 3.8, fill: .swatch(.ink), outline: false),
+                    .circle($0 + 1.4, ey - 1.4, 1.45, fill: .swatch(.white), outline: false),
+                    .circle($0 - 1.4, ey + 1.6, 0.75, fill: .swatch(.white), outline: false),
+                ]
+            }
         }
     }
 
@@ -303,34 +501,50 @@ public enum CharacterArt {
 
     public static func brows(_ expression: FacialExpression) -> [ArtShape] {
         switch expression {
-        case .focus: [.line("M-11.5,-0.6 L-4.5,0.2"), .line("M4.5,0.2 L11.5,-0.6"), .line("M-11,-6.5 L-5,-5", width: 1.6), .line("M5,-5 L11,-6.5", width: 1.6)]
-        case .think: [.line("M-11,-6 Q-8,-8 -5,-6.5", width: 1.6), .line("M5,-8 Q8,-10 11,-8.5", width: 1.6)]
-        case .surprised, .eager: [.line("M-11,-8 Q-8,-10.5 -5,-8", width: 1.6), .line("M5,-8 Q8,-10.5 11,-8", width: 1.6)]
+        case .focus: [.line("M-12,-3.2 L-5.4,-1.8", width: 1.7), .line("M5.4,-1.8 L12,-3.2", width: 1.7)]
+        case .think: [.line("M-10.4,-5 Q-7.4,-7 -4.4,-5.6", width: 1.5), .line("M7,-7.4 Q10,-9.6 13,-7.8", width: 1.5)]
+        case .surprised, .eager: raisedBrows
         case .troubled, .sad: worried
         default: []
         }
     }
 
+    static let tongue = ArtColor(0xF08FA0)
+
+    /// 활짝 웃는 입 (반달 + 혀)
+    static func smile(_ halfWidth: Double, top: Double = 8.6, depth: Double) -> [ArtShape] {
+        let w = halfWidth
+        return [
+            .path("M\(-w),\(top) Q0,\(top + depth * 2) \(w),\(top) Z", fill: .swatch(.mouth), width: 1.6),
+            .ellipse(0, top + depth * 0.72, w * 0.42, depth * 0.24, fill: .color(tongue)),
+        ]
+    }
+
     public static func mouth(_ expression: FacialExpression) -> [ArtShape] {
         switch expression {
-        case .neutral: [.line("M-3.5,10 Q0,13 3.5,10")]
-        case .happy: [.path("M-6,8 Q0,16.5 6,8 Z", fill: .swatch(.mouth))]
-        case .focus: [.line("M-3,11 L3,11")]
-        case .think: [ArtShape(.circle(center: MapPoint(3, 11), radius: 1.8), stroke: .swatch(.ink), lineWidth: 1.6)]
-        case .surprised: [.ellipse(0, 11.5, 2.6, 3.2, fill: .swatch(.mouth), outline: true)]
-        case .troubled: [.line("M-4.5,11.5 q1.5,-2 3,0 t3,0", width: 1.7)]
-        case .sleepy: [.ellipse(0, 11, 1.6, 1.2, fill: .swatch(.ink))]
-        case .proud: [.path("M-6.5,8.5 Q0,16 6.5,8.5 Z", fill: .swatch(.mouth))]
-        case .sad: [.line("M-3.5,13.5 Q0,10.5 3.5,13.5")]
-        case .eager: [.path("M-4.5,8.5 Q0,15 4.5,8.5 Z", fill: .swatch(.mouth))]
+        case .neutral: [.line("M-3.2,10.6 Q0,13.4 3.2,10.6", width: 1.8)]
+        case .happy: smile(5.6, depth: 3.8)
+        case .focus: [.line("M-2.6,11.6 L2.6,11.6", width: 1.8)]
+        case .think: [ArtShape(.circle(center: MapPoint(3, 11.6), radius: 1.7), stroke: .swatch(.ink), lineWidth: 1.6)]
+        case .surprised: [.ellipse(0, 12, 2.5, 3.1, fill: .swatch(.mouth), outline: true, width: 1.6)]
+        case .troubled: [.line("M-4.5,12 q1.5,-2 3,0 t3,0", width: 1.7)]
+        case .sleepy: [.ellipse(0, 11.6, 1.7, 1.3, fill: .swatch(.ink))]
+        case .proud: smile(6.2, depth: 3.6)
+        case .sad: [.line("M-3.4,13.6 Q0,10.6 3.4,13.6", width: 1.8)]
+        case .eager: smile(4.4, top: 9, depth: 3.2)
         }
     }
 
-    /// 표정에 딸린 효과 (땀방울, 반짝이)
+    /// 표정에 딸린 효과 (땀방울, 반짝이, 눈물)
     public static func effects(_ expression: FacialExpression) -> [ArtShape] {
         switch expression {
         case .troubled: [.path("M18,-14 q-4.5,6.5 0,8.5 q4.5,-2 0,-8.5 Z", fill: .swatch(.drop), width: 1.4)]
         case .proud: [ArtShape(.path(star4(MapPoint(22, -20), 5.5)), fill: .swatch(.butter), stroke: .swatch(.ink), lineWidth: 1.3)]
+        case .sad:
+            [
+                .path("M\(-eyeX),7.4 q-2.4,3.8 0,5 q2.4,-1.2 0,-5 Z", fill: .swatch(.drop), width: 1),
+                .path("M\(eyeX),7.4 q-2.4,3.8 0,5 q2.4,-1.2 0,-5 Z", fill: .swatch(.drop), width: 1),
+            ]
         default: []
         }
     }
@@ -342,13 +556,14 @@ public enum CharacterArt {
     public static func portrait(_ appearance: Appearance, isLead: Bool, expression: FacialExpression = .happy) -> [ArtShape] {
         // 몸과 팔은 발 기준 좌표 → 머리 중심 기준으로 옮깁니다
         let toHead = MapPoint(-headOrigin.x, -headOrigin.y)
+        let outfit = outfit(for: appearance)
         let arms = [leftShoulder, rightShoulder].flatMap { shoulder in
-            arm.map { $0.transformed(offset: MapPoint(shoulder.x + toHead.x, shoulder.y + toHead.y)) }
+            arm(outfit).map { $0.transformed(offset: MapPoint(shoulder.x + toHead.x, shoulder.y + toHead.y)) }
         }
         return hairBack(style: appearance.hairStyle)
-            + body(isLead: isLead).map { $0.transformed(offset: toHead) }
+            + body(isLead: isLead, outfit: outfit).map { $0.transformed(offset: toHead) }
             + arms
-            + face
+            + ears + face
             + eyes(expression)
             + blush(expression) + mouth(expression) + hairFront(style: appearance.hairStyle)
             + brows(expression) + accessory(appearance.accessory)
@@ -376,150 +591,5 @@ public enum CharacterArt {
         }
         commands.append(.close)
         return commands
-    }
-}
-
-/// 한 순간의 리그 자세. 렌더러는 정적인 부위 도형에 이 값만 적용합니다.
-/// 각도는 y가 아래로 증가하는 좌표계 기준 시계 방향(도)입니다. SpriteKit에서는 부호를 뒤집습니다.
-public struct RigPose: Hashable, Sendable {
-    /// 몸 전체 위아래 (음수 = 위로)
-    public var bob: Double = 0
-    public var leftLegLift: Double = 0
-    public var rightLegLift: Double = 0
-    public var headRotation: Double = 0
-    public var headDrop: Double = 0
-    public var leftArm: Double = 12
-    public var rightArm: Double = -12
-    /// 눈 세로 배율 (깜빡임 0.12)
-    public var eyeScale: Double = 1
-    /// 몸 세로 늘이기 (기지개)
-    public var stretch: Double = 1
-    public var mirrored = false
-}
-
-/// 직원 상태와 무대 시각으로 리그 자세를 계산합니다 (미리보기의 CSS 애니메이션을 옮긴 것).
-public enum RigAnimator {
-    /// - Parameter blinkDuration: 깜빡임 길이 (초). 그리기 빈도가 낮을 때(잠잠함 3fps) 늘려서 깜빡임이 빠지지 않게 합니다 (M6(1)).
-    public static func pose(for actor: StageActor, time: Double, blinkDuration: Double = 0.14) -> RigPose {
-        var pose = RigPose()
-        let seed = Double(StableHashLite.value(actor.id.raw) % 997) / 997 * 4.6
-        let base = armAngles(actor.pose)
-        pose.leftArm = base.0
-        pose.rightArm = base.1
-        pose.mirrored = actor.facing == .left
-
-        if actor.isWalking {
-            let phase = actor.walkedDistance / 14 * Double.pi
-            pose.leftLegLift = -max(0, sin(phase)) * 2.6
-            pose.rightLegLift = -max(0, -sin(phase)) * 2.6
-            pose.bob = -abs(sin(phase)) * 1.4
-            pose.leftArm = 8 + sin(phase) * 13
-            pose.rightArm = -8 + sin(phase) * 13
-        } else {
-            // 숨쉬기
-            pose.bob = -1.3 * (sin(time * 2 * Double.pi / 2.8) + 1) / 2
-            switch actor.pose {
-            case .typing:
-                pose.leftArm += 4.5 * sin(time * 22)
-                pose.rightArm += 4.5 * sin(time * 22 + 1.6)
-            case .raisingHand:
-                let wave = (1 + sin(time * 5.7)) / 2
-                pose.rightArm = -146 - 14 * wave
-                pose.bob = -2.5 * wave
-            case .thinking:
-                pose.headRotation = -6
-            case .sleeping:
-                pose.headRotation = 8 + 2.5 * sin(time * 2.1)
-                pose.headDrop = 2 + sin(time * 2.1)
-            case .holdingCup:
-                pose.rightArm = sipAngle(time)
-            case .watching:
-                // 모니터를 보며 기다림: 손은 책상 위, 고개를 천천히 갸웃하다 가끔 콕 끄덕
-                pose.headRotation = 3 * sin(time * 1.4 + seed)
-                let tap = (time + seed).truncatingRemainder(dividingBy: 2.2)
-                pose.headDrop = tap < 0.25 ? 1.6 * sin(tap / 0.25 * Double.pi) : 0
-            case .massage:
-                // 안마받는 중: 몸이 잘게 떨리고 고개는 느리게 흔들림, 팔은 팔걸이에
-                pose.bob = -0.7 * (1 + sin(time * 38)) / 2
-                pose.headRotation = 6 * sin(time * 1.2 + seed)
-            default:
-                break
-            }
-        }
-
-        if let gesture = actor.gesture {
-            apply(gesture, elapsed: time - actor.gestureStartedAt, to: &pose)
-        }
-
-        // 깜빡임 (직원마다 엇갈리게)
-        if CharacterArt.blinks(actor.expression) {
-            let cycle = (time + seed).truncatingRemainder(dividingBy: 4.6)
-            if cycle > 4.5 - blinkDuration && cycle < 4.5 { pose.eyeScale = 0.12 }
-        }
-        return pose
-    }
-
-    public static func armAngles(_ pose: Pose) -> (Double, Double) {
-        switch pose {
-        case .typing: (-38, 38)
-        case .reading, .sorting, .sleeping: (-34, 34)
-        case .watching: (-30, 30)
-        case .massage: (30, -30)
-        case .thinking: (12, 125)
-        case .writingBoard: (12, -110)
-        case .holdingCup: (12, 95)
-        case .raisingHand: (12, -152)
-        case .standing, .sitting: (12, -12)
-        }
-    }
-
-    static func sipAngle(_ time: Double) -> Double {
-        let t = time.truncatingRemainder(dividingBy: 3.4) / 3.4
-        switch t {
-        case ..<0.3: return 95
-        case ..<0.45: return 95 + (t - 0.3) / 0.15 * 43
-        case ..<0.7: return 138
-        case ..<0.85: return 138 - (t - 0.7) / 0.15 * 43
-        default: return 95
-        }
-    }
-
-    static func apply(_ gesture: BodyGesture, elapsed t: Double, to pose: inout RigPose) {
-        switch gesture {
-        case .wave: pose.rightArm = -142.5 + 17.5 * sin(t * 12.5)
-        case .nod: pose.headDrop = 2.5 * max(0, sin(t * 8))
-        case .beckon: pose.rightArm = -111 + 16 * sin(t * 14)
-        case .thumbsUp: pose.rightArm = -95
-        case .cheer:
-            pose.leftArm = 151 + 11 * sin(t * 20)
-            pose.rightArm = -151 - 11 * sin(t * 20)
-            pose.bob = -3.5 * (1 + sin(t * 10))
-        case .highFive:
-            pose.rightArm = -140
-            pose.bob = -1.25 * (1 + sin(t * 7.8))
-        case .tilt: pose.headRotation = 13 * sin(min(t, 0.6) / 0.6 * Double.pi / 2)
-        case .scratchHead:
-            pose.rightArm = -168 + 5 * sin(t * 28)
-            pose.headRotation = 7
-        case .stretch:
-            pose.leftArm = 166
-            pose.rightArm = -166
-            pose.stretch = 1 + 0.05 * sin(min(t, 1.2) / 1.2 * Double.pi)
-        case .sip: pose.rightArm = 138
-        }
-    }
-}
-
-/// 리그용 가벼운 해시 (직원마다 깜빡임 시점을 엇갈리게)
-enum StableHashLite {
-    static func value(_ text: String) -> Int {
-        var hash = 5381
-        for byte in text.utf8 { hash = (hash &* 33) ^ Int(byte) }
-        return nonNegative(hash)
-    }
-
-    /// 절댓값. `abs(Int.min)`은 넘쳐서 죽으므로 그 값만 0으로 둡니다 (나머지는 `abs`와 같은 값)
-    static func nonNegative(_ hash: Int) -> Int {
-        hash == .min ? 0 : abs(hash)
     }
 }

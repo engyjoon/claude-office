@@ -19,6 +19,8 @@ import OfficeStage
 //       --select 메인1 이면 그 직원을 고른 모습(몸 외곽선 + 머리 위 ▼)으로, --contrast 면 대비 증가로 그립니다 (M6(15)).
 //   office-sim icon [--out 폴더]
 //       앱 아이콘을 SVG로 저장합니다 (64px 이상용 app-icon-full.svg, 16·32px용 app-icon-small.svg). PNG는 make icon.
+//   office-sim sheet [--out 폴더]
+//       캐릭터 시트(머리 모양·액세서리·표정·자세·소품을 한 장에)를 SVG로 저장합니다. 그림을 다듬을 때 한눈에 보려고 씁니다.
 //   office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
 //       시나리오의 훅을 실행 중인 앱(또는 serve)으로 실제 훅처럼 보냅니다 (curl 사용).
 //
@@ -40,6 +42,7 @@ func usage() -> Never {
           office-sim snapshot <scenario.jsonl> --at 3,12.5 [--out 폴더] [--size 1180x748 | --mini 390] [--night] [--select 이름] [--contrast]
           office-sim replay <scenario.jsonl> [--endpoint 파일] [--speed 배속]
           office-sim icon [--out 폴더]
+          office-sim sheet [--out 폴더]
         """)
     exit(2)
 }
@@ -420,6 +423,84 @@ func icon(_ arguments: [String]) throws {
     }
 }
 
+// MARK: - sheet
+
+/// 캐릭터 시트를 <폴더>/character-sheet.svg로 씁니다: 머리 모양 5종 × 옷차림, 액세서리, 표정 10종, 자세·소품.
+func sheet(_ arguments: [String]) throws {
+    let folder = URL(fileURLWithPath: option("--out", in: arguments) ?? "build/sheet")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let cell = (width: 74.0, height: 118.0)
+    var rows: [[(label: String, svg: String)]] = []
+    func look(_ index: Int, style: Int? = nil, accessory: Accessory? = nil) -> Appearance {
+        Appearance(
+            skinTone: index % Appearance.skinToneCount, hairStyle: style ?? index % Appearance.hairStyleCount,
+            hairColor: (index * 3 + 1) % Appearance.hairColorCount, topColor: index % Appearance.topColorCount, accessory: accessory, voice: 0)
+    }
+    func posed(_ pose: Pose) -> RigPose {
+        var rig = RigPose()
+        (rig.leftArm, rig.rightArm) = RigAnimator.armAngles(pose)
+        return rig
+    }
+    // 머리 모양 5종 (옷차림이 골고루 나오게 두 줄)
+    rows.append((0..<8).map { ("머리 \($0 % 5)", SVGRenderer.figure(look($0), isLead: $0 == 0, expression: $0 % 2 == 0 ? .neutral : .happy)) })
+    rows.append((8..<16).map { ("머리 \($0 % 5)", SVGRenderer.figure(look($0), isLead: false, expression: $0 % 2 == 0 ? .happy : .neutral)) })
+    // 액세서리 (머리 모양을 바꿔 가며)
+    rows.append(Accessory.allCases.enumerated().map { index, accessory in
+        (accessory.rawValue, SVGRenderer.figure(look(index + 2, accessory: accessory), isLead: false, expression: .happy))
+    } + Accessory.allCases.prefix(3).enumerated().map { index, accessory in
+        (accessory.rawValue, SVGRenderer.figure(look(index + 7, style: index + 2, accessory: accessory), isLead: false))
+    })
+    // 표정 10종
+    let expressions: [FacialExpression] = [.neutral, .happy, .focus, .think, .surprised, .troubled, .sleepy, .proud, .sad, .eager]
+    rows.append(expressions.prefix(8).enumerated().map { index, e in (e.rawValue, SVGRenderer.figure(look(index + 1), isLead: false, expression: e)) })
+    // 나머지 표정 + 자세·소품
+    var poses: [(String, String)] = expressions.suffix(2).enumerated().map { index, e in
+        (e.rawValue, SVGRenderer.figure(look(index + 4), isLead: false, expression: e))
+    }
+    poses.append(("typing", SVGRenderer.figure(look(3), isLead: true, expression: .focus, pose: posed(.typing))))
+    poses.append(("thinking", SVGRenderer.figure(look(5), isLead: false, expression: .think, pose: posed(.thinking))))
+    poses.append(("raisingHand", SVGRenderer.figure(look(6), isLead: false, expression: .eager, pose: posed(.raisingHand))))
+    poses.append(("cup", SVGRenderer.figure(look(7), isLead: false, expression: .happy, pose: posed(.holdingCup), prop: .cup)))
+    poses.append(("book", SVGRenderer.figure(look(9), isLead: false, expression: .focus, pose: posed(.reading), prop: .book)))
+    poses.append(("documents", SVGRenderer.figure(look(10), isLead: false, pose: posed(.sorting), prop: .documents)))
+    rows.append(poses)
+    var cheer = RigPose()
+    (cheer.leftArm, cheer.rightArm, cheer.bob) = (151, -151, -4)
+    var thumbs = RigPose()
+    thumbs.rightArm = -95
+    var walk = RigPose()
+    (walk.leftLegLift, walk.leftArm, walk.rightArm, walk.mirrored) = (-2.6, 21, 5, true)
+    rows.append([
+        ("cheer", SVGRenderer.figure(look(11), isLead: false, expression: .proud, pose: cheer)),
+        ("thumbsUp", SVGRenderer.figure(look(12), isLead: true, expression: .happy, pose: thumbs, gesture: .thumbsUp)),
+        ("walk", SVGRenderer.figure(look(13), isLead: false, pose: walk)),
+        ("drink", SVGRenderer.figure(look(14), isLead: false, expression: .happy, pose: posed(.holdingCup), prop: .drink)),
+        ("marker", SVGRenderer.figure(look(15), isLead: false, expression: .focus, pose: posed(.writingBoard), prop: .marker)),
+        ("밤 그림자", SVGRenderer.figure(look(2), isLead: false, shadow: .night)),
+        ("고름", SVGRenderer.figure(
+            look(4), isLead: true, expression: .happy,
+            outline: CharacterArt.outlineLayers(team: Swatch.team(0).color, lighting: .day, contrast: false))),
+    ])
+    let columns = rows.map(\.count).max() ?? 1
+    let width = Double(columns) * cell.width + 16
+    let height = Double(rows.count) * cell.height + 8
+    var body = "<rect width=\"\(width)\" height=\"\(height)\" fill=\"\(Swatch.floor.color.hex)\"/>"
+    for (rowIndex, row) in rows.enumerated() {
+        for (column, item) in row.enumerated() {
+            let x = 8 + (Double(column) + 0.5) * cell.width
+            let y = Double(rowIndex) * cell.height + 98
+            body += "<g transform=\"translate(\(x),\(y))\">\(item.svg)</g>"
+            body += "<text x=\"\(x)\" y=\"\(y + 14)\" font-size=\"7\" text-anchor=\"middle\" fill=\"\(Swatch.plateInk.color.hex)\">\(item.label)</text>"
+        }
+    }
+    let url = folder.appendingPathComponent("character-sheet.svg")
+    try """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \(width) \(height)" width="\(width)" height="\(height)" \
+        font-family="Apple SD Gothic Neo, Noto Sans CJK KR, sans-serif">\(body)</svg>
+        """.write(to: url, atomically: true, encoding: .utf8)
+    print(url.path)
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch arguments.first {
@@ -429,6 +510,7 @@ do {
     case "replay": try replay(Array(arguments.dropFirst()))
     case "snapshot": try snapshot(Array(arguments.dropFirst()))
     case "icon": try icon(Array(arguments.dropFirst()))
+    case "sheet": try sheet(Array(arguments.dropFirst()))
     default: usage()
     }
 } catch {
