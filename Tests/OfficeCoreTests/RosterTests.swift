@@ -55,6 +55,28 @@ struct RosterTests {
         #expect(team.rows[1].status.label == "편집 중")
     }
 
+    @Test("백그라운드로 맡기고 응답을 끝낸 세션: 세션은 쉬는 중이고, 맡긴 서브는 그 세션의 '맡긴 일'로 남아 일한다 (2026-11-19)")
+    func delegatesOfIdleSession() throws {
+        let architect = (id: "x1", type: "architect")
+        let s = state([
+            hook.tool("PreToolUse", "Agent", id: "a1", input: ["description": "2차 검토", "subagent_type": "architect", "run_in_background": true]),
+            hook.tool("PostToolUse", "Agent", id: "a1", input: ["description": "2차 검토", "subagent_type": "architect", "run_in_background": true]),
+            hook.tool("PreToolUse", "Bash", id: "b1", input: ["command": "git diff"], agent: architect),
+            hook.tool("PostToolUse", "Bash", id: "b1", input: ["command": "git diff"], agent: architect),
+            hook.make("Stop"),
+        ])
+        let team = try #require(Roster.make(from: s, privacy: .detailed).teams.first)
+        let main = try #require(team.rows.first)
+        // 응답을 끝냈고 아직 보지 않음 (쉬는 쪽 톤)
+        #expect(main.status == .unread)
+        #expect(main.status.tone == .calm)
+        let delegates = team.subagents(calledBy: main)
+        #expect(delegates.map(\.agentType) == ["architect"])
+        #expect(delegates.first?.status == .thinking)
+        // 서브에이전트는 맡긴 일이 없습니다
+        #expect(team.subagents(calledBy: try #require(delegates.first)).isEmpty)
+    }
+
     @Test("클릭한 직원의 행과 팀을 id로 찾는다")
     func lookup() throws {
         let s = state([

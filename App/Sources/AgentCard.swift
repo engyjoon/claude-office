@@ -170,6 +170,33 @@ struct AgentCard: View {
                     }
                 }
             }
+            if !delegates.isEmpty {
+                // 이 세션이 부른 서브에이전트 (누르면 그 서브로). 백그라운드로 맡기면 세션은 "쉬는 중"인데 서브만 일합니다
+                GridRow {
+                    label("맡긴 일")
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(delegates) { sub in
+                            Button { onSelect(sub.id) } label: {
+                                HStack(spacing: 5) {
+                                    Avatar(appearance: sub.appearance, isLead: false, size: 18, tint: Palette.team(team.colorIndex).opacity(0.35))
+                                    Text(sub.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                    if let agentType = sub.agentType {
+                                        Text(agentType).font(.system(size: 10)).foregroundStyle(Self.labelColor)
+                                            .lineLimit(1).truncationMode(.tail)
+                                    }
+                                    Spacer(minLength: 4)
+                                    StatusChip(status: sub.status)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("눌러서 \(sub.name) 보기")
+                            .accessibilityLabel("맡긴 일: \(AccessibilityText.agent(sub))")
+                            .accessibilityHint("누르면 \(sub.name)을 골라요.")
+                        }
+                    }
+                }
+            }
             GridRow {
                 label("세션")
                 Text(String(row.session.raw.prefix(8)))
@@ -258,6 +285,9 @@ struct AgentCard: View {
 
     /// 메인일 때 같은 행의 다른 사람들 (서브 세션과 서브에이전트)
     private var subs: [RosterRow] { team.rows.filter { !$0.isMain && $0.id != row.id } }
+
+    /// 이 세션이 부른 서브에이전트 ("맡긴 일" 줄)
+    private var delegates: [RosterRow] { team.subagents(calledBy: row) }
 
     private var main: RosterRow? { team.rows.first { $0.isMain } }
 

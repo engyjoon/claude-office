@@ -130,6 +130,15 @@ public struct RosterTeam: Identifiable, Hashable, Sendable {
 
     /// 선택기·목록 머리에 쓰는 이름 ("메인1 · claude-office")
     public var label: String { "\(mainName) · \(name)" }
+
+    /// 그 세션 직원(메인·서브 세션)이 부른 서브에이전트들, 책상 순서. 서브에이전트를 넘기면 빈 목록.
+    ///
+    /// 서브 세션이 부른 서브에이전트도 메인의 행에 한 줄로 앉아서 누가 누구 일을 하는지 화면으로는 알 수 없습니다.
+    /// 백그라운드로 맡기면 세션은 응답을 끝내고 쉬는데 서브만 일하므로(2026-11-19), 신원 카드가 이 목록을 "맡긴 일"로 보여 줍니다.
+    public func subagents(calledBy row: RosterRow) -> [RosterRow] {
+        guard row.role == .lead else { return [] }
+        return rows.filter { $0.role == .member && $0.session == row.session }
+    }
 }
 
 /// 사무실 상태를 목록으로 정리한 것. 메뉴바 앱이 그대로 그립니다.
