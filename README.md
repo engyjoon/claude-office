@@ -81,6 +81,12 @@ git pull
 make install
 ```
 
+2026-11-19 전에 클론했다면 `git pull` 전에 한 번만 아래를 실행합니다. 그날 기본 브랜치 이름을 `claude/magical-johnson-4jfy9c`에서 `main`으로 바꿨습니다.
+
+```bash
+git branch -m claude/magical-johnson-4jfy9c main && git fetch origin --prune && git branch -u origin/main main && git remote set-head origin -a
+```
+
 지우기: **설정 → 연동 → 제거**로 훅을 빼고, 로그인 시 실행을 끈 다음 앱을 종료하고
 
 ```bash
@@ -147,6 +153,8 @@ make uninstall
 ## 개발
 
 Swift 6 툴체인이 필요합니다. 코어는 Linux에서도 빌드하고 테스트할 수 있습니다.
+
+기본 브랜치는 `main`이고, 설치와 업데이트는 이 브랜치를 기준으로 합니다. 푸시와 PR마다 GitHub Actions가 코어 테스트(`make test`)를 돌립니다.
 
 ```bash
 make test
