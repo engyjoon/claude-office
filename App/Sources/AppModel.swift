@@ -259,8 +259,9 @@ final class AppModel {
         let directory = desktopSessions
         let server = HookServer(token: token) { [weak self] delivery in
             // 정보 파일 읽기와 훅 본문 파싱은 전달 큐(백그라운드)에서 한 번만 하고, 메인 액터에는 결과만 넘깁니다 (개선 11)
-            let hint = delivery.hostSession.flatMap { directory.hint(forHostSession: $0) }
-            let hook = ParsedHook(delivery, hint: hint)
+            let hook = ParsedHook(delivery) { session in
+                delivery.hostSession.flatMap { directory.hint(forHostSession: $0, cliSession: session) }
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.receive(hook) }
             }
@@ -432,10 +433,12 @@ final class AppModel {
         let summary: String
         let error: String?
 
-        init(_ delivery: HookDelivery, hint: SessionHint?) {
+        /// `hint`는 훅의 `session_id`를 받아 방 힌트를 만듭니다 (정보 파일의 낡은 캐시를 가려내려고 본문을 먼저 읽음).
+        init(_ delivery: HookDelivery, hint makeHint: (String?) -> SessionHint?) {
             self.delivery = delivery
             do {
                 let payload = try JSONValue.parse(delivery.body)
+                let hint = makeHint(payload["session_id"]?.stringValue)
                 var event = HookParser.parse(payload, term: delivery.term, receivedAt: delivery.receivedAt)
                 event?.hint = hint
                 self.event = event

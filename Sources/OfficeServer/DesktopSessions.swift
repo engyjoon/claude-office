@@ -31,12 +31,15 @@ public struct DesktopSessionRecord: Hashable, Sendable {
     /// 데스크톱 앱의 응답 요약(`postTurnSummary`)이 마지막 응답(`lastAssistantUuid`)에 대한 것이면 그 판정:
     /// `status_category`가 `blocked`이고 `needs_action`이 있으면 true(답변 필요), 다른 판정이면 false. 요약이 없거나 지난 것이면 nil.
     public var replyRequest: Bool?
+    /// 이 데스크톱 세션이 전에 쓰던 CLI 세션 id들 (`priorCliSessionIds`). 데스크톱 앱이 CLI 세션 id를 바꾸면 옛 id가 여기 남습니다.
+    public var priorCliSessionIDs: [String]
 
     public init(
         localID: String, cliSessionID: String?, cwd: String?, originCwd: String?, parentLocalID: String?, title: String?,
         isArchived: Bool = false, lastActivity: Date? = nil, createdAt: Date? = nil, lastFocused: Date? = nil, lastTurnEdge: Date? = nil,
-        replyRequest: Bool? = nil, isSideQuestion: Bool = false
+        replyRequest: Bool? = nil, isSideQuestion: Bool = false, priorCliSessionIDs: [String] = []
     ) {
+        self.priorCliSessionIDs = priorCliSessionIDs
         self.isSideQuestion = isSideQuestion
         self.lastFocused = lastFocused
         self.lastTurnEdge = lastTurnEdge
@@ -80,7 +83,8 @@ public struct DesktopSessionRecord: Hashable, Sendable {
             lastFocused: date("lastFocusedAt"),
             lastTurnEdge: date("lastTurnEdgeAt"),
             replyRequest: replyRequest,
-            isSideQuestion: json["spawnedFrom"]?["btw"]?.boolValue ?? false
+            isSideQuestion: json["spawnedFrom"]?["btw"]?.boolValue ?? false,
+            priorCliSessionIDs: (json["priorCliSessionIds"]?.arrayValue ?? []).compactMap { text($0) }
         )
     }
 
@@ -151,8 +155,11 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
     }
 
     /// 데스크톱 세션 id로 방 힌트를 만듭니다. 정보 파일이 없거나 읽지 못하면 nil.
-    public func hint(forHostSession localID: String) -> SessionHint? {
-        guard let record = record(localID) else { return nil }
+    ///
+    /// `cliSession`(훅의 `session_id`)을 주면, 캐시한 정보 파일의 CLI 세션 id가 그것과 다를 때 캐시를 `missTTL`까지만 믿습니다:
+    /// 데스크톱 앱이 CLI 세션 id를 막 바꾼 참이면 새 id의 첫 훅이 낡은 캐시 때문에 다른 사람으로 앉기 때문입니다 (2026-11-19).
+    public func hint(forHostSession localID: String, cliSession: String? = nil) -> SessionHint? {
+        guard let record = record(localID, expecting: cliSession) else { return nil }
         var ancestors: [SessionID] = []
         var rootRecord = record
         var visited: Set<String> = [record.localID]
@@ -242,13 +249,14 @@ public final class DesktopSessionDirectory: @unchecked Sendable {
     }
 
     /// 캐시된 정보 파일 (없으면 찾아서 읽습니다)
-    public func record(_ localID: String) -> DesktopSessionRecord? {
+    public func record(_ localID: String, expecting cliSession: String? = nil) -> DesktopSessionRecord? {
         guard HookRequestPolicy.isHostSessionID(localID) else { return nil }
         let current = now()
         lock.lock()
         if let cached = cache[localID] {
             let age = current.timeIntervalSince(cached.at)
-            if age < (cached.record == nil ? missTTL : ttl) {
+            let doubtful = cached.record == nil || (cliSession != nil && cached.record?.cliSessionID != cliSession)
+            if age < (doubtful ? missTTL : ttl) {
                 lock.unlock()
                 return cached.record
             }
@@ -347,7 +355,8 @@ public enum DesktopResidents {
             let resident = ResidentSession(
                 session: SessionID(cli), hostSession: record.localID, ancestors: ancestors, rootCwd: root.folder ?? record.folder,
                 title: record.title, lastActivity: record.lastActivity, lastFocused: record.lastFocused,
-                isFocused: record.localID == focused, lastTurnEdge: record.lastTurnEdge, replyRequest: record.replyRequest)
+                isFocused: record.localID == focused, lastTurnEdge: record.lastTurnEdge, replyRequest: record.replyRequest,
+                priorSessions: record.priorCliSessionIDs.filter { $0 != cli }.map(SessionID.init))
             entries.append(Entry(record: record, resident: resident, group: group, depth: ancestors.count))
         }
 

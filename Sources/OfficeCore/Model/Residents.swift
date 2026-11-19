@@ -22,11 +22,16 @@ public struct ResidentSession: Hashable, Sendable {
     /// 데스크톱 앱의 최신 응답 요약이 "사용자 결정이 필요함"(`blocked` + `needs_action`)이면 true, 다른 판정이면 false,
     /// 요약이 없거나 지난 응답의 것이면 nil (M6(4))
     public var replyRequest: Bool?
+    /// 같은 데스크톱 세션이 전에 쓰던 훅 `session_id`들 (정보 파일의 `priorCliSessionIds`).
+    /// 사무실에 그 id로 앉아 있는 사람은 이 세션과 같은 사람입니다 (2026-11-19).
+    public var priorSessions: [SessionID]
 
     public init(
         session: SessionID, hostSession: String, ancestors: [SessionID] = [], rootCwd: String? = nil, title: String? = nil,
-        lastActivity: Date? = nil, lastFocused: Date? = nil, isFocused: Bool = false, lastTurnEdge: Date? = nil, replyRequest: Bool? = nil
+        lastActivity: Date? = nil, lastFocused: Date? = nil, isFocused: Bool = false, lastTurnEdge: Date? = nil, replyRequest: Bool? = nil,
+        priorSessions: [SessionID] = []
     ) {
+        self.priorSessions = priorSessions
         self.lastFocused = lastFocused
         self.isFocused = isFocused
         self.lastTurnEdge = lastTurnEdge

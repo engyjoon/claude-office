@@ -195,6 +195,64 @@ struct ResidentTests {
         #expect(engine.state.agents.count == 3)
     }
 
+    @Test("새 CLI id의 훅이 정보 파일보다 먼저 와서 메인이 둘이 되면, 다시 읽을 때 옛 id를 정리하고 행을 합친다")
+    func retiresPriorSession() throws {
+        // 2026-11-19 실제 증상: 데스크톱 세션 하나(work-stats)가 옛 id 행(서브 3)과 새 id 행(서브 2)으로 둘이 보였음
+        var engine = OfficeEngine(seed: 1)
+        _ = engine.syncResidents(roll(standard), at: at(0))
+        let c = try #require(engine.state.lead(of: SessionID("C")))
+
+        // 정보 파일은 아직 옛 id(A) → 새 id(A2)의 훅이 다른 사람으로 앉아 행이 하나 더 열림
+        let stale = SessionHint(hostSession: "local_a", rootCwd: Self.office, hostCliSession: SessionID("A"))
+        _ = engine.handle(try hook("A2", "UserPromptSubmit", hint: stale, at: 10))
+        let a2 = try #require(engine.state.lead(of: SessionID("A2")))
+        #expect(engine.state.lead(of: SessionID("A")) != nil && engine.state.teams.count == 3)
+        // 새 id가 띄운 세션 D는 새 행의 서브
+        let late = SessionHint(hostSession: "local_d", ancestors: [SessionID("A2")], rootCwd: Self.office, hostCliSession: SessionID("D"))
+        _ = engine.handle(try hook("D", "UserPromptSubmit", hint: late, at: 11))
+
+        // 정보 파일을 다시 읽음: local_a의 CLI id는 A2, 전에 쓰던 id는 A
+        var main = resident("A2", "local_a", title: "사무실 작업", idle: 0)
+        main.priorSessions = [SessionID("A")]
+        let residents = [
+            main, resident("C", "local_c", ancestors: ["A2"], idle: 30), resident("D", "local_d", ancestors: ["A2"], idle: 0),
+            standard[2],
+        ]
+        _ = engine.syncResidents(roll(residents), at: at(15))
+        let state = engine.state
+        #expect(state.parts[SessionID("A")] == nil && state.lead(of: SessionID("A")) == nil)
+        #expect(state.lead(of: SessionID("A2"))?.id == a2.id && state.lead(of: SessionID("A2"))?.isMain == true)
+        #expect(state.teams.count == 2)
+        let moved = try #require(state.lead(of: SessionID("C")))
+        #expect(moved.id == c.id && !moved.isMain && moved.teamID == a2.teamID)
+        #expect(state.lead(of: SessionID("D"))?.teamID == a2.teamID)
+        #expect(state.agents.count == 4)
+        #expect(Set(state.agents(in: a2.teamID).map(\.seat.desk)) == [0, 1, 2])
+
+        // 다시 맞춰도 그대로
+        #expect(engine.syncResidents(roll(residents), at: at(20)).isEmpty)
+    }
+
+    @Test("전에 쓰던 CLI id로 일하던 사람도 새 id로 이어 간다 (쉬고 있지 않아도), 세션 안에서 띄운 claude는 그대로")
+    func rekeysPriorSessionWhileBusy() throws {
+        var engine = OfficeEngine(seed: 1)
+        _ = engine.syncResidents(roll(standard), at: at(0))
+        let own = SessionHint(hostSession: "local_a", hostCliSession: SessionID("A"))
+        _ = engine.handle(try hook("A", "UserPromptSubmit", hint: own, at: 5))
+        _ = engine.handle(try hook("N", "SessionStart", hint: own, at: 6))  // 세션 안에서 띄운 claude
+        let a = try #require(engine.state.lead(of: SessionID("A")))
+        let nested = try #require(engine.state.lead(of: SessionID("N")))
+
+        var residents = standard
+        residents[0].session = SessionID("A2")
+        residents[0].priorSessions = [SessionID("A")]
+        residents[1].ancestors = [SessionID("A2")]
+        _ = engine.syncResidents(roll(residents), at: at(10))
+        #expect(engine.state.lead(of: SessionID("A2"))?.id == a.id)
+        #expect(engine.state.parts[SessionID("A")] == nil)
+        #expect(engine.state.lead(of: SessionID("N"))?.id == nested.id)
+    }
+
     @Test("보관했거나 목록에서 사라진 세션은 퇴근, 메인이 나가면 서브가 승진")
     func archivedLeave() throws {
         var engine = OfficeEngine(seed: 1)

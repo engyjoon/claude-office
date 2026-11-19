@@ -130,6 +130,22 @@ struct DesktopSessionTests {
         clock.now = clock.now.addingTimeInterval(3)
         #expect(directory.hint(forHostSession: "local_late")?.title == "늦게")
     }
+
+    @Test("캐시한 CLI 세션 id가 훅의 session_id와 다르면 곧 다시 읽는다 (CLI 세션 id가 막 바뀐 경우)")
+    func staleCliSession() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let directory = DesktopSessionDirectory(root: root, ttl: 10, missTTL: 2, now: { clock.now })
+        try write(root, "local_a", #"{"cliSessionId":"old","cwd":"/w/a"}"#)
+        #expect(directory.hint(forHostSession: "local_a", cliSession: "old")?.hostCliSession == SessionID("old"))
+        try write(root, "local_a", #"{"cliSessionId":"new","cwd":"/w/a","priorCliSessionIds":["old"]}"#)
+        clock.now = clock.now.addingTimeInterval(3)
+        // 같은 id의 훅은 캐시 그대로, 다른 id의 훅은 다시 읽음
+        #expect(directory.hint(forHostSession: "local_a", cliSession: "old")?.hostCliSession == SessionID("old"))
+        #expect(directory.hint(forHostSession: "local_a", cliSession: "new")?.hostCliSession == SessionID("new"))
+        #expect(directory.record("local_a")?.priorCliSessionIDs == ["old"])
+    }
 }
 
 final class Clock: @unchecked Sendable {

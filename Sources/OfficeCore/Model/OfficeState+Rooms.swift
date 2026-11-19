@@ -88,6 +88,17 @@ extension OfficeState {
         }
     }
 
+    /// 같은 데스크톱 세션이 옛 CLI 세션 id(`old`)와 새 id(`new`)로 둘 다 앉아 있을 때 옛 사람을 내보냅니다.
+    /// 옛 사람을 부모로 알던 세션은 새 사람을 부모로 알게 되고, 옛 사람이 메인이던 행은 새 사람의 행에 합쳐집니다.
+    mutating func retire(_ old: SessionID, into new: SessionID, beats: inout [Beat]) {
+        guard old != new, parts[old] != nil, parts[new] != nil else { return }
+        for key in parts.keys where key != new && parts[key]!.ancestors.contains(old) {
+            parts[key]!.ancestors = parts[key]!.ancestors.map { $0 == old ? new : $0 }
+        }
+        endSession(old, beats: &beats)
+        reconcileTeams(beats: &beats)
+    }
+
     mutating func openTeam(folder: String, beats: inout [Beat]) -> TeamID {
         // 닫힌 행의 메인 번호를 다시 씁니다
         let used = Set(teams.values.map(\.island))

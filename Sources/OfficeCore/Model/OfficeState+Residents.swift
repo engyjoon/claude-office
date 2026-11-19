@@ -8,6 +8,7 @@ extension OfficeState {
     ///
     /// - 열려 있지만 사무실에 없는 세션은 "쉬는 중"으로 조용히 앉힙니다(`settled`). 부모가 사무실에 있으면 그 행의 서브.
     /// - 이미 있는 세션은 제목·데스크톱 id·부모만 맞춥니다. 같은 데스크톱 세션이 CLI 세션 id만 바뀌었으면 같은 사람으로 이어 갑니다.
+    ///   옛 id와 새 id가 둘 다 앉아 있으면 옛 id 쪽을 정리합니다 (`priorSessions`, 2026-11-19 work-stats 행이 둘로 보인 증상).
     /// - 보관했거나 목록에서 사라진 데스크톱 세션은 퇴근시킵니다. 다만 파일을 읽기 시작한 뒤에 훅이 왔거나,
     ///   지금 일하는 중(마지막 활동이 `busyGrace` 안)이면 그대로 둡니다. 터미널 CLI 세션과 `office-sim`의 가짜 세션은
     ///   데스크톱 id가 없어서 건드리지 않습니다.
@@ -29,6 +30,15 @@ extension OfficeState {
         for resident in roll.residents {
             let hint = SessionHint(
                 hostSession: resident.hostSession, ancestors: resident.ancestors, rootCwd: resident.rootCwd, title: resident.title)
+            // 같은 데스크톱 세션이 전에 쓰던 CLI 세션 id로 앉아 있는 사람은 같은 사람입니다: 새 id가 아직 없으면 이어 가고,
+            // 새 id가 이미 다른 사람으로 와 있으면(새 id의 훅이 정보 파일보다 먼저 옴) 옛 사람을 정리하고 그 행을 합칩니다.
+            for prior in resident.priorSessions where prior != resident.session && parts[prior]?.hostSession == resident.hostSession {
+                if parts[resident.session] == nil {
+                    rekey(prior, to: resident.session)
+                } else {
+                    retire(prior, into: resident.session, beats: &beats)
+                }
+            }
             if parts[resident.session] == nil,
                 let old = parts.values.filter({ $0.hostSession == resident.hostSession && agents[$0.lead]?.isResting == true })
                     .min(by: { $0.order < $1.order })
