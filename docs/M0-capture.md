@@ -14,7 +14,7 @@ git clone https://github.com/engyjoon/claude-office.git
 ```
 
 ```bash
-cd claude-office && git checkout claude/magical-johnson-4jfy9c
+cd claude-office && git checkout main
 ```
 
 ## 1. 수집 훅 설치

@@ -103,7 +103,7 @@ Homebrew를 쓸 수 없는 맥이면 https://github.com/yonaskolb/XcodeGen/relea
 
 ## 3. 받기와 설치
 
-저장소는 공개이고, 작업 브랜치(`claude/magical-johnson-4jfy9c`)가 기본 브랜치라 그냥 클론하면 됩니다.
+저장소는 공개이고, 기본 브랜치(`main`)를 그냥 클론하면 됩니다.
 
 ```bash
 git clone https://github.com/engyjoon/claude-office.git

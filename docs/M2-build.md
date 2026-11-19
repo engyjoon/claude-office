@@ -21,7 +21,7 @@ brew install xcodegen
 ## 2. 브랜치 받기
 
 ```bash
-git pull origin claude/magical-johnson-4jfy9c
+git pull origin main
 ```
 
 ## 3. 코어 테스트 (선택)
