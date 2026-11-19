@@ -800,6 +800,13 @@ public struct Choreographer: Sendable {
         let elapsed = max(0, now.timeIntervalSince(since))
         var presence = Presence(agent: agent, spot: seatSpot(agent), shownAt: now)
         presence.seated = true
+        if !agent.isResting {
+            // 응답 중에 앱을 켠 세션 (`ResidentSession.isResponding`): 쉼 단계 없이 자기 책상에서 생각하는 모습으로
+            presence.shown = .thinking
+            presences[agent.id] = presence
+            out += restoreDirectives(for: agent, entering: false)
+            return
+        }
         presence.idleSince = since
         if elapsed >= config.napAfter {
             presence.rest = .nap

@@ -43,6 +43,22 @@ public struct ResidentSession: Hashable, Sendable {
         self.title = title
         self.lastActivity = lastActivity
     }
+
+    /// 마지막 활동이 응답 경계보다 이만큼 넘게 뒤면 응답이 도는 중으로 봅니다 (끝난 응답은 0.1초 안)
+    public static let respondingGap: TimeInterval = 1
+    /// 마지막 활동이 이보다 오래됐으면 응답 중으로 보지 않습니다 (끝 표시 없이 멈춘 응답이 "생각 중"으로 남지 않게)
+    public static let respondingRecency: TimeInterval = 5 * 60
+
+    /// 지금 응답 중인지를 데스크톱 기록만으로 미루어 압니다 (2026-11-19, 응답 중에 앱을 다시 켜면 "쉬는 중"으로 앉았음).
+    ///
+    /// `lastTurnEdgeAt`은 응답이 시작할 때와 끝날 때 찍히고, `lastActivityAt`은 응답이 도는 동안 계속 올라갑니다.
+    /// 이 맥의 세션 255개 실측: 응답을 끝낸 세션은 둘의 차이가 0.013~0.06초, 응답 중인 두 세션은 2.4초와 498초(계속 늘어남),
+    /// 예외는 26시간 전에 멈춘 세션 하나(3.8시간) — 그래서 마지막 활동이 최근일 때만 믿습니다.
+    /// 문서에 없는 파일이라 필드가 없으면 false (지금까지처럼 쉬는 중으로 앉힘).
+    public func isResponding(at now: Date) -> Bool {
+        guard let activity = lastActivity, let edge = lastTurnEdge else { return false }
+        return activity.timeIntervalSince(edge) > Self.respondingGap && now.timeIntervalSince(activity) < Self.respondingRecency
+    }
 }
 
 /// 데스크톱 앱 세션 정보를 한 번 읽은 결과 (앱이 몇 초마다 만들어 `OfficeState.syncResidents`에 넘김).

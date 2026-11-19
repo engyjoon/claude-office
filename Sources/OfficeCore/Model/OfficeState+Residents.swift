@@ -54,10 +54,23 @@ extension OfficeState {
                 session: resident.session, cwd: resident.rootCwd, term: nil, at: now, kind: .sessionStarted(source: nil), hint: hint)
             var local: [Beat] = []
             let id = ensureLead(for: arrival, beats: &local)
-            update(id) { $0.setActivity(.idle, at: min(resident.lastActivity ?? now, now)) }
-            // 사무실에 오기 전에 끝난 응답도 확인 안 함·답변 필요를 보여 주도록 응답 끝을 데스크톱 기록에서 가져옵니다
-            parts[resident.session]?.completedAt = resident.lastTurnEdge.map { min($0, now) }
-            parts[resident.session]?.replyRequested = resident.replyRequest ?? false
+            if resident.isResponding(at: now), let edge = resident.lastTurnEdge, let activity = resident.lastActivity {
+                // 응답 중에 앱을 켰음: "생각 중"으로 앉히고, 이때의 응답 경계는 끝이 아니라 시작입니다.
+                // 다음 훅(도구·Stop)이 실제 상태로 바꾸고, 훅이 끝내 없으면 마지막 활동부터 `silenceLimit` 뒤에 쉬는 상태로 풉니다.
+                let started = min(edge, now)
+                update(id) {
+                    $0.setActivity(.thinking, at: started)
+                    $0.lastHeardAt = min(activity, now)
+                }
+                parts[resident.session]?.lastPromptAt = started
+                parts[resident.session]?.completedAt = nil
+                parts[resident.session]?.replyRequested = false
+            } else {
+                update(id) { $0.setActivity(.idle, at: min(resident.lastActivity ?? now, now)) }
+                // 사무실에 오기 전에 끝난 응답도 확인 안 함·답변 필요를 보여 주도록 응답 끝을 데스크톱 기록에서 가져옵니다
+                parts[resident.session]?.completedAt = resident.lastTurnEdge.map { min($0, now) }
+                parts[resident.session]?.replyRequested = resident.replyRequest ?? false
+            }
             observe(resident, at: now)
             let settled = agents[id]!
             beats += local.map { beat in
