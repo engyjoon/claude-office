@@ -227,6 +227,7 @@ final class AppModel {
         // 앱(NSApp)이 준비된 뒤에 미니를 띄웁니다 (init 때는 NSApp이 아직 없음). 조명도 시스템 모양을 읽을 수 있을 때 정합니다.
         DispatchQueue.main.async { [weak self] in
             self?.refreshLighting()
+            SwitcherPresence.start()
             self?.syncMiniPanel()
             self?.showWelcomeIfFirstRun()
         }

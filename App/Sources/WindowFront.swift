@@ -13,6 +13,8 @@ enum WindowFront {
 
     /// 앱을 활성화하고 `open`(창 열기)을 부른 뒤, `find`로 찾은 창을 맨 앞으로 몇 번 올립니다.
     static func bring(open: (() -> Void)? = nil, find: @escaping @MainActor () -> NSWindow?) {
+        // 활성화하기 전에 앱 전환기에 올려 둡니다 (활성화한 뒤에 바꾸면 메뉴 막대가 앞 앱의 것으로 남을 수 있음)
+        SwitcherPresence.show()
         activateApp()
         open?()
         for delay in retryDelays {
@@ -42,6 +44,55 @@ enum WindowFront {
 
     private static func activateApp() {
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// 보통 창(사무실·이벤트 로그·설정·환영 창)이 떠 있는 동안만 앱을 앱 전환기(⌘Tab)와 Dock에 올립니다.
+///
+/// 메뉴바 앱(LSUIElement)은 액세서리 앱이라 창이 떠 있어도 앱 전환기에 없어서, 다른 앱 창을 누른 뒤에는
+/// 키보드로 사무실 창에 돌아올 수 없었습니다 (사용자 제보 2026-11-19). 그래서 창이 하나라도 떠 있거나 최소화돼 있으면
+/// `.regular`, 다 닫히면 다시 `.accessory`(메뉴바 아이콘만)로 바꿉니다.
+/// - 미니 사무실·메뉴바 드롭다운은 패널이라 세지 않습니다 (미니만 떠 있을 때는 전처럼 Dock에 없음).
+/// - 창이 닫히는 순간에는 아직 `isVisible`이 true라서 닫히는 창은 빼고 셉니다.
+@MainActor
+enum SwitcherPresence {
+    private static var observers: [NSObjectProtocol] = []
+
+    /// 창이 뜨고 닫히고 최소화되는 것을 지켜봅니다 (앱이 준비된 뒤 한 번)
+    static func start() {
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { update() }
+            })
+        }
+        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            let closing = note.object as? NSWindow
+            MainActor.assumeIsolated { update(closing: closing) }
+        })
+        update()
+    }
+
+    /// 창을 열기 직전에: 앱 전환기에 올림 (창이 끝내 안 열리면 다음 `update`가 되돌림)
+    static func show() {
+        apply(.regular)
+    }
+
+    static func update(closing: NSWindow? = nil) {
+        guard let app = NSApp else { return }
+        let hasWindow = app.windows.contains { $0 !== closing && counts($0) }
+        apply(hasWindow ? .regular : .accessory)
+    }
+
+    /// 제목 막대가 있는 보통 창이 떠 있거나 최소화돼 있음 (패널·메뉴바 창은 아님)
+    private static func counts(_ window: NSWindow) -> Bool {
+        !(window is NSPanel) && window.styleMask.contains(.titled) && (window.isVisible || window.isMiniaturized)
+    }
+
+    private static func apply(_ policy: NSApplication.ActivationPolicy) {
+        guard let app = NSApp, app.activationPolicy() != policy else { return }
+        app.setActivationPolicy(policy)
     }
 }
 

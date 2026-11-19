@@ -51,7 +51,7 @@ make install
 
 ## 처음 쓰기
 
-1. 앱을 엽니다. Dock에는 없고 **메뉴바에 아이콘**만 생깁니다.
+1. 앱을 엽니다. Dock에는 없고 **메뉴바에 아이콘**만 생깁니다 (사무실 창 같은 창을 열어 둔 동안에는 Dock과 ⌘Tab에도 보입니다).
    ```bash
    open "/Applications/Claude Office.app"
    ```
